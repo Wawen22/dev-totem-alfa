@@ -245,6 +245,10 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
+  const [lotSelection, setLotSelection] = useState<{
+    title: string;
+    items: ForgiatoItem[];
+  } | null>(null);
 
   const service = useMemo(() => {
     if (!siteId) return null;
@@ -267,6 +271,20 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
     return sorted;
   }, [rawRows]);
 
+  const groupedRows = useMemo(() => {
+    const map = new Map<string, ForgiatoItem[]>();
+    rows.forEach((item) => {
+      const title = toStr((item.fields as Record<string, unknown>).Title) || "(senza codice)";
+      const existing = map.get(title) || [];
+      map.set(title, [...existing, item]);
+    });
+    return Array.from(map.entries()).map(([title, items]) => ({
+      title,
+      items,
+      representative: items[0],
+    }));
+  }, [rows]);
+
   const formatCell = (value: unknown, type?: 'text' | 'date' | 'number') => {
     if (type === 'date') {
       return formatSharePointDate(value);
@@ -280,22 +298,21 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
 
   const normalizedRows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return rows;
-    return rows.filter((item) =>
-      forgiatiColumns.some((col) => {
-        const v = (item.fields as Record<string, unknown>)[col.field];
-        if (v === null || v === undefined) return false;
-        
-        // Handle search in date fields specially if needed, or just convert to string
-        let valStr = String(v);
-        if (col.type === 'date') {
-             valStr = formatSharePointDate(v);
-        }
-        
-        return valStr.toLowerCase().includes(term);
-      })
+    if (!term) return groupedRows;
+    return groupedRows.filter((group) =>
+      group.items.some((item) =>
+        forgiatiColumns.some((col) => {
+          const v = (item.fields as Record<string, unknown>)[col.field];
+          if (v === null || v === undefined) return false;
+          let valStr = String(v);
+          if (col.type === "date") {
+            valStr = formatSharePointDate(v);
+          }
+          return valStr.toLowerCase().includes(term);
+        })
+      )
     );
-  }, [rows, search]);
+  }, [groupedRows, search]);
 
   const totalPages = Math.max(1, Math.ceil(normalizedRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -373,44 +390,65 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                     <small>{col.field}</small>
                   </th>
                 ))}
+                <th scope="col" style={{ width: 160 }}>Colate</th>
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && (
+              {visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={visibleColumns.length + 1} className="muted" style={{ textAlign: "center" }}>
+                  <td colSpan={visibleColumns.length + 2} className="muted" style={{ textAlign: "center" }}>
                     {loading ? "Carico dati..." : "Nessun elemento trovato"}
                   </td>
                 </tr>
               )}
-              {visibleRows.map((item) => {
-                const cartItem: CartItem = {
+              {visibleRows.map((group) => {
+                const representative = group.representative;
+                const selectedCount = group.items.filter((itm) => selectedItems[`FORGIATI-${itm.id}`]).length;
+
+                const handleGroupCheck = () => {
+                  if (group.items.length === 1) {
+                    const singleItem = group.items[0];
+                    const cartItem = {
+                      key: `FORGIATI-${singleItem.id}`,
+                      source: "FORGIATI" as const,
+                      itemId: singleItem.id,
+                      title: toStr((singleItem.fields as Record<string, unknown>).Title) || "-",
+                      bolla: (singleItem.fields as Record<string, unknown>).field_10,
+                      colata: (singleItem.fields as Record<string, unknown>).field_13,
+                      fields: singleItem.fields as Record<string, unknown>,
+                    } satisfies CartItem;
+                    onToggle(cartItem, Boolean(selectedItems[cartItem.key]));
+                    return;
+                  }
+                  setLotSelection(group);
+                };
+
+                const toCartItem = (item: ForgiatoItem): CartItem => ({
                   key: `FORGIATI-${item.id}`,
                   source: "FORGIATI",
                   itemId: item.id,
-                  title: ((item.fields as Record<string, unknown>).Title as string) || "-",
+                  title: toStr((item.fields as Record<string, unknown>).Title) || "-",
                   bolla: (item.fields as Record<string, unknown>).field_10,
                   colata: (item.fields as Record<string, unknown>).field_13,
                   fields: item.fields as Record<string, unknown>,
-                };
-                const checked = Boolean(selectedItems[cartItem.key]);
+                });
 
                 return (
-                  <tr key={item.id}>
+                  <tr key={group.title}>
                     <td className="selection-col">
                       <input
                         type="checkbox"
                         aria-label="Seleziona riga"
-                        checked={checked}
-                        disabled={!checked && selectionLimitReached}
-                        onChange={() => onToggle(cartItem, checked)}
+                        checked={selectedCount > 0}
+                        disabled={selectionLimitReached && selectedCount === 0 && group.items.length === 1}
+                        onChange={handleGroupCheck}
                       />
                     </td>
                     {visibleColumns.map((col) => {
                       const isTitle = col.field === "Title";
                       const isSecondarySticky = col.field === "field_5";
                       const className = isTitle ? "sticky-col" : isSecondarySticky ? "sticky-col secondary" : undefined;
-                      const content = formatCell((item.fields as Record<string, unknown>)[col.field], col.type);
+                      const content = formatCell((representative.fields as Record<string, unknown>)[col.field], col.type);
 
                       if (isTitle) {
                         return (
@@ -426,6 +464,26 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                         </td>
                       );
                     })}
+                    <td>
+                      <div className="colata-badges">
+                        {(() => {
+                          const sortedLots = [...group.items].sort(
+                            (a, b) => getTimeValue((b.fields as any).field_23) - getTimeValue((a.fields as any).field_23)
+                          );
+                          const latest = sortedLots[0];
+                          const moreCount = Math.max(0, sortedLots.length - 1);
+                          const latestLabel = latest ? toStr((latest.fields as any).field_13) || "-" : "-";
+                          return (
+                            <>
+                              <span className="pill ghost">{latestLabel}</span>
+                              {moreCount > 0 && (
+                                <span className="pill ghost" style={{ fontSize: 11, padding: "2px 6px" }}>+{moreCount}</span>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -433,6 +491,76 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
           </table>
         </div>
       </div>
+
+      {lotSelection && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal">
+            <div className="modal__header">
+              <div>
+                <p className="eyebrow" style={{ marginBottom: 4 }}>Seleziona colata</p>
+                <h3 style={{ margin: 0 }}>{lotSelection.title}</h3>
+              </div>
+              <button className="icon-btn" aria-label="Chiudi" onClick={() => setLotSelection(null)} type="button">✕</button>
+            </div>
+            <div className="modal__body">
+              <div className="table-scroll modal-table">
+                <table className="inventory-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">N° COLATA</th>
+                      <th scope="col">N° BOLLA</th>
+                      <th scope="col">Data prelievo</th>
+                      <th scope="col">Giacenza Q.tà</th>
+                      <th scope="col" style={{ width: 140 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lotSelection.items.map((item) => {
+                      const cartItem = {
+                        key: `FORGIATI-${item.id}`,
+                        source: "FORGIATI" as const,
+                        itemId: item.id,
+                        title: toStr((item.fields as Record<string, unknown>).Title) || "-",
+                        bolla: (item.fields as Record<string, unknown>).field_10,
+                        colata: (item.fields as Record<string, unknown>).field_13,
+                        fields: item.fields as Record<string, unknown>,
+                      } satisfies CartItem;
+                      const alreadySelected = Boolean(selectedItems[cartItem.key]);
+                      const disableAdd = selectionLimitReached && !alreadySelected;
+                      return (
+                        <tr key={item.id}>
+                          <td>{toStr((item.fields as any).field_13) || "-"}</td>
+                          <td>{toStr((item.fields as any).field_10) || "-"}</td>
+                          <td>{formatSharePointDate((item.fields as any).field_23)}</td>
+                          <td>{toStr((item.fields as any).field_22) || "-"}</td>
+                          <td>
+                            <button
+                              className={alreadySelected ? "btn secondary" : "btn primary"}
+                              style={{ width: "100%", padding: "8px 10px", fontSize: 13 }}
+                              onClick={() => {
+                                onToggle(cartItem, alreadySelected);
+                                setLotSelection(null);
+                              }}
+                              disabled={disableAdd}
+                              type="button"
+                            >
+                              {alreadySelected ? "Rimuovi" : "Aggiungi"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {selectionLimitReached && <p className="muted" style={{ marginTop: 10 }}>Limite massimo di 10 articoli in carrello.</p>}
+            </div>
+            <div className="modal__footer">
+              <button className="btn secondary" onClick={() => setLotSelection(null)} type="button">Chiudi</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
