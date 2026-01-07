@@ -1161,12 +1161,15 @@ function StockUpdatePage({
             : [
                 { label: "N° Ordine", value: raw["field_2"] },
                 { label: "Fornitore", value: raw["field_4"] },
+                { label: "DATA ORDINE", value: formatSharePointDate(raw["field_3"]) },
                 { label: "Q.tà", value: raw["field_6"] },
                 { label: "Lung. tubo mm", value: raw["field_7"] },
                 { label: "DN", value: raw["field_8"] },
                 { label: "DN mm", value: raw["field_9"] },
                 { label: "SP", value: raw["field_10"] },
                 { label: "Grado", value: raw["field_11"] },
+                { label: "N Cert", value: raw["field_17"] },
+                { label: "DATA CONSEGNA", value: formatSharePointDate(raw["field_16"]) },
               ];
 
           return (
