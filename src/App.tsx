@@ -100,6 +100,27 @@ const toNumberOrNull = (val: string | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+// Sum numbers written as a "+" separated expression (e.g. "100+20+10").
+const sumAdditiveExpression = (val: string | undefined): number | null => {
+  if (val === undefined || val === null) return null;
+  const cleaned = val.replace(/\s+/g, "");
+  if (!cleaned) return null;
+
+  const parts = cleaned.split("+").filter((p) => p.length > 0);
+  if (parts.length === 0) return null;
+
+  let total = 0;
+  for (const part of parts) {
+    const num = Number(part.replace(",", "."));
+    if (!Number.isFinite(num)) {
+      return null;
+    }
+    total += num;
+  }
+
+  return total;
+};
+
 const formatCellValue = (value: unknown, type?: "text" | "date" | "number") => {
   if (type === "date") {
     return formatSharePointDate(value);
@@ -1355,7 +1376,7 @@ function StockUpdatePage({
                       />
                     </label>
                     <label className="field">
-                      <span>Giacenza BIB tagliati</span>
+                      <span>Giacenza Tubo Intero mm</span>
                       <input
                         type="number"
                         inputMode="decimal"
@@ -1364,10 +1385,11 @@ function StockUpdatePage({
                       />
                     </label>
                     <label className="field">
-                      <span>Giacenza Contab mm</span>
+                      <span>Giacenza Contab mm (somma accetta +)</span>
                       <input
-                        type="number"
+                        type="text"
                         inputMode="decimal"
+                        placeholder="es. 100+20+10"
                         value={cardValues.giacenzaContab || ""}
                         onChange={(e) => onChange(item.key, "giacenzaContab", e.target.value)}
                       />
@@ -1504,9 +1526,18 @@ function AuthenticatedShell() {
       setEditValues((prev) => {
         const base = prev[key] || (cartItems[key] ? buildEditableState(cartItems[key]) : undefined);
         if (!base) return prev;
+        const next: EditableItemState = { ...base, [field]: value };
+
+        if (base.type === "TUBI" && field === "giacenzaContab") {
+          const sum = sumAdditiveExpression(value);
+          if (sum !== null) {
+            next.giacenzaBib = String(sum);
+          }
+        }
+
         return {
           ...prev,
-          [key]: { ...base, [field]: value },
+          [key]: next,
         };
       });
     },
@@ -1546,6 +1577,8 @@ function AuthenticatedShell() {
             throw new Error(`List ID non configurato per ${item.source}.`);
           }
 
+          const contabSum = sumAdditiveExpression(values.giacenzaContab);
+
           const payload = isForgiati
             ? {
                 field_24: values.commessa ?? null,
@@ -1574,8 +1607,8 @@ function AuthenticatedShell() {
             : {
                 field_21: toIsoOrNull(values.dataUltimoPrelievo),
                 field_25: values.commessa ?? null,
-                field_20: toNumberOrNull(values.giacenzaBib),
-                field_19: toNumberOrNull(values.giacenzaContab),
+                field_20: contabSum ?? toNumberOrNull(values.giacenzaBib),
+                field_19: values.giacenzaContab ?? null,
               };
 
           return sharepointService.updateItem<Record<string, unknown>>(listId, item.itemId, payload);

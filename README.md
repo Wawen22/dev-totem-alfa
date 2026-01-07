@@ -46,7 +46,7 @@ totem-alfa-app/
 - In questa fase eseguiamo solo **read**; gli hook per **update/patch** sono già supportati dal `SharePointService` e possono essere agganciati a pulsanti di modifica/aggiornamento giacenze.
   - Il flusso `Aggiorna Giacenza` utilizza `SharePointService.updateItem` per patchare i campi consentiti:
     - **FORGIATI**: `field_24` (Commessa), `field_23` (Data prelievo), `field_22` (Giacenza Q.tà), `field_25` (Note), `field_21` (Giacenza mm da barra).
-    - **TUBI**: `field_21` (Data ultimo prelievo), `field_25` (Commessa), `field_20` (Giacenza BIB tagliati), `field_19` (Giacenza mm contabile).
+    - **TUBI**: `field_21` (Data ultimo prelievo), `field_25` (Commessa), `field_20` (Giacenza Tubo intero), `field_19` (Giacenza mm contabile).
 
 ## Come funziona Aggiorna Giacenza
 1. Seleziona fino a 10 articoli nei pannelli FORGIATI/TUBI (carrello espandibile in alto).
