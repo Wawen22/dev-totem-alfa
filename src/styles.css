@@ -1521,7 +1521,7 @@ body {
 }
 
 .hero-logo {
-  height: 70px;
+  height: 100px;
   width: auto;
   object-fit: contain;
   /* Optional: add a subtle drop shadow to the logo if transparent */
