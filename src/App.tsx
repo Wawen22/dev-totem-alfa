@@ -42,6 +42,7 @@ type CartItem = {
   title: string;
   bolla?: unknown;
   colata?: unknown;
+  lottoProg?: string;
   fields: Record<string, unknown>;
 };
 
@@ -285,6 +286,52 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
     }));
   }, [rows]);
 
+  const forgiatiProgressiveMap = useMemo(() => {
+    const map = new Map<string, string>();
+
+    const normalizeLetter = (val: string | null | undefined) => {
+      if (!val) return null;
+      const cleaned = String(val).trim().toLowerCase();
+      if (/^[a-z]$/.test(cleaned)) return cleaned;
+      return null;
+    };
+
+    groupedRows.forEach((group) => {
+      const sorted = [...group.items].sort((a, b) => getTimeValue((b.fields as any).field_23) - getTimeValue((a.fields as any).field_23));
+      const used = new Set<string>();
+
+      sorted.forEach((item) => {
+        const existing = normalizeLetter((item.fields as any).LottoProgressivo);
+        let letter = existing;
+        if (!letter || used.has(letter)) {
+          let code = "a".charCodeAt(0);
+          while (used.has(String.fromCharCode(code))) {
+            code++;
+          }
+          letter = String.fromCharCode(code);
+        }
+        used.add(letter);
+        map.set(item.id, letter);
+      });
+    });
+
+    return map;
+  }, [groupedRows]);
+
+  const toCartItemForgiati = useCallback(
+    (item: ForgiatoItem): CartItem => ({
+      key: `FORGIATI-${item.id}`,
+      source: "FORGIATI",
+      itemId: item.id,
+      title: toStr((item.fields as Record<string, unknown>).Title) || "-",
+      bolla: (item.fields as Record<string, unknown>).field_10,
+      colata: (item.fields as Record<string, unknown>).field_13,
+      lottoProg: forgiatiProgressiveMap.get(item.id) || "a",
+      fields: item.fields as Record<string, unknown>,
+    }),
+    [forgiatiProgressiveMap]
+  );
+
   const formatCell = (value: unknown, type?: 'text' | 'date' | 'number') => {
     if (type === 'date') {
       return formatSharePointDate(value);
@@ -382,7 +429,6 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                 {visibleColumns.map((col) => (
                   <th
                     scope="col"
-                    key={col.field}
                     className={col.field === "Title" ? "sticky-col" : col.field === "field_5" ? "sticky-col secondary" : undefined}
                     style={col.width ? { width: col.width } : undefined}
                   >
@@ -407,31 +453,12 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
 
                 const handleGroupCheck = () => {
                   if (group.items.length === 1) {
-                    const singleItem = group.items[0];
-                    const cartItem = {
-                      key: `FORGIATI-${singleItem.id}`,
-                      source: "FORGIATI" as const,
-                      itemId: singleItem.id,
-                      title: toStr((singleItem.fields as Record<string, unknown>).Title) || "-",
-                      bolla: (singleItem.fields as Record<string, unknown>).field_10,
-                      colata: (singleItem.fields as Record<string, unknown>).field_13,
-                      fields: singleItem.fields as Record<string, unknown>,
-                    } satisfies CartItem;
-                    onToggle(cartItem, Boolean(selectedItems[cartItem.key]));
+                    const singleItem = toCartItemForgiati(group.items[0]);
+                    onToggle(singleItem, Boolean(selectedItems[singleItem.key]));
                     return;
                   }
                   setLotSelection(group);
                 };
-
-                const toCartItem = (item: ForgiatoItem): CartItem => ({
-                  key: `FORGIATI-${item.id}`,
-                  source: "FORGIATI",
-                  itemId: item.id,
-                  title: toStr((item.fields as Record<string, unknown>).Title) || "-",
-                  bolla: (item.fields as Record<string, unknown>).field_10,
-                  colata: (item.fields as Record<string, unknown>).field_13,
-                  fields: item.fields as Record<string, unknown>,
-                });
 
                 return (
                   <tr key={group.title}>
@@ -472,7 +499,8 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                           );
                           const latest = sortedLots[0];
                           const moreCount = Math.max(0, sortedLots.length - 1);
-                          const latestLabel = latest ? toStr((latest.fields as any).field_13) || "-" : "-";
+                          const latestProg = latest ? forgiatiProgressiveMap.get(latest.id) || "a" : "a";
+                          const latestLabel = latest ? `${toStr((latest.fields as any).field_13) || "-"} (${latestProg})` : "-";
                           return (
                             <>
                               <span className="pill ghost">{latestLabel}</span>
@@ -508,6 +536,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                   <thead>
                     <tr>
                       <th scope="col">N° COLATA</th>
+                      <th scope="col">Ident. Lotto</th>
                       <th scope="col">N° BOLLA</th>
                       <th scope="col">Data prelievo</th>
                       <th scope="col">Giacenza Q.tà</th>
@@ -516,20 +545,14 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                   </thead>
                   <tbody>
                     {lotSelection.items.map((item) => {
-                      const cartItem = {
-                        key: `FORGIATI-${item.id}`,
-                        source: "FORGIATI" as const,
-                        itemId: item.id,
-                        title: toStr((item.fields as Record<string, unknown>).Title) || "-",
-                        bolla: (item.fields as Record<string, unknown>).field_10,
-                        colata: (item.fields as Record<string, unknown>).field_13,
-                        fields: item.fields as Record<string, unknown>,
-                      } satisfies CartItem;
+                      const cartItem = toCartItemForgiati(item);
                       const alreadySelected = Boolean(selectedItems[cartItem.key]);
                       const disableAdd = selectionLimitReached && !alreadySelected;
+                      const lotProg = forgiatiProgressiveMap.get(item.id) || "a";
                       return (
                         <tr key={item.id}>
                           <td>{toStr((item.fields as any).field_13) || "-"}</td>
+                          <td>{lotProg}</td>
                           <td>{toStr((item.fields as any).field_10) || "-"}</td>
                           <td>{formatSharePointDate((item.fields as any).field_23)}</td>
                           <td>{toStr((item.fields as any).field_22) || "-"}</td>
@@ -987,6 +1010,39 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
     }));
   }, [rows]);
 
+  const tubiProgressiveMap = useMemo(() => {
+    const map = new Map<string, string>();
+
+    const normalizeLetter = (val: string | null | undefined) => {
+      if (!val) return null;
+      const cleaned = String(val).trim().toLowerCase();
+      if (/^[a-z]$/.test(cleaned)) return cleaned;
+      return null;
+    };
+
+    groupedRows.forEach((group) => {
+      const sorted = [...group.items].sort((a, b) => getTimeValue((b.fields as any).field_21) - getTimeValue((a.fields as any).field_21));
+      const used = new Set<string>();
+
+      sorted.forEach((item, idx) => {
+        const existing = normalizeLetter((item.fields as any).LottoProgressivo);
+        let letter = existing;
+        if (!letter || used.has(letter)) {
+          // Assign next available letter starting from 'a' when empty or duplicate
+          let code = "a".charCodeAt(0);
+          while (used.has(String.fromCharCode(code))) {
+            code++;
+          }
+          letter = String.fromCharCode(code);
+        }
+        used.add(letter);
+        map.set(item.id, letter);
+      });
+    });
+
+    return map;
+  }, [groupedRows]);
+
   const visibleColumns = tubiColumns;
 
   const normalizedRows = useMemo(() => {
@@ -1034,6 +1090,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
     title: toStr((item.fields as Record<string, unknown>).Title) || "-",
     bolla: (item.fields as Record<string, unknown>).field_15,
     colata: (item.fields as Record<string, unknown>).field_18,
+    lottoProg: tubiProgressiveMap.get(item.id) || "a",
     fields: item.fields as Record<string, unknown>,
   });
 
@@ -1174,7 +1231,8 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                           );
                           const latest = sortedLots[0];
                           const moreCount = Math.max(0, sortedLots.length - 1);
-                          const latestLabel = latest ? toStr((latest.fields as any).field_18) || "-" : "-";
+                          const latestProg = latest ? tubiProgressiveMap.get(latest.id) || "a" : "a";
+                          const latestLabel = latest ? `${toStr((latest.fields as any).field_18) || "-"} (${latestProg})` : "-";
                           return (
                             <>
                               <span className="pill ghost">{latestLabel}</span>
@@ -1210,6 +1268,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                   <thead>
                     <tr>
                       <th scope="col">N° COLATA</th>
+                      <th scope="col">Ident. Lotto</th>
                       <th scope="col">N° BOLLA</th>
                       <th scope="col">DATA ULT. PREL.</th>
                       <th scope="col">Giacenza Contab.</th>
@@ -1221,9 +1280,11 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                       const cartItem = toCartItem(item);
                       const alreadySelected = Boolean(selectedItems[cartItem.key]);
                       const disableAdd = selectionLimitReached && !alreadySelected;
+                      const lotProg = tubiProgressiveMap.get(item.id) || "a";
                       return (
                         <tr key={item.id}>
                           <td>{toStr((item.fields as any).field_18) || "-"}</td>
+                          <td>{lotProg}</td>
                           <td>{toStr((item.fields as any).field_15) || "-"}</td>
                           <td>{formatSharePointDate((item.fields as any).field_21)}</td>
                           <td>{toStr((item.fields as any).field_19) || "-"}</td>
@@ -1449,6 +1510,8 @@ function StockUpdatePage({
                     <span>{cardValues.bolla ? `Bolla ${cardValues.bolla}` : "Bolla -"}</span>
                     <span className="bullet">•</span>
                     <span>{cardValues.colata ? `Colata ${cardValues.colata}` : "Colata -"}</span>
+                    <span className="bullet">•</span>
+                    <span>{item.lottoProg ? `Ident. lotto ${item.lottoProg}` : "Ident. lotto a"}</span>
                   </div>
                 </div>
               </div>
@@ -2024,6 +2087,7 @@ function AuthenticatedShell() {
                     <th scope="col">ARTICOLO</th>
                     <th scope="col">N° Bolla</th>
                     <th scope="col">Colata</th>
+                    <th scope="col">Ident. Lotto</th>
                     <th scope="col" style={{ width: 64 }}></th>
                   </tr>
                 </thead>
@@ -2045,6 +2109,7 @@ function AuthenticatedShell() {
                       <td>{item.title || "-"}</td>
                       <td>{item.bolla ? String(item.bolla) : "-"}</td>
                       <td>{item.colata ? String(item.colata) : "-"}</td>
+                      <td>{item.lottoProg ? String(item.lottoProg) : "a"}</td>
                       <td>
                         <button
                           className="icon-btn danger"
