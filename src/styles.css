@@ -1521,7 +1521,7 @@ body {
 }
 
 .hero-logo {
-  height: 100px;
+  height: 70px;
   width: auto;
   object-fit: contain;
   /* Optional: add a subtle drop shadow to the logo if transparent */
@@ -2402,6 +2402,63 @@ h3 { font-size: 20px; }
   padding: 8px 10px;
   background: #fff;
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+}
+
+/* Modal for selezione colata */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 50;
+}
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: 0 22px 80px rgba(15, 23, 42, 0.3);
+  width: min(980px, calc(100% - 32px));
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 0;
+}
+
+.modal__body {
+  padding: 0 20px 12px;
+  overflow: hidden;
+}
+
+.modal__footer {
+  padding: 0 20px 18px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.modal-table {
+  max-height: 55vh;
+}
+
+.modal-table .inventory-table {
+  min-width: 100%;
+}
+
+.colata-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .chip-name { font-weight: 600; font-size: 13px; }

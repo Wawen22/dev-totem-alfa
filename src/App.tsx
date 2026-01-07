@@ -819,6 +819,10 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
+  const [lotSelection, setLotSelection] = useState<{
+    title: string;
+    items: TubiItem[];
+  } | null>(null);
 
   const service = useMemo(() => {
     if (!siteId) return null;
@@ -841,25 +845,41 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
     return sorted;
   }, [rawRows]);
 
+  const groupedRows = useMemo(() => {
+    const map = new Map<string, TubiItem[]>();
+    rows.forEach((item) => {
+      const title = toStr((item.fields as Record<string, unknown>).Title) || "(senza codice)";
+      const existing = map.get(title) || [];
+      map.set(title, [...existing, item]);
+    });
+    return Array.from(map.entries()).map(([title, items]) => ({
+      title,
+      items,
+      representative: items[0],
+    }));
+  }, [rows]);
+
   const visibleColumns = tubiColumns;
 
   const normalizedRows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return rows;
-    return rows.filter((item) =>
-      visibleColumns.some((col) => {
-        const v = (item.fields as Record<string, unknown>)[col.field];
-        if (v === null || v === undefined) return false;
-        
-        let valStr = String(v);
-        if (col.type === 'date') {
-             valStr = formatSharePointDate(v);
-        }
-        
-        return valStr.toLowerCase().includes(term);
-      })
+    if (!term) return groupedRows;
+    return groupedRows.filter((group) =>
+      group.items.some((item) =>
+        visibleColumns.some((col) => {
+          const v = (item.fields as Record<string, unknown>)[col.field];
+          if (v === null || v === undefined) return false;
+
+          let valStr = String(v);
+          if (col.type === "date") {
+            valStr = formatSharePointDate(v);
+          }
+
+          return valStr.toLowerCase().includes(term);
+        })
+      )
     );
-  }, [rows, search, visibleColumns]);
+  }, [groupedRows, search, visibleColumns]);
 
   const totalPages = Math.max(1, Math.ceil(normalizedRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -878,6 +898,32 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
 
   const handlePrev = () => setPage((p) => Math.max(1, p - 1));
   const handleNext = () => setPage((p) => Math.min(totalPages, p + 1));
+
+  const toCartItem = (item: TubiItem): CartItem => ({
+    key: `TUBI-${item.id}`,
+    source: "TUBI",
+    itemId: item.id,
+    title: toStr((item.fields as Record<string, unknown>).Title) || "-",
+    bolla: (item.fields as Record<string, unknown>).field_15,
+    colata: (item.fields as Record<string, unknown>).field_18,
+    fields: item.fields as Record<string, unknown>,
+  });
+
+  const handleOpenLot = (group: { title: string; items: TubiItem[] }) => {
+    if (group.items.length === 1) {
+      const cartItem = toCartItem(group.items[0]);
+      onToggle(cartItem, Boolean(selectedItems[cartItem.key]));
+      return;
+    }
+    setLotSelection(group);
+  };
+
+  const handleSelectLot = (item: TubiItem) => {
+    const cartItem = toCartItem(item);
+    const alreadySelected = Boolean(selectedItems[cartItem.key]);
+    onToggle(cartItem, alreadySelected);
+    setLotSelection(null);
+  };
 
   return (
     <div className="panel inventory-panel">
@@ -937,43 +983,46 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                     <small>{col.field}</small>
                   </th>
                 ))}
+                <th scope="col" style={{ width: 160 }}>Colate</th>
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && (
+              {visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={visibleColumns.length + 1} className="muted" style={{ textAlign: "center" }}>
+                  <td colSpan={visibleColumns.length + 2} className="muted" style={{ textAlign: "center" }}>
                     {loading ? "Carico dati..." : "Nessun elemento trovato"}
                   </td>
                 </tr>
               )}
-              {visibleRows.map((item) => {
-                const cartItem: CartItem = {
-                  key: `TUBI-${item.id}`,
-                  source: "TUBI",
-                  itemId: item.id,
-                  title: ((item.fields as Record<string, unknown>).Title as string) || "-",
-                  bolla: (item.fields as Record<string, unknown>).field_15,
-                  colata: (item.fields as Record<string, unknown>).field_18,
-                  fields: item.fields as Record<string, unknown>,
+              {visibleRows.map((group) => {
+                const representative = group.representative;
+                const selectedCount = group.items.filter((itm) => selectedItems[`TUBI-${itm.id}`]).length;
+                const lotLabel = `${group.items.length} colata${group.items.length === 1 ? "" : "e"}`;
+
+                const handleGroupCheck = () => {
+                  if (group.items.length === 1) {
+                    const cartItem = toCartItem(group.items[0]);
+                    onToggle(cartItem, Boolean(selectedItems[cartItem.key]));
+                    return;
+                  }
+                  setLotSelection(group);
                 };
-                const checked = Boolean(selectedItems[cartItem.key]);
 
                 return (
-                  <tr key={item.id}>
+                  <tr key={group.title}>
                     <td className="selection-col">
                       <input
                         type="checkbox"
                         aria-label="Seleziona riga"
-                        checked={checked}
-                        disabled={!checked && selectionLimitReached}
-                        onChange={() => onToggle(cartItem, checked)}
+                        checked={selectedCount > 0}
+                        disabled={selectionLimitReached && selectedCount === 0 && group.items.length === 1}
+                        onChange={handleGroupCheck}
                       />
                     </td>
                     {visibleColumns.map((col) => {
                       const isTitle = col.field === "Title";
                       const className = isTitle ? "sticky-col" : undefined;
-                      const content = formatCellValue((item.fields as Record<string, unknown>)[col.field], col.type);
+                      const content = formatCellValue((representative.fields as Record<string, unknown>)[col.field], col.type);
 
                       if (isTitle) {
                         return (
@@ -989,6 +1038,26 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                         </td>
                       );
                     })}
+                    <td>
+                      <div className="colata-badges">
+                        {(() => {
+                          const sortedLots = [...group.items].sort(
+                            (a, b) => getTimeValue((b.fields as any).field_21) - getTimeValue((a.fields as any).field_21)
+                          );
+                          const latest = sortedLots[0];
+                          const moreCount = Math.max(0, sortedLots.length - 1);
+                          const latestLabel = latest ? toStr((latest.fields as any).field_18) || "-" : "-";
+                          return (
+                            <>
+                              <span className="pill ghost">{latestLabel}</span>
+                              {moreCount > 0 && (
+                                <span className="pill ghost" style={{ fontSize: 11, padding: "2px 6px" }}>+{moreCount}</span>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -996,6 +1065,65 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
           </table>
         </div>
       </div>
+
+      {lotSelection && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal">
+            <div className="modal__header">
+              <div>
+                <p className="eyebrow" style={{ marginBottom: 4 }}>Seleziona colata</p>
+                <h3 style={{ margin: 0 }}>{lotSelection.title}</h3>
+              </div>
+              <button className="icon-btn" aria-label="Chiudi" onClick={() => setLotSelection(null)} type="button">✕</button>
+            </div>
+            <div className="modal__body">
+              <div className="table-scroll modal-table">
+                <table className="inventory-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">N° COLATA</th>
+                      <th scope="col">N° BOLLA</th>
+                      <th scope="col">DATA ULT. PREL.</th>
+                      <th scope="col">Giacenza Contab.</th>
+                      <th scope="col" style={{ width: 140 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lotSelection.items.map((item) => {
+                      const cartItem = toCartItem(item);
+                      const alreadySelected = Boolean(selectedItems[cartItem.key]);
+                      const disableAdd = selectionLimitReached && !alreadySelected;
+                      return (
+                        <tr key={item.id}>
+                          <td>{toStr((item.fields as any).field_18) || "-"}</td>
+                          <td>{toStr((item.fields as any).field_15) || "-"}</td>
+                          <td>{formatSharePointDate((item.fields as any).field_21)}</td>
+                          <td>{toStr((item.fields as any).field_19) || "-"}</td>
+                          <td>
+                            <button
+                              className={alreadySelected ? "btn secondary" : "btn primary"}
+                              style={{ width: "100%", padding: "8px 10px", fontSize: 13 }}
+                              onClick={() => handleSelectLot(item)}
+                              disabled={disableAdd}
+                              type="button"
+                            >
+                              {alreadySelected ? "Rimuovi" : "Aggiungi"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {selectionLimitReached && <p className="muted" style={{ marginTop: 10 }}>Limite massimo di 10 articoli in carrello.</p>}
+            </div>
+            <div className="modal__footer">
+              <button className="btn secondary" onClick={() => setLotSelection(null)} type="button">Chiudi</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
