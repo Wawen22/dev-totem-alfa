@@ -80,6 +80,7 @@ type DriveItem = {
   file?: { mimeType?: string };
   lastModifiedDateTime?: string;
   "@microsoft.graph.downloadUrl"?: string;
+  parentReference?: { path?: string };
 };
 
 export function DocumentBrowser({
@@ -97,6 +98,10 @@ export function DocumentBrowser({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewer, setViewer] = useState<{ name: string; blobUrl?: string; loading: boolean } | null>(null);
+  const [search, setSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<DriveItem[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const blobUrlRef = useRef<string | null>(null);
 
   const breadcrumb = useMemo(() => {
@@ -207,6 +212,196 @@ export function DocumentBrowser({
     };
   }, []);
 
+  // Reset search when navigating to a different folder to avoid stale filters.
+  useEffect(() => {
+    setSearch("");
+  }, [path]);
+
+  // Extract a relative path (without /root:) from the Graph parentReference.path.
+  const extractRelativePath = useCallback((parentPath?: string) => {
+    if (!parentPath) return null;
+    const marker = "/root:";
+    const idx = parentPath.indexOf(marker);
+    if (idx === -1) return null;
+    const relative = parentPath.slice(idx + marker.length);
+    return relative.startsWith("/") ? relative.slice(1) : relative;
+  }, []);
+
+  const extractRelativeParentFromUrl = useCallback((url?: string, name?: string) => {
+    if (!url) return null;
+    try {
+      const { pathname } = new URL(url);
+      const decoded = decodeURIComponent(pathname);
+      const lower = decoded.toLowerCase();
+      const markers = ["/shared documents", "/documenti condivisi"];
+      let start = -1;
+      for (const m of markers) {
+        const idx = lower.indexOf(m);
+        if (idx !== -1) {
+          start = idx + m.length;
+          break;
+        }
+      }
+      if (start === -1) return null;
+      let relative = decoded.slice(start).replace(/^\//, "");
+      if (name && relative.toLowerCase().endsWith(name.toLowerCase())) {
+        relative = relative.slice(0, -name.length).replace(/\/$/, "");
+      }
+      return relative === "" ? "/" : relative;
+    } catch (e) {
+      console.warn("Impossibile derivare percorso da webUrl", e);
+      return null;
+    }
+  }, []);
+
+  const getFolderPathFromItem = useCallback(
+    (item: DriveItem) => {
+      const parent = extractRelativePath(item.parentReference?.path);
+      if (parent !== null) return parent ? `${parent}/${item.name}` : item.name;
+
+      const urlParent = extractRelativeParentFromUrl(item.webUrl, item.name);
+      if (urlParent === null) return null;
+      if (urlParent === "/") return item.name;
+      return `${urlParent}/${item.name}`;
+    },
+    [extractRelativeParentFromUrl, extractRelativePath]
+  );
+
+  const getParentPathFromItem = useCallback(
+    (item: DriveItem) => {
+      const parent = extractRelativePath(item.parentReference?.path);
+      if (parent !== null) return parent === "" ? "/" : parent;
+
+      const urlParent = extractRelativeParentFromUrl(item.webUrl, item.name);
+      if (urlParent === null) return null;
+      return urlParent;
+    },
+    [extractRelativeParentFromUrl, extractRelativePath]
+  );
+
+  const trimmedSearch = search.trim();
+  const inSearchMode = Boolean(trimmedSearch);
+
+  const setScopedError = useCallback(
+    (msg: string) => {
+      if (inSearchMode) {
+        setSearchError(msg);
+      } else {
+        setError(msg);
+      }
+    },
+    [inSearchMode]
+  );
+
+  useEffect(() => {
+    const query = trimmedSearch;
+    if (!query) {
+      setSearchResults([]);
+      setSearchError(null);
+      setSearchLoading(false);
+      return;
+    }
+
+    if (!siteId || !driveId) {
+      setSearchError("Configurazione SharePoint mancante (ID sito o drive non trovati).");
+      setSearchLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const runSearch = async () => {
+      setSearchLoading(true);
+      setSearchError(null);
+      try {
+        const client = await getClient();
+        const base = `/sites/${siteId}/drives/${driveId}`;
+        const safeQuery = query.replace(/'/g, "");
+        const api = `${base}/root/search(q='${encodeURIComponent(safeQuery)}')`;
+        const res = await client
+          .api(api)
+          .select("id,name,folder,file,parentReference,webUrl,size,lastModifiedDateTime,@microsoft.graph.downloadUrl")
+          .get();
+        if (!cancelled) {
+          setSearchResults(res.value || []);
+        }
+      } catch (err) {
+        console.error("Errore ricerca documenti", err);
+        if (!cancelled) {
+          setSearchError("Impossibile completare la ricerca globale.");
+        }
+      } finally {
+        if (!cancelled) {
+          setSearchLoading(false);
+        }
+      }
+    };
+
+    runSearch();
+    return () => {
+      cancelled = true;
+    };
+  }, [driveId, getClient, trimmedSearch, siteId]);
+
+  const hydrateItem = useCallback(
+    async (item: DriveItem): Promise<DriveItem> => {
+      const needsDownload = !item["@microsoft.graph.downloadUrl"];
+      const needsPath = extractRelativePath(item.parentReference?.path) === null;
+
+      if (!needsDownload && !needsPath) return item;
+      if (!siteId || !driveId) {
+        return item;
+      }
+
+      const client = await getClient();
+      const res = await client
+        .api(`/sites/${siteId}/drives/${driveId}/items/${item.id}`)
+        .select("id,name,folder,file,parentReference,webUrl,size,lastModifiedDateTime,@microsoft.graph.downloadUrl")
+        .get();
+      return res;
+    },
+    [driveId, extractRelativePath, getClient, siteId]
+  );
+
+  const activeItems = inSearchMode ? searchResults : items;
+  const activeLoading = inSearchMode ? searchLoading : loading;
+  const activeError = inSearchMode ? searchError || error : error;
+
+  const handleItemClick = useCallback(
+    async (item: DriveItem) => {
+      const isFolder = Boolean(item.folder);
+      const hydrated = inSearchMode ? await hydrateItem(item) : item;
+
+      if (isFolder) {
+        const folderPath = getFolderPathFromItem(hydrated);
+        if (!folderPath) {
+          setScopedError("Percorso non disponibile per questa cartella.");
+          return;
+        }
+        setPath(folderPath);
+        setSearch("");
+        return;
+      }
+
+      if (inSearchMode) {
+        const parentPath = getParentPathFromItem(hydrated);
+        if (parentPath) {
+          setPath(parentPath);
+          setSearch("");
+        } else {
+          setScopedError("Percorso non disponibile per questo file.");
+        }
+      }
+
+      try {
+        await handleOpenFile(hydrated);
+      } catch (err) {
+        console.error("Errore apertura elemento da ricerca", err);
+        setScopedError("Impossibile aprire l'elemento. Riprova.");
+      }
+    },
+    [getFolderPathFromItem, getParentPathFromItem, handleOpenFile, hydrateItem, inSearchMode, setScopedError]
+  );
+
   return (
     <>
       <style>{`
@@ -262,9 +457,55 @@ export function DocumentBrowser({
               <div style={{ opacity: 0.7, marginTop: 6, fontSize: 15 }}>Esplora archivio PDF e procedure</div>
             </div>
             
-            <div style={{ display: "flex", gap: 12 }}>
-               {path !== (initialPath || "") && path !== "" && (
-                  <button 
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <div style={{ 
+                display: "flex", 
+                alignItems: "center", 
+                gap: 10, 
+                background: "rgba(255,255,255,0.1)", 
+                border: "1px solid rgba(255,255,255,0.2)", 
+                padding: "10px 12px",
+                borderRadius: 12,
+                minWidth: 260
+              }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#cbd5e1" }}>
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Cerca per nome (file o cartella)"
+                  style={{ 
+                    background: "transparent",
+                    border: "none",
+                    color: "white",
+                    outline: "none",
+                    width: "100%",
+                    fontSize: 14
+                  }}
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch("")}
+                    style={{
+                      background: "rgba(255,255,255,0.15)",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                      color: "white",
+                      padding: "4px 8px",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      fontSize: 12,
+                      fontWeight: 700
+                    }}
+                  >
+                    Cancella
+                  </button>
+                )}
+              </div>
+              {path !== (initialPath || "") && path !== "" && (
+                <button 
                   onClick={handleGoUp}
                   className="btn-reset"
                   style={{ 
@@ -283,8 +524,8 @@ export function DocumentBrowser({
                 >
                   <BackIcon /> Indietro
                 </button>
-               )}
-               <button 
+              )}
+              <button 
                 onClick={fetchItems}
                 disabled={loading}
                 className="btn-reset"
@@ -350,17 +591,38 @@ export function DocumentBrowser({
 
         {/* Dynamic Content Area */}
         <div style={{ minHeight: 400 }}>
-          {error && (
+          {activeError && (
             <div style={{ padding: 20, background: "#fef2f2", color: "#991b1b", borderRadius: 12, border: "1px solid #fecaca", display: "flex", alignItems: "center", gap: 12 }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-              {error}
+              {activeError}
             </div>
           )}
 
-          {!loading && !error && items.length === 0 && (
+          {inSearchMode && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, color: "#cbd5e1", fontSize: 14 }}>
+              <RefreshIcon spinning={searchLoading} />
+              Ricerca globale nell'intero archivio
+            </div>
+          )}
+
+          {!activeLoading && !activeError && !inSearchMode && activeItems.length === 0 && (
             <div style={{ textAlign: "center", padding: "60px 0", opacity: 0.6 }}>
               <div style={{ fontSize: 48, marginBottom: 16 }}>📂</div>
               <div style={{ fontSize: 18, fontWeight: 500 }}>Questa cartella è vuota</div>
+            </div>
+          )}
+
+          {!activeLoading && !activeError && inSearchMode && activeItems.length === 0 && (
+            <div style={{ textAlign: "center", padding: "60px 0", opacity: 0.75, color: "white" }}>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>Nessun risultato per "{search.trim()}"</div>
+              <div style={{ marginTop: 8, fontSize: 14, opacity: 0.8 }}>Prova con un altro nome di file o cartella</div>
+            </div>
+          )}
+
+          {activeLoading && !activeError && (
+            <div style={{ textAlign: "center", padding: "40px 0", color: "#475569", fontWeight: 600 }}>
+              <RefreshIcon spinning />
+              <span style={{ marginLeft: 8 }}>{inSearchMode ? "Ricerca in corso..." : "Caricamento cartella..."}</span>
             </div>
           )}
 
@@ -368,17 +630,20 @@ export function DocumentBrowser({
             display: "grid", 
             gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", 
             gap: 20,
-            marginTop: error ? 24 : 0
+            marginTop: activeError ? 24 : 0
           }}>
-            {items.map((item) => {
+            {activeItems.map((item) => {
                const isFolder = Boolean(item.folder);
                const isPdfFile = isPdf(item.name, item.file?.mimeType);
+               const displayPath = inSearchMode
+                 ? getFolderPathFromItem(item) || getParentPathFromItem(item)
+                 : null;
                
                return (
                  <button
                     key={item.id}
                     className="doc-card"
-                    onClick={() => isFolder ? handleOpenFolder(item.name) : handleOpenFile(item)}
+                    onClick={() => handleItemClick(item)}
                     style={{
                       background: "white",
                       borderRadius: 20,
@@ -423,13 +688,30 @@ export function DocumentBrowser({
                          marginBottom: 6,
                          display: "-webkit-box",
                          WebkitLineClamp: 3,
-                         WebkitBoxOrient: "vertical",
-                         overflow: "hidden",
-                         lineHeight: 1.3
-                       }}>
-                         {item.name}
-                       </div>
+                       WebkitBoxOrient: "vertical",
+                       overflow: "hidden",
+                       lineHeight: 1.3
+                     }}>
+                       {item.name}
+                      </div>
                        
+                       {inSearchMode && displayPath && (
+                         <div style={{ 
+                           fontSize: 12, 
+                           color: "#475569", 
+                           fontWeight: 600,
+                           display: "flex",
+                           alignItems: "center",
+                           gap: 6,
+                           marginBottom: 6
+                         }}>
+                           <HomeIcon />
+                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                             {displayPath}
+                           </span>
+                         </div>
+                       )}
+
                        <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>
                           {isFolder ? `${item.folder?.childCount} oggetti` : item.size ? `${(item.size / 1024).toFixed(0)} KB` : ''}
                        </div>
