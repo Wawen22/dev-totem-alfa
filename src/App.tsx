@@ -429,7 +429,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                 {visibleColumns.map((col) => (
                   <th
                     scope="col"
-                    className={col.field === "Title" ? "sticky-col" : col.field === "field_5" ? "sticky-col secondary" : undefined}
+                    className={col.field === "Title" ? "sticky-col" : undefined}
                     style={col.width ? { width: col.width } : undefined}
                   >
                     <span>{col.label}</span>
@@ -473,8 +473,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                     </td>
                     {visibleColumns.map((col) => {
                       const isTitle = col.field === "Title";
-                      const isSecondarySticky = col.field === "field_5";
-                      const className = isTitle ? "sticky-col" : isSecondarySticky ? "sticky-col secondary" : undefined;
+                      const className = isTitle ? "sticky-col" : undefined;
                       const content = formatCell((representative.fields as Record<string, unknown>)[col.field], col.type);
 
                       if (isTitle) {
