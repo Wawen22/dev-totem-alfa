@@ -39,6 +39,11 @@ Per permettere all'applicazione di autenticarsi e accedere ai dati, è mandatori
 5. **Importante**: Cliccare sul pulsante **Grant admin consent for [Nome Organizzazione]**.
    - *Nota*: Senza il consenso amministrativo, agli utenti potrebbe essere bloccato l'accesso o richiesto un consenso individuale che l'UI del totem potrebbe non gestire elegantemente.
 
+**App Role Totem.Admin (Pannello Admin)**
+- In **App roles** creare: Display name `Totem Admin`, Value `Totem.Admin`, Allowed member types **Users/Groups**, descrizione "Consente accesso al pannello amministrazione totem".
+- In **Enterprise applications** assegnare il ruolo a utenti/gruppi: **Users and groups** > **Add user/group** > seleziona ruolo `Totem Admin`.
+- Verifica: dopo logout/login (meglio Incognito) aprire l'`id_token` su https://jwt.ms e controllare che il claim `roles` contenga `Totem.Admin`. Solo allora l'app mostra il CTA fisso "Pannello Admin" in basso a destra.
+
 ### 2. Autenticazione Lato Client (MSAL)
 Il file `src/auth/authConfig.ts` configura l'istanza MSAL.
 - **Client ID & Tenant ID**: Identificano l'applicazione registrata su Azure AD.

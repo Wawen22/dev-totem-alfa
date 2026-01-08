@@ -1769,7 +1769,7 @@ function AuthenticatedShell() {
     if (!siteId) return null;
     return new SharePointService(getClient, siteId);
   }, [getClient, siteId]);
-  const [view, setView] = useState<'dashboard' | 'inventory' | 'update-stock' | 'website' | 'docs'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'inventory' | 'update-stock' | 'website' | 'docs' | 'admin'>('dashboard');
   const [activeTab, setActiveTab] = useState<"forgiati" | "oring-hnbr" | "oring-nbr" | "tubi">("forgiati");
   const [cartItems, setCartItems] = useState<Record<string, CartItem>>({});
   const [selectionMessage, setSelectionMessage] = useState<string | null>(null);
@@ -1784,12 +1784,29 @@ function AuthenticatedShell() {
     }
   }, [accounts]);
 
+  const activeAccount = accounts[0];
+  const roles = useMemo(() => {
+    const claims = (activeAccount?.idTokenClaims || {}) as Record<string, unknown>;
+    const claimRoles = claims["roles"];
+    if (Array.isArray(claimRoles)) return claimRoles.map((r) => String(r));
+    if (typeof claimRoles === "string") return [claimRoles];
+    return [];
+  }, [activeAccount]);
+
+  const isAdmin = roles.includes("Totem.Admin");
+
   const handleBack = () => {
     setActiveTab("forgiati");
     setView('dashboard');
   };
 
   const selectionLimitReached = Object.keys(cartItems).length >= 10;
+
+  const adminCta = isAdmin && view !== 'admin' ? (
+    <button className="admin-cta" onClick={() => setView('admin')} type="button">
+      Pannello Admin
+    </button>
+  ) : null;
 
   const handleToggleSelection = useCallback((item: CartItem, isSelected: boolean) => {
     setCartItems((prev) => {
@@ -1966,171 +1983,212 @@ function AuthenticatedShell() {
 
   if (view === 'dashboard') {
     return (
-      <div className="totem-shell">
-        <Hero 
-          title="Benvenuto in Totem Alfa" 
-          subtitle="Seleziona un'operazione per iniziare"
-        />
-        <main className="dashboard-main">
-          <Dashboard onNavigate={setView} />
-        </main>
-      </div>
+      <>
+        <div className="totem-shell">
+          <Hero 
+            title="Benvenuto in Totem Alfa" 
+            subtitle="Seleziona un'operazione per iniziare"
+          />
+          <main className="dashboard-main">
+            <Dashboard onNavigate={setView} />
+          </main>
+        </div>
+        {adminCta}
+      </>
     );
   }
 
   if (view === 'website') {
     return (
-      <div className="totem-shell">
-        <Hero 
-          title="Sito Web Aziendale" 
-          onBack={() => setView('dashboard')}
-        />
-        <main className="dashboard-main" style={{ padding: '0 2rem 2rem' }}>
-          <WebsiteViewer url="https://www.alfa-eng.net/" />
-        </main>
-      </div>
+      <>
+        <div className="totem-shell">
+          <Hero 
+            title="Sito Web Aziendale" 
+            onBack={() => setView('dashboard')}
+          />
+          <main className="dashboard-main" style={{ padding: '0 2rem 2rem' }}>
+            <WebsiteViewer url="https://www.alfa-eng.net/" />
+          </main>
+        </div>
+        {adminCta}
+      </>
     );
   }
 
   if (view === 'docs') {
     return (
-      <div className="totem-shell">
-        <Hero 
-          title="Consulta Documentazione" 
-          subtitle="Naviga cartelle e apri PDF senza uscire dal totem"
-          onBack={() => setView('dashboard')}
-        />
-        <main className="dashboard-main" style={{ 
-          padding: '0 2rem 2rem', 
-          maxWidth: '1400px', 
-          margin: '0 auto', 
-          width: '100%',
-          overflowY: 'auto',
-          alignItems: 'flex-start',
-          display: 'block', // Override flex centering for this view 
-          height: '100%' 
-        }}>
-          <DocumentBrowser
-            siteId={siteId}
-            driveId={import.meta.env.VITE_SHAREPOINT_DRIVE_ID}
-            initialPath={import.meta.env.VITE_DOCS_ROOT_PATH || ""}
+      <>
+        <div className="totem-shell">
+          <Hero 
+            title="Consulta Documentazione" 
+            subtitle="Naviga cartelle e apri PDF senza uscire dal totem"
+            onBack={() => setView('dashboard')}
           />
-        </main>
-      </div>
+          <main className="dashboard-main" style={{ 
+            padding: '0 2rem 2rem', 
+            maxWidth: '1400px', 
+            margin: '0 auto', 
+            width: '100%',
+            overflowY: 'auto',
+            alignItems: 'flex-start',
+            display: 'block', // Override flex centering for this view 
+            height: '100%' 
+          }}>
+            <DocumentBrowser
+              siteId={siteId}
+              driveId={import.meta.env.VITE_SHAREPOINT_DRIVE_ID}
+              initialPath={import.meta.env.VITE_DOCS_ROOT_PATH || ""}
+            />
+          </main>
+        </div>
+        {adminCta}
+      </>
+    );
+  }
+
+  if (view === 'admin') {
+    return (
+      <>
+        <div className="totem-shell">
+          <Hero
+            title="Pannello Admin"
+            subtitle="Accesso riservato agli amministratori"
+            onBack={() => setView('dashboard')}
+          />
+          <main className="dashboard-main">
+            <div className="panel">
+              <div className="panel-content">
+                <p className="eyebrow" style={{ marginBottom: 8 }}>Stato</p>
+                <p className="muted">Area admin in allestimento. Questo pulsante serve a verificare il ruolo Totem.Admin.</p>
+                <button className="btn secondary" onClick={() => setView('dashboard')} type="button">
+                  Torna alla dashboard
+                </button>
+              </div>
+            </div>
+          </main>
+        </div>
+        {adminCta}
+      </>
     );
   }
 
   if (view === 'update-stock') {
     return (
-      <div className="totem-shell update-mode">
-        <Hero 
-          title="Aggiorna Giacenza" 
-          onBack={() => setView('inventory')}
-        />
-        <StockUpdatePage
-          items={cartList}
-          values={editValues}
-          onChange={handleEditChange}
-          onSave={handleSave}
-          saving={saveStatus === "saving"}
-          status={saveStatus}
-          message={saveMessage}
-          onBackToInventory={() => setView('inventory')}
-        />
-      </div>
+      <>
+        <div className="totem-shell update-mode">
+          <Hero 
+            title="Aggiorna Giacenza" 
+            onBack={() => setView('inventory')}
+          />
+          <StockUpdatePage
+            items={cartList}
+            values={editValues}
+            onChange={handleEditChange}
+            onSave={handleSave}
+            saving={saveStatus === "saving"}
+            status={saveStatus}
+            message={saveMessage}
+            onBackToInventory={() => setView('inventory')}
+          />
+        </div>
+        {adminCta}
+      </>
     );
   }
 
   return (
-    <div className="totem-shell">
-      <Hero 
-        title="Giacenza Magazzino" 
-        onBack={handleBack}
-      />
-      <NavigationTabs activeTab={activeTab} onTabChange={setActiveTab} />
-      {selectionMessage && (
-        <div className="alert warning" style={{ marginTop: 6 }}>
-          {selectionMessage}
-        </div>
-      )}
-      {cartList.length > 0 && (
-        <div className="cart-panel">
-          <div className="cart-header">
-            <div>
-              <p className="eyebrow" style={{ marginBottom: 6 }}>Carrello</p>
-              <h3>{cartList.length} / 10 articoli selezionati</h3>
-            </div>
-            <div className="cart-actions">
-              <button
-                className="btn secondary"
-                style={{ padding: "10px 12px" }}
-                onClick={() => setIsCartOpen((v) => !v)}
-                type="button"
-              >
-                {isCartOpen ? "Comprimi ▲" : "Espandi ▼"}
-              </button>
-              <button className="btn danger-ghost" onClick={handleClearCart} type="button">
-                🗑 Svuota articoli
-              </button>
-              <button className="btn primary" onClick={() => setView('update-stock')} type="button">
-                Aggiorna Giacenza
-              </button>
-            </div>
+    <>
+      <div className="totem-shell">
+        <Hero 
+          title="Giacenza Magazzino" 
+          onBack={handleBack}
+        />
+        <NavigationTabs activeTab={activeTab} onTabChange={setActiveTab} />
+        {selectionMessage && (
+          <div className="alert warning" style={{ marginTop: 6 }}>
+            {selectionMessage}
           </div>
-          {isCartOpen && (
-            <div className="cart-table-wrapper">
-              <table className="cart-table">
-                <thead>
-                  <tr>
-                    <th scope="col">TIPO</th>
-                    <th scope="col">ARTICOLO</th>
-                    <th scope="col">N° Bolla</th>
-                    <th scope="col">Colata</th>
-                    <th scope="col">Ident. Lotto</th>
-                    <th scope="col" style={{ width: 64 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cartList.map((item) => (
-                    <tr
-                      key={item.key}
-                      className={`cart-row ${
-                        item.source === "FORGIATI"
-                          ? "cart-row-forgiati"
-                          : item.source === "TUBI"
-                          ? "cart-row-tubi"
-                          : item.source === "ORING-HNBR"
-                          ? "cart-row-oring"
-                          : "cart-row-oring-nbr"
-                      }`}
-                    >
-                      <td>{item.source}</td>
-                      <td>{item.title || "-"}</td>
-                      <td>{item.bolla ? String(item.bolla) : "-"}</td>
-                      <td>{item.colata ? String(item.colata) : "-"}</td>
-                      <td>{item.lottoProg ? String(item.lottoProg) : "a"}</td>
-                      <td>
-                        <button
-                          className="icon-btn danger"
-                          aria-label="Rimuovi articolo"
-                          onClick={() => handleRemoveFromCart(item.key)}
-                          type="button"
-                        >
-                          ✕
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        )}
+        {cartList.length > 0 && (
+          <div className="cart-panel">
+            <div className="cart-header">
+              <div>
+                <p className="eyebrow" style={{ marginBottom: 6 }}>Carrello</p>
+                <h3>{cartList.length} / 10 articoli selezionati</h3>
+              </div>
+              <div className="cart-actions">
+                <button
+                  className="btn secondary"
+                  style={{ padding: "10px 12px" }}
+                  onClick={() => setIsCartOpen((v) => !v)}
+                  type="button"
+                >
+                  {isCartOpen ? "Comprimi ▲" : "Espandi ▼"}
+                </button>
+                <button className="btn danger-ghost" onClick={handleClearCart} type="button">
+                  🗑 Svuota articoli
+                </button>
+                <button className="btn primary" onClick={() => setView('update-stock')} type="button">
+                  Aggiorna Giacenza
+                </button>
+              </div>
             </div>
-          )}
-        </div>
-      )}
-      <main className="panels-grid">
-        {renderActivePanel()}
-      </main>
-    </div>
+            {isCartOpen && (
+              <div className="cart-table-wrapper">
+                <table className="cart-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">TIPO</th>
+                      <th scope="col">ARTICOLO</th>
+                      <th scope="col">N° Bolla</th>
+                      <th scope="col">Colata</th>
+                      <th scope="col">Ident. Lotto</th>
+                      <th scope="col" style={{ width: 64 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cartList.map((item) => (
+                      <tr
+                        key={item.key}
+                        className={`cart-row ${
+                          item.source === "FORGIATI"
+                            ? "cart-row-forgiati"
+                            : item.source === "TUBI"
+                            ? "cart-row-tubi"
+                            : item.source === "ORING-HNBR"
+                            ? "cart-row-oring"
+                            : "cart-row-oring-nbr"
+                        }`}
+                      >
+                        <td>{item.source}</td>
+                        <td>{item.title || "-"}</td>
+                        <td>{item.bolla ? String(item.bolla) : "-"}</td>
+                        <td>{item.colata ? String(item.colata) : "-"}</td>
+                        <td>{item.lottoProg ? String(item.lottoProg) : "a"}</td>
+                        <td>
+                          <button
+                            className="icon-btn danger"
+                            aria-label="Rimuovi articolo"
+                            onClick={() => handleRemoveFromCart(item.key)}
+                            type="button"
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+        <main className="panels-grid">
+          {renderActivePanel()}
+        </main>
+      </div>
+      {adminCta}
+    </>
   );
 }
 

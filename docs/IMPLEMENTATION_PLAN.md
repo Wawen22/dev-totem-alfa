@@ -12,6 +12,7 @@
 - **Data Layer**: Graph SDK v3 + `SharePointService` (listItems, createItem, updateItem se serve via patch) parametrizzato da SiteId + ListId.
 - **Config**: `.env.local` (usa gli stessi valori del KIOSK, cambia solo i GUID delle liste magazzino).
 - **UI**: layout verticale con tiles di sezione + pannelli tabellari, palette chiara, pulsanti XL.
+- **Ruoli (App Role)**: App role `Totem.Admin` lato Entra ID per mostrare il CTA "Pannello Admin" solo agli utenti/gruppi assegnati.
 
 ## 3) Dati – Lista 1_FORGIATI
 - Colonne di business in `src/config/forgiatiColumns.ts` (etichette già inserite).
@@ -24,6 +25,10 @@
 3. **Run dev**: `npm install && npm run dev` dentro `totem-alfa-app`, login Microsoft, verifica popolamento tabella FORGIATI e chiavi debug.
 4. **Allinea colonne**: aggiorna `forgiatiColumns.ts` con gli internal name reali.
 5. **Abilitare edit**: aggiungi azioni (es. pulsanti +/- su giacenza) usando `SharePointService` (metodo `createItem` già pronto; per update usa patch su `/fields`).
+6. **Ruolo Admin (Totem.Admin)**:
+	- In **App roles** crea `Totem Admin` (Value `Totem.Admin`, Allowed member types: Users/Groups, descrizione: "Consente accesso al pannello amministrazione totem").
+	- In **Enterprise applications** assegna utenti/gruppi al ruolo `Totem Admin`.
+	- Re-login e verifica su https://jwt.ms che nel claim `roles` compaia `Totem.Admin`. Solo con questo claim compare il CTA "Pannello Admin" in basso a destra.
 
 ## 5) Iterazioni successive
 - **Sezioni mancanti**: duplicare `ForgiatiPanel` per ORING-HNBR, ORING-NBR, TUBI con relativi env `VITE_ORING_*` e colonne dedicate.

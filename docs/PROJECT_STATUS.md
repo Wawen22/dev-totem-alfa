@@ -15,6 +15,7 @@ Applicazione Totem touch-friendly verticale per la gestione dell'inventario ALFA
   - **Giacenza Magazzino:** Attiva e funzionante.
   - **Documentazione:** Attiva e Funzionante (File Browser & PDF Viewer).
   - **Sito Web:** Placeholder disabilitato per sviluppi futuri.
+- **Accesso Admin:** CTA fisso "Pannello Admin" in basso a destra visibile solo se il claim `roles` contiene `Totem.Admin` (app role Entra ID).
 
 ### B. Gestione Inventario (Giacenza Magazzino)
 - **Liste Supportate:**
@@ -46,6 +47,10 @@ Applicazione Totem touch-friendly verticale per la gestione dell'inventario ALFA
   - Il cambio scheda (es. da Forgiati a Tubi) è istantaneo se i dati sono in cache.
   - Pulsante "Aggiorna" per forzare il refresh dai server Microsoft.
 - **Download Totale:** Scaricamento batch di tutto l'inventario (4000+ righe) all'avvio per permettere filtri e ricerche locali istantanee.
+- **Ruoli Entra ID:**
+  - App role `Totem.Admin` creato in **App roles** (Value `Totem.Admin`, Allowed member types: Users/Groups, descrizione: "Consente accesso al pannello amministrazione totem").
+  - Assegnazione in **Enterprise applications** > app > **Users and groups** > **Add user/group** selezionando il ruolo `Totem Admin`.
+  - Verifica: dopo logout/login o in Incognito, controllare l'`id_token` su https://jwt.ms e confermare che `roles` includa `Totem.Admin`.
 
 ## 3. Configurazione Tecnica
 
