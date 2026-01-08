@@ -52,12 +52,16 @@ export class SharePointService {
   async createItem<TFields extends Record<string, unknown>>(listId: string, fields: TFields): Promise<SharePointListItem<TFields>> {
     if (!listId) throw new Error("listId mancante");
     const client = await this.getClient();
+    try {
+      const response = await client
+        .api(`/sites/${this.siteId}/lists/${listId}/items`)
+        .post({ fields });
 
-    const response = await client
-      .api(`/sites/${this.siteId}/lists/${listId}/items`)
-      .post({ fields });
-
-    return { id: response.id, fields: response.fields };
+      return { id: response.id, fields: response.fields };
+    } catch (err: any) {
+      const msg = err?.body?.error?.message || err?.message || "Errore creazione elemento";
+      throw new Error(msg);
+    }
   }
 
   async updateItem<TFields extends Record<string, unknown>>(listId: string, itemId: string, fields: Partial<TFields>): Promise<void> {

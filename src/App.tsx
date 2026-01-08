@@ -12,6 +12,8 @@ import { SharePointListItem } from "./types/sharepoint";
 import { formatSharePointDate } from "./utils/dateUtils";
 import { WebsiteViewer } from "./components/features/WebsiteViewer";
 import { DocumentBrowser } from "./components/features/DocumentBrowser";
+import { useIsAdmin } from "./hooks/useIsAdmin";
+import { AdminPanel } from "./components/features/AdminPanel";
 
 const msalInstance = new PublicClientApplication(msalConfig);
 
@@ -1777,6 +1779,14 @@ function AuthenticatedShell() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(true);
+  const isAdmin = useIsAdmin();
+
+  const shellClass = useMemo(() => {
+    if (view === "update-stock") return "totem-shell update-mode";
+    if (view === "admin") return "totem-shell admin-mode";
+    if (view === "docs") return "totem-shell docs-mode";
+    return "totem-shell";
+  }, [view]);
 
   useEffect(() => {
     if (accounts.length > 0) {
@@ -1784,16 +1794,11 @@ function AuthenticatedShell() {
     }
   }, [accounts]);
 
-  const activeAccount = accounts[0];
-  const roles = useMemo(() => {
-    const claims = (activeAccount?.idTokenClaims || {}) as Record<string, unknown>;
-    const claimRoles = claims["roles"];
-    if (Array.isArray(claimRoles)) return claimRoles.map((r) => String(r));
-    if (typeof claimRoles === "string") return [claimRoles];
-    return [];
-  }, [activeAccount]);
-
-  const isAdmin = roles.includes("Totem.Admin");
+  useEffect(() => {
+    if (view === "admin" && !isAdmin) {
+      setView("dashboard");
+    }
+  }, [view, isAdmin]);
 
   const handleBack = () => {
     setActiveTab("forgiati");
@@ -1984,7 +1989,7 @@ function AuthenticatedShell() {
   if (view === 'dashboard') {
     return (
       <>
-        <div className="totem-shell">
+        <div className={shellClass}>
           <Hero 
             title="Benvenuto in Totem Alfa" 
             subtitle="Seleziona un'operazione per iniziare"
@@ -2001,7 +2006,7 @@ function AuthenticatedShell() {
   if (view === 'website') {
     return (
       <>
-        <div className="totem-shell">
+        <div className={shellClass}>
           <Hero 
             title="Sito Web Aziendale" 
             onBack={() => setView('dashboard')}
@@ -2018,7 +2023,7 @@ function AuthenticatedShell() {
   if (view === 'docs') {
     return (
       <>
-        <div className="totem-shell">
+        <div className={shellClass}>
           <Hero 
             title="Consulta Documentazione" 
             subtitle="Naviga cartelle e apri PDF senza uscire dal totem"
@@ -2049,22 +2054,28 @@ function AuthenticatedShell() {
   if (view === 'admin') {
     return (
       <>
-        <div className="totem-shell">
+        <div className={shellClass}>
           <Hero
             title="Pannello Admin"
             subtitle="Accesso riservato agli amministratori"
             onBack={() => setView('dashboard')}
           />
-          <main className="dashboard-main">
-            <div className="panel">
-              <div className="panel-content">
-                <p className="eyebrow" style={{ marginBottom: 8 }}>Stato</p>
-                <p className="muted">Area admin in allestimento. Questo pulsante serve a verificare il ruolo Totem.Admin.</p>
-                <button className="btn secondary" onClick={() => setView('dashboard')} type="button">
-                  Torna alla dashboard
-                </button>
-              </div>
-            </div>
+          <main
+            className="dashboard-main"
+            style={{
+              padding: '0 2rem 2rem',
+              width: '100%',
+              maxWidth: '1500px',
+              margin: '0 auto',
+              alignItems: 'flex-start',
+              display: 'block',
+            }}
+          >
+            <AdminPanel
+              siteId={siteId}
+              forgiatiListId={forgiatiListId}
+              tubiListId={tubiListId}
+            />
           </main>
         </div>
         {adminCta}
@@ -2075,7 +2086,7 @@ function AuthenticatedShell() {
   if (view === 'update-stock') {
     return (
       <>
-        <div className="totem-shell update-mode">
+        <div className={shellClass}>
           <Hero 
             title="Aggiorna Giacenza" 
             onBack={() => setView('inventory')}
@@ -2098,7 +2109,7 @@ function AuthenticatedShell() {
 
   return (
     <>
-      <div className="totem-shell">
+      <div className={shellClass}>
         <Hero 
           title="Giacenza Magazzino" 
           onBack={handleBack}
