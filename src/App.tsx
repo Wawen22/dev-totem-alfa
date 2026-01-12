@@ -252,6 +252,9 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
     title: string;
     items: ForgiatoItem[];
   } | null>(null);
+  const [newLotColata, setNewLotColata] = useState("");
+  const [lotSaveStatus, setLotSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [lotSaveMessage, setLotSaveMessage] = useState<string | null>(null);
 
   const service = useMemo(() => {
     if (!siteId) return null;
@@ -288,6 +291,17 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
     }));
   }, [rows]);
 
+  useEffect(() => {
+    if (!lotSelection) return;
+    const updated = groupedRows.find((group) => group.title === lotSelection.title);
+    if (!updated) return;
+    const currentIds = lotSelection.items.map((itm) => itm.id).join(",");
+    const nextIds = updated.items.map((itm) => itm.id).join(",");
+    if (currentIds !== nextIds) {
+      setLotSelection(updated);
+    }
+  }, [groupedRows, lotSelection]);
+
   const forgiatiProgressiveMap = useMemo(() => {
     const map = new Map<string, string>();
 
@@ -298,8 +312,15 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
       return null;
     };
 
+    const getCreatedKey = (item: ForgiatoItem) => {
+      const created = getTimeValue((item.fields as any).Created);
+      if (created) return created;
+      const idNum = Number(item.id);
+      return Number.isFinite(idNum) ? idNum : 0;
+    };
+
     groupedRows.forEach((group) => {
-      const sorted = [...group.items].sort((a, b) => getTimeValue((b.fields as any).field_23) - getTimeValue((a.fields as any).field_23));
+      const sorted = [...group.items].sort((a, b) => getCreatedKey(a) - getCreatedKey(b));
       const used = new Set<string>();
 
       sorted.forEach((item) => {
@@ -380,6 +401,123 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
 
   const handlePrev = () => setPage((p) => Math.max(1, p - 1));
   const handleNext = () => setPage((p) => Math.min(totalPages, p + 1));
+
+  const existingColate = useMemo(() => {
+    const set = new Set<string>();
+    if (!lotSelection) return set;
+    lotSelection.items.forEach((itm) => {
+      const val = toStr((itm.fields as any).field_13).trim().toLowerCase();
+      if (val) set.add(val);
+    });
+    return set;
+  }, [lotSelection]);
+
+  useEffect(() => {
+    if (lotSelection) {
+      setNewLotColata("");
+      setLotSaveStatus("idle");
+      setLotSaveMessage(null);
+    }
+  }, [lotSelection]);
+
+  const buildLotClonePayload = (item: ForgiatoItem, newColataValue: string) => {
+    const sourceFields = (item.fields || {}) as Record<string, unknown>;
+    const payload: Record<string, unknown> = {};
+
+    Object.entries(sourceFields).forEach(([key, value]) => {
+      if (
+        key === "id" ||
+        key === "ContentType" ||
+        key === "ContentTypeId" ||
+        key === "Created" ||
+        key === "Modified" ||
+        key === "AuthorLookupId" ||
+        key === "EditorLookupId" ||
+        key === "ComplianceAssetId" ||
+        key === "GUID" ||
+        key === "Attachments" ||
+        key === "AppAuthor" ||
+        key === "AppEditor" ||
+        key === "Edit" ||
+        key === "ItemChildCount" ||
+        key === "FolderChildCount" ||
+        key === "_UIVersionString" ||
+        key === "UIVersionString" ||
+        key === "_ModerationStatus" ||
+        key === "_ModerationComments" ||
+        key === "_ComplianceFlags" ||
+        key === "_ComplianceTag" ||
+        key === "_ComplianceTagUserId" ||
+        key === "_ComplianceTagWrittenTime" ||
+        key === "_IsRecord" ||
+        key === "_Level" ||
+        key === "_Version" ||
+        key.startsWith("LinkTitle") ||
+        key.startsWith("_Compliance") ||
+        key.startsWith("@") ||
+        key.startsWith("odata")
+      ) {
+        return;
+      }
+
+      if (key === "field_13") {
+        payload[key] = newColataValue;
+        return;
+      }
+
+      if (key === "LottoProgressivo") {
+        payload[key] = null;
+        return;
+      }
+
+      payload[key] = value;
+    });
+
+    if (!("field_13" in payload)) {
+      payload.field_13 = newColataValue;
+    }
+
+    return payload;
+  };
+
+  const handleCreateLot = async () => {
+    if (!service || !listId || !lotSelection) {
+      setLotSaveStatus("error");
+      setLotSaveMessage("Servizio non disponibile per la creazione del lotto.");
+      return;
+    }
+
+    const normalized = newLotColata.trim();
+    if (!normalized) return;
+    const normalizedLower = normalized.toLowerCase();
+    if (existingColate.has(normalizedLower)) {
+      setLotSaveStatus("error");
+      setLotSaveMessage("Inserisci un N° colata diverso dai lotti esistenti.");
+      return;
+    }
+
+    const baseItem = lotSelection.items[0];
+    if (!baseItem) return;
+
+    setLotSaveStatus("saving");
+    setLotSaveMessage(null);
+    try {
+      const payload = buildLotClonePayload(baseItem, normalized);
+      await service.createItem<Record<string, unknown>>(listId, payload);
+      setLotSaveStatus("success");
+      setLotSaveMessage("Nuovo lotto creato. Aggiorno la lista...");
+      setNewLotColata("");
+      await refresh();
+    } catch (err: any) {
+      setLotSaveStatus("error");
+      setLotSaveMessage(err?.message || "Errore durante la creazione del lotto.");
+    }
+  };
+
+  const normalizedNewLot = newLotColata.trim();
+  const normalizedNewLotLower = normalizedNewLot.toLowerCase();
+  const isDuplicateLot = normalizedNewLot.length > 0 && existingColate.has(normalizedNewLotLower);
+  const canCreateLot = Boolean(normalizedNewLot) && !isDuplicateLot && lotSaveStatus !== "saving";
 
   return (
     <div className="panel inventory-panel">
@@ -481,7 +619,18 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                       if (isTitle) {
                         return (
                           <th scope="row" key={col.field} className={className}>
-                            {content}
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
+                              <span>{content}</span>
+                              <button
+                                className="icon-btn"
+                                aria-label="Gestisci lotti"
+                                title="Gestisci lotti"
+                                onClick={() => setLotSelection(group)}
+                                type="button"
+                              >
+                                📦
+                              </button>
+                            </div>
                           </th>
                         );
                       }
@@ -522,7 +671,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
       </div>
 
       {lotSelection && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
+        <div className="modal-backdrop blur" role="dialog" aria-modal="true">
           <div className="modal">
             <div className="modal__header">
               <div>
@@ -577,6 +726,44 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                   </tbody>
                 </table>
               </div>
+              <div className="section-heading" style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <span className="pill ghost">Nuovo lotto</span>
+                  <p className="muted" style={{ margin: "6px 0 0" }}>Duplico l&apos;articolo: cambia solo N° COLATA.</p>
+                </div>
+              </div>
+              <div className="field-grid" style={{ marginTop: 8, alignItems: "flex-end" }}>
+                <label className="field" style={{ flex: 1 }}>
+                  <span>Nuovo N° COLATA</span>
+                  <input
+                    type="text"
+                    value={newLotColata}
+                    onChange={(e) => {
+                      setNewLotColata(e.target.value);
+                      setLotSaveStatus("idle");
+                      setLotSaveMessage(null);
+                    }}
+                    placeholder="Inserisci un valore diverso dai lotti esistenti"
+                  />
+                </label>
+                <button
+                  className="btn primary"
+                  style={{ minWidth: 160, height: 44 }}
+                  onClick={handleCreateLot}
+                  disabled={!canCreateLot}
+                  type="button"
+                >
+                  {lotSaveStatus === "saving" ? "Creo..." : "Crea lotto"}
+                </button>
+              </div>
+              {newLotColata && isDuplicateLot && (
+                <p className="muted" style={{ marginTop: 6 }}>Valore già presente tra le colate esistenti.</p>
+              )}
+              {lotSaveMessage && (
+                <div className={`alert ${lotSaveStatus === "success" ? "success" : lotSaveStatus === "error" ? "error" : "warning"}`} style={{ marginTop: 10 }}>
+                  {lotSaveMessage}
+                </div>
+              )}
               {selectionLimitReached && <p className="muted" style={{ marginTop: 10 }}>Limite massimo di 10 articoli in carrello.</p>}
             </div>
             <div className="modal__footer">
@@ -975,6 +1162,9 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
     title: string;
     items: TubiItem[];
   } | null>(null);
+  const [newLotColata, setNewLotColata] = useState("");
+  const [lotSaveStatus, setLotSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [lotSaveMessage, setLotSaveMessage] = useState<string | null>(null);
 
   const service = useMemo(() => {
     if (!siteId) return null;
@@ -1011,6 +1201,18 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
     }));
   }, [rows]);
 
+  useEffect(() => {
+    if (!lotSelection) return;
+    const updated = groupedRows.find((group) => group.title === lotSelection.title);
+    if (!updated) return;
+
+    const currentIds = lotSelection.items.map((itm) => itm.id).join(",");
+    const nextIds = updated.items.map((itm) => itm.id).join(",");
+    if (currentIds !== nextIds) {
+      setLotSelection(updated);
+    }
+  }, [groupedRows, lotSelection]);
+
   const tubiProgressiveMap = useMemo(() => {
     const map = new Map<string, string>();
 
@@ -1021,15 +1223,21 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
       return null;
     };
 
+    const getCreatedKey = (item: TubiItem) => {
+      const created = getTimeValue((item.fields as any).Created);
+      if (created) return created;
+      const idNum = Number(item.id);
+      return Number.isFinite(idNum) ? idNum : 0;
+    };
+
     groupedRows.forEach((group) => {
-      const sorted = [...group.items].sort((a, b) => getTimeValue((b.fields as any).field_21) - getTimeValue((a.fields as any).field_21));
+      const sorted = [...group.items].sort((a, b) => getCreatedKey(a) - getCreatedKey(b));
       const used = new Set<string>();
 
-      sorted.forEach((item, idx) => {
+      sorted.forEach((item) => {
         const existing = normalizeLetter((item.fields as any).LottoProgressivo);
         let letter = existing;
         if (!letter || used.has(letter)) {
-          // Assign next available letter starting from 'a' when empty or duplicate
           let code = "a".charCodeAt(0);
           while (used.has(String.fromCharCode(code))) {
             code++;
@@ -1095,21 +1303,129 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
     fields: item.fields as Record<string, unknown>,
   });
 
-  const handleOpenLot = (group: { title: string; items: TubiItem[] }) => {
-    if (group.items.length === 1) {
-      const cartItem = toCartItem(group.items[0]);
-      onToggle(cartItem, Boolean(selectedItems[cartItem.key]));
-      return;
-    }
-    setLotSelection(group);
-  };
-
   const handleSelectLot = (item: TubiItem) => {
     const cartItem = toCartItem(item);
     const alreadySelected = Boolean(selectedItems[cartItem.key]);
     onToggle(cartItem, alreadySelected);
     setLotSelection(null);
   };
+
+  const existingColate = useMemo(() => {
+    const set = new Set<string>();
+    if (!lotSelection) return set;
+    lotSelection.items.forEach((itm) => {
+      const val = toStr((itm.fields as any).field_18).trim().toLowerCase();
+      if (val) set.add(val);
+    });
+    return set;
+  }, [lotSelection]);
+
+  useEffect(() => {
+    if (lotSelection) {
+      setNewLotColata("");
+      setLotSaveStatus("idle");
+      setLotSaveMessage(null);
+    }
+  }, [lotSelection]);
+
+  const buildLotClonePayload = (item: TubiItem, newColataValue: string) => {
+    const sourceFields = (item.fields || {}) as Record<string, unknown>;
+    const payload: Record<string, unknown> = {};
+
+    Object.entries(sourceFields).forEach(([key, value]) => {
+      if (
+        key === "id" ||
+        key === "ContentType" ||
+        key === "ContentTypeId" ||
+        key === "Created" ||
+        key === "Modified" ||
+        key === "AuthorLookupId" ||
+        key === "EditorLookupId" ||
+        key === "ComplianceAssetId" ||
+        key === "GUID" ||
+        key === "Attachments" ||
+        key === "AppAuthor" ||
+        key === "AppEditor" ||
+        key === "Edit" ||
+        key === "ItemChildCount" ||
+        key === "FolderChildCount" ||
+        key === "_UIVersionString" ||
+        key === "UIVersionString" ||
+        key === "_ModerationStatus" ||
+        key === "_ModerationComments" ||
+        key === "_ComplianceFlags" ||
+        key === "_ComplianceTag" ||
+        key === "_ComplianceTagUserId" ||
+        key === "_ComplianceTagWrittenTime" ||
+        key === "_IsRecord" ||
+        key === "_Level" ||
+        key === "_Version" ||
+        key.startsWith("LinkTitle") ||
+        key.startsWith("_Compliance") ||
+        key.startsWith("@") ||
+        key.startsWith("odata")
+      ) {
+        return;
+      }
+
+      if (key === "field_18") {
+        payload[key] = newColataValue;
+        return;
+      }
+
+      if (key === "LottoProgressivo") {
+        payload[key] = null;
+        return;
+      }
+
+      payload[key] = value;
+    });
+
+    if (!("field_18" in payload)) {
+      payload.field_18 = newColataValue;
+    }
+
+    return payload;
+  };
+
+  const handleCreateLot = async () => {
+    if (!service || !listId || !lotSelection) {
+      setLotSaveStatus("error");
+      setLotSaveMessage("Servizio non disponibile per la creazione del lotto.");
+      return;
+    }
+
+    const normalized = newLotColata.trim();
+    if (!normalized) return;
+    const normalizedLower = normalized.toLowerCase();
+    if (existingColate.has(normalizedLower)) {
+      setLotSaveStatus("error");
+      setLotSaveMessage("Inserisci un N° colata diverso dai lotti esistenti.");
+      return;
+    }
+
+    const baseItem = lotSelection.items[0];
+    if (!baseItem) return;
+
+    setLotSaveStatus("saving");
+    setLotSaveMessage(null);
+    try {
+      const payload = buildLotClonePayload(baseItem, normalized);
+      await service.createItem<Record<string, unknown>>(listId, payload);
+      setLotSaveStatus("success");
+      setLotSaveMessage("Nuovo lotto creato. Aggiorno la lista...");
+      setNewLotColata("");
+      await refresh();
+    } catch (err: any) {
+      setLotSaveStatus("error");
+      setLotSaveMessage(err?.message || "Errore durante la creazione del lotto.");
+    }
+  };
+
+  const normalizedNewLot = newLotColata.trim();
+  const normalizedNewLotLower = normalizedNewLot.toLowerCase();
+  const isDuplicateLot = normalizedNewLot.length > 0 && existingColate.has(normalizedNewLotLower);
+  const canCreateLot = Boolean(normalizedNewLot) && !isDuplicateLot && lotSaveStatus !== "saving";
 
   return (
     <div className="panel inventory-panel">
@@ -1213,7 +1529,18 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                       if (isTitle) {
                         return (
                           <th scope="row" key={col.field} className={className}>
-                            {content}
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
+                              <span>{content}</span>
+                              <button
+                                className="icon-btn"
+                                aria-label="Gestisci lotti"
+                                title="Gestisci lotti"
+                                onClick={() => setLotSelection(group)}
+                                type="button"
+                              >
+                                📦
+                              </button>
+                            </div>
                           </th>
                         );
                       }
@@ -1225,7 +1552,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                       );
                     })}
                     <td>
-                      <div className="colata-badges">
+                      <div className="colata-badges" style={{ alignItems: "center" }}>
                         {(() => {
                           const sortedLots = [...group.items].sort(
                             (a, b) => getTimeValue((b.fields as any).field_21) - getTimeValue((a.fields as any).field_21)
@@ -1254,7 +1581,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
       </div>
 
       {lotSelection && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
+        <div className="modal-backdrop blur" role="dialog" aria-modal="true">
           <div className="modal">
             <div className="modal__header">
               <div>
@@ -1306,6 +1633,44 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                   </tbody>
                 </table>
               </div>
+              <div className="section-heading" style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <span className="pill ghost">Nuovo lotto</span>
+                  <p className="muted" style={{ margin: "6px 0 0" }}>Duplico l&apos;articolo: cambia solo N° COLATA.</p>
+                </div>
+              </div>
+              <div className="field-grid" style={{ marginTop: 8, alignItems: "flex-end" }}>
+                <label className="field" style={{ flex: 1 }}>
+                  <span>Nuovo N° COLATA</span>
+                  <input
+                    type="text"
+                    value={newLotColata}
+                    onChange={(e) => {
+                      setNewLotColata(e.target.value);
+                      setLotSaveStatus("idle");
+                      setLotSaveMessage(null);
+                    }}
+                    placeholder="Inserisci un valore diverso dai lotti esistenti"
+                  />
+                </label>
+                <button
+                  className="btn primary"
+                  style={{ minWidth: 160, height: 44 }}
+                  onClick={handleCreateLot}
+                  disabled={!canCreateLot}
+                  type="button"
+                >
+                  {lotSaveStatus === "saving" ? "Creo..." : "Crea lotto"}
+                </button>
+              </div>
+              {newLotColata && isDuplicateLot && (
+                <p className="muted" style={{ marginTop: 6 }}>Valore già presente tra le colate esistenti.</p>
+              )}
+              {lotSaveMessage && (
+                <div className={`alert ${lotSaveStatus === "success" ? "success" : lotSaveStatus === "error" ? "error" : "warning"}`} style={{ marginTop: 10 }}>
+                  {lotSaveMessage}
+                </div>
+              )}
               {selectionLimitReached && <p className="muted" style={{ marginTop: 10 }}>Limite massimo di 10 articoli in carrello.</p>}
             </div>
             <div className="modal__footer">
