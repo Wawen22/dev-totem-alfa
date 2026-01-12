@@ -438,6 +438,8 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
         key === "Attachments" ||
         key === "AppAuthor" ||
         key === "AppEditor" ||
+        key === "AppAuthorLookupId" ||
+        key === "AppEditorLookupId" ||
         key === "Edit" ||
         key === "ItemChildCount" ||
         key === "FolderChildCount" ||
@@ -1346,6 +1348,8 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
         key === "Attachments" ||
         key === "AppAuthor" ||
         key === "AppEditor" ||
+        key === "AppAuthorLookupId" ||
+        key === "AppEditorLookupId" ||
         key === "Edit" ||
         key === "ItemChildCount" ||
         key === "FolderChildCount" ||
