@@ -1603,7 +1603,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                       <th scope="col">Ident. Lotto</th>
                       <th scope="col">N° BOLLA</th>
                       <th scope="col">DATA ORDINE</th>
-                      <th scope="col">Giacenza Contab.</th>
+                      <th scope="col">Giacenza Non Tagliato</th>
                       <th scope="col" style={{ width: 140 }}></th>
                     </tr>
                   </thead>
@@ -1619,7 +1619,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                           <td>{lotProg}</td>
                           <td>{toStr((item.fields as any).field_15) || "-"}</td>
                           <td>{formatSharePointDate((item.fields as any).field_3)}</td>
-                          <td>{toStr((item.fields as any).field_19) || "-"}</td>
+                          <td>{toStr((item.fields as any).field_20) || "-"}</td>
                           <td>
                             <button
                               className={alreadySelected ? "btn secondary" : "btn primary"}
