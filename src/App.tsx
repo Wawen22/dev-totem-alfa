@@ -677,7 +677,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
           <div className="modal">
             <div className="modal__header">
               <div>
-                <p className="eyebrow" style={{ marginBottom: 4 }}>Seleziona colata</p>
+                <p className="eyebrow" style={{ marginBottom: 4 }}>Seleziona lotto</p>
                 <h3 style={{ margin: 0 }}>{lotSelection.title}</h3>
               </div>
               <button className="icon-btn" aria-label="Chiudi" onClick={() => setLotSelection(null)} type="button">✕</button>
@@ -690,7 +690,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                       <th scope="col">N° COLATA</th>
                       <th scope="col">Ident. Lotto</th>
                       <th scope="col">N° BOLLA</th>
-                      <th scope="col">Data prelievo</th>
+                      <th scope="col">Data ordine</th>
                       <th scope="col">Giacenza Q.tà</th>
                       <th scope="col" style={{ width: 140 }}></th>
                     </tr>
@@ -706,7 +706,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                           <td>{toStr((item.fields as any).field_13) || "-"}</td>
                           <td>{lotProg}</td>
                           <td>{toStr((item.fields as any).field_10) || "-"}</td>
-                          <td>{formatSharePointDate((item.fields as any).field_23)}</td>
+                          <td>{formatSharePointDate((item.fields as any).field_2)}</td>
                           <td>{toStr((item.fields as any).field_22) || "-"}</td>
                           <td>
                             <button
@@ -1589,7 +1589,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
           <div className="modal">
             <div className="modal__header">
               <div>
-                <p className="eyebrow" style={{ marginBottom: 4 }}>Seleziona colata</p>
+                <p className="eyebrow" style={{ marginBottom: 4 }}>Seleziona lotto</p>
                 <h3 style={{ margin: 0 }}>{lotSelection.title}</h3>
               </div>
               <button className="icon-btn" aria-label="Chiudi" onClick={() => setLotSelection(null)} type="button">✕</button>
@@ -1602,7 +1602,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                       <th scope="col">N° COLATA</th>
                       <th scope="col">Ident. Lotto</th>
                       <th scope="col">N° BOLLA</th>
-                      <th scope="col">DATA ULT. PREL.</th>
+                      <th scope="col">DATA ORDINE</th>
                       <th scope="col">Giacenza Contab.</th>
                       <th scope="col" style={{ width: 140 }}></th>
                     </tr>
@@ -1618,7 +1618,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                           <td>{toStr((item.fields as any).field_18) || "-"}</td>
                           <td>{lotProg}</td>
                           <td>{toStr((item.fields as any).field_15) || "-"}</td>
-                          <td>{formatSharePointDate((item.fields as any).field_21)}</td>
+                          <td>{formatSharePointDate((item.fields as any).field_3)}</td>
                           <td>{toStr((item.fields as any).field_19) || "-"}</td>
                           <td>
                             <button
