@@ -14,6 +14,7 @@ import { WebsiteViewer } from "./components/features/WebsiteViewer";
 import { DocumentBrowser } from "./components/features/DocumentBrowser";
 import { useIsAdmin } from "./hooks/useIsAdmin";
 import { AdminPanel } from "./components/features/AdminPanel";
+import { PowerAutomateService } from "./services/powerAutomateService";
 
 const msalInstance = new PublicClientApplication(msalConfig);
 
@@ -2140,6 +2141,7 @@ function AuthenticatedShell() {
     if (!siteId) return null;
     return new SharePointService(getClient, siteId);
   }, [getClient, siteId]);
+  const flowService = useMemo(() => new PowerAutomateService(), []);
   const [view, setView] = useState<'dashboard' | 'inventory' | 'update-stock' | 'website' | 'docs' | 'admin'>('dashboard');
   const [activeTab, setActiveTab] = useState<"forgiati" | "oring-hnbr" | "oring-nbr" | "tubi">("forgiati");
   const [cartItems, setCartItems] = useState<Record<string, CartItem>>({});
@@ -2327,14 +2329,57 @@ function AuthenticatedShell() {
         })
       );
 
+      const account = accounts[0];
+      const sources = Array.from(new Set(cartList.map((i) => i.source)));
+      const flowPayload = {
+        action: "AggiornaGiacenza",
+        user: account?.username || account?.name || "unknown",
+        displayName: account?.name || null,
+        totalItems: cartList.length,
+        sources,
+        hasForgiati: sources.includes("FORGIATI"),
+        hasTubi: sources.includes("TUBI"),
+        hasOringHnbr: sources.includes("ORING-HNBR"),
+        hasOringNbr: sources.includes("ORING-NBR"),
+        items: cartList.map((item) => {
+          const values = editValues[item.key] || buildEditableState(item);
+          const isTubi = item.source === "TUBI";
+          const isForgiati = item.source === "FORGIATI";
+          return {
+            key: item.key,
+            itemId: item.itemId,
+            title: item.title,
+            source: item.source,
+            commessa: values.commessa ?? null,
+            giacenza: values.giacenza ?? values.giacenzaQt ?? values.giacenzaBib ?? null,
+            prenotazione: values.prenotazione ?? null,
+            note: values.note ?? null,
+            dataUltimoPrelievo: isTubi ? values.dataUltimoPrelievo ?? null : null,
+            giacenzaTuboIntero: isTubi ? values.giacenzaBib ?? null : null,
+            giacenzaContabMm: isTubi ? values.giacenzaContab ?? null : null,
+            dataPrelievo: isForgiati ? values.dataPrelievo ?? null : null,
+            giacenzaQt: isForgiati ? values.giacenzaQt ?? null : null,
+            giacenzaBarra: isForgiati ? values.giacenzaBarra ?? null : null,
+          };
+        }),
+        timestamp: new Date().toISOString(),
+      };
+
       setSaveStatus("success");
       setSaveMessage("Giacenza aggiornata con successo.");
+
+      try {
+        await flowService.invoke(flowPayload);
+      } catch (flowErr: any) {
+        console.error("Errore Power Automate", flowErr);
+        setSaveMessage(`Giacenza aggiornata; notifica Teams non inviata: ${flowErr?.message || "errore flow"}`);
+      }
     } catch (err: any) {
       console.error("Errore aggiornamento", err);
       setSaveStatus("error");
       setSaveMessage(err?.message || "Errore durante il salvataggio.");
     }
-  }, [cartList, editValues, forgiatiListId, oringHnbrListId, oringNbrListId, sharepointService, tubiListId]);
+  }, [accounts, cartList, editValues, flowService, forgiatiListId, oringHnbrListId, oringNbrListId, sharepointService, tubiListId]);
 
   const renderActivePanel = () => {
     const selectionProps: SelectionStateProps = {
