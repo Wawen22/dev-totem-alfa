@@ -134,6 +134,11 @@ const formatCellValue = (value: unknown, type?: "text" | "date" | "number") => {
   return String(value);
 };
 
+const formatLottoProg = (val: string | undefined | null) => {
+  const str = val ? String(val) : "";
+  return str ? str.toUpperCase() : "A";
+};
+
 function DateTimeWidget() {
   const [date, setDate] = useState(new Date());
 
@@ -653,10 +658,13 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                           const latest = sortedLots[0];
                           const moreCount = Math.max(0, sortedLots.length - 1);
                           const latestProg = latest ? forgiatiProgressiveMap.get(latest.id) || "a" : "a";
-                          const latestLabel = latest ? `${toStr((latest.fields as any).field_13) || "-"} (${latestProg})` : "-";
+                          const latestColata = latest ? toStr((latest.fields as any).field_13) || "-" : "-";
                           return (
                             <>
-                              <span className="pill ghost">{latestLabel}</span>
+                              <span className="pill ghost" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                <span>{latestColata}</span>
+                                <span className="lotto-chip">{formatLottoProg(latestProg)}</span>
+                              </span>
                               {moreCount > 0 && (
                                 <span className="pill ghost" style={{ fontSize: 11, padding: "2px 6px" }}>+{moreCount}</span>
                               )}
@@ -688,9 +696,9 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                 <table className="inventory-table">
                   <thead>
                     <tr>
-                      <th scope="col">N° COLATA</th>
                       <th scope="col">Ident. Lotto</th>
-                      <th scope="col">N° BOLLA</th>
+                      <th scope="col">N° COLATA</th>
+                      <th scope="col">N° ORDINE</th>
                       <th scope="col">Data ordine</th>
                       <th scope="col">Giacenza Q.tà</th>
                       <th scope="col" style={{ width: 140 }}></th>
@@ -704,9 +712,9 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                       const lotProg = forgiatiProgressiveMap.get(item.id) || "a";
                       return (
                         <tr key={item.id}>
+                          <td><span className="lotto-chip">{formatLottoProg(lotProg)}</span></td>
                           <td>{toStr((item.fields as any).field_13) || "-"}</td>
-                          <td>{lotProg}</td>
-                          <td>{toStr((item.fields as any).field_10) || "-"}</td>
+                          <td>{toStr((item.fields as any).field_1) || "-"}</td>
                           <td>{formatSharePointDate((item.fields as any).field_2)}</td>
                           <td>{toStr((item.fields as any).field_22) || "-"}</td>
                           <td>
@@ -1565,10 +1573,13 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                           const latest = sortedLots[0];
                           const moreCount = Math.max(0, sortedLots.length - 1);
                           const latestProg = latest ? tubiProgressiveMap.get(latest.id) || "a" : "a";
-                          const latestLabel = latest ? `${toStr((latest.fields as any).field_18) || "-"} (${latestProg})` : "-";
+                          const latestColata = latest ? toStr((latest.fields as any).field_18) || "-" : "-";
                           return (
                             <>
-                              <span className="pill ghost">{latestLabel}</span>
+                              <span className="pill ghost" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                <span>{latestColata}</span>
+                                <span className="lotto-chip">{formatLottoProg(latestProg)}</span>
+                              </span>
                               {moreCount > 0 && (
                                 <span className="pill ghost" style={{ fontSize: 11, padding: "2px 6px" }}>+{moreCount}</span>
                               )}
@@ -1600,9 +1611,9 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                 <table className="inventory-table">
                   <thead>
                     <tr>
-                      <th scope="col">N° COLATA</th>
                       <th scope="col">Ident. Lotto</th>
-                      <th scope="col">N° BOLLA</th>
+                      <th scope="col">N° COLATA</th>
+                      <th scope="col">N° ORDINE</th>
                       <th scope="col">DATA ORDINE</th>
                       <th scope="col">Giacenza Non Tagliato</th>
                       <th scope="col" style={{ width: 140 }}></th>
@@ -1616,9 +1627,9 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                       const lotProg = tubiProgressiveMap.get(item.id) || "a";
                       return (
                         <tr key={item.id}>
+                          <td><span className="lotto-chip">{formatLottoProg(lotProg)}</span></td>
                           <td>{toStr((item.fields as any).field_18) || "-"}</td>
-                          <td>{lotProg}</td>
-                          <td>{toStr((item.fields as any).field_15) || "-"}</td>
+                          <td>{toStr((item.fields as any).field_2) || "-"}</td>
                           <td>{formatSharePointDate((item.fields as any).field_3)}</td>
                           <td>{toStr((item.fields as any).field_20) || "-"}</td>
                           <td>
@@ -1819,6 +1830,7 @@ function StockUpdatePage({
                 { label: "Classe", value: raw["field_7"] },
                 { label: "Materiale", value: raw["field_9"] },
                 { label: "No. Disegno - Particolare", value: raw["field_8"] },
+                { label: "Codice SAM", value: raw["field_28"] },
               ]
             : isOring
             ? [
@@ -1882,7 +1894,9 @@ function StockUpdatePage({
                     <span className="bullet">•</span>
                     <span>{cardValues.colata ? `Colata ${cardValues.colata}` : "Colata -"}</span>
                     <span className="bullet">•</span>
-                    <span>{item.lottoProg ? `Ident. lotto ${item.lottoProg}` : "Ident. lotto a"}</span>
+                    <span>
+                      Ident. lotto <span className="lotto-chip">{formatLottoProg(item.lottoProg)}</span>
+                    </span>
                   </div>
                 </div>
               </div>
@@ -2216,6 +2230,14 @@ function AuthenticatedShell() {
   }, []);
 
   const cartList = useMemo(() => Object.values(cartItems), [cartItems]);
+
+  const getCartOrderNumber = (item: CartItem): string => {
+    const raw = (item.fields || {}) as Record<string, unknown>;
+    if (item.source === "FORGIATI") return toStr((raw as any).field_1);
+    if (item.source === "TUBI") return toStr((raw as any).field_2);
+    if (item.source === "ORING-HNBR") return toStr((raw as any).field_18);
+    return "";
+  };
 
   useEffect(() => {
     if (cartList.length > 0) {
@@ -2565,7 +2587,7 @@ function AuthenticatedShell() {
                     <tr>
                       <th scope="col">TIPO</th>
                       <th scope="col">ARTICOLO</th>
-                      <th scope="col">N° Bolla</th>
+                      <th scope="col">N° Ordine</th>
                       <th scope="col">Colata</th>
                       <th scope="col">Ident. Lotto</th>
                       <th scope="col" style={{ width: 64 }}></th>
@@ -2587,9 +2609,9 @@ function AuthenticatedShell() {
                       >
                         <td>{item.source}</td>
                         <td>{item.title || "-"}</td>
-                        <td>{item.bolla ? String(item.bolla) : "-"}</td>
+                        <td>{getCartOrderNumber(item) || "-"}</td>
                         <td>{item.colata ? String(item.colata) : "-"}</td>
-                        <td>{item.lottoProg ? String(item.lottoProg) : "a"}</td>
+                        <td><span className="lotto-chip">{formatLottoProg(item.lottoProg)}</span></td>
                         <td>
                           <button
                             className="icon-btn danger"
