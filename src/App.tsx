@@ -259,8 +259,13 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
     items: ForgiatoItem[];
   } | null>(null);
   const [newLotColata, setNewLotColata] = useState("");
+  const [newLotOrdine, setNewLotOrdine] = useState("");
+  const [newLotDataOrdine, setNewLotDataOrdine] = useState("");
   const [lotSaveStatus, setLotSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [lotSaveMessage, setLotSaveMessage] = useState<string | null>(null);
+  const QTA_RESET_VALUE = 0;
+  const GIACENZA_QTA_RESET_VALUE = 0;
+  const NOTE_RESET_VALUE = "";
 
   const service = useMemo(() => {
     if (!siteId) return null;
@@ -421,14 +426,44 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
   useEffect(() => {
     if (lotSelection) {
       setNewLotColata("");
+      const baseItem = lotSelection.items[0];
+      const baseFields = (baseItem?.fields || {}) as any;
+      setNewLotOrdine(toStr(baseFields?.field_1));
+      setNewLotDataOrdine(toInputDate(baseFields?.field_2));
       setLotSaveStatus("idle");
       setLotSaveMessage(null);
     }
   }, [lotSelection]);
 
-  const buildLotClonePayload = (item: ForgiatoItem, newColataValue: string) => {
+  const buildLotClonePayload = (
+    item: ForgiatoItem,
+    options: {
+      colata: string;
+      ordine?: string;
+      dataOrdine?: string | null;
+      qtaReset: number | string;
+      giacenzaQtReset: number | string;
+      noteReset: string;
+      dataConsegnaReset: string | null;
+    }
+  ) => {
+    const { colata, ordine, dataOrdine, qtaReset, giacenzaQtReset, noteReset, dataConsegnaReset } = options;
     const sourceFields = (item.fields || {}) as Record<string, unknown>;
     const payload: Record<string, unknown> = {};
+
+    const normalizeDateValue = (val: unknown): string | null => {
+      const t = getTimeValue(val);
+      if (!t) return null;
+      const iso = new Date(t).toISOString();
+      return iso;
+    };
+
+    const ordineValue = ordine !== undefined ? ordine : toStr((sourceFields as any).field_1);
+    const dataOrdineValue = dataOrdine !== undefined ? dataOrdine : normalizeDateValue((sourceFields as any).field_2);
+    const qtaValue = String(qtaReset);
+    const giacenzaQtValue = String(giacenzaQtReset);
+    const noteValue = noteReset;
+    const dataConsegnaValue = dataConsegnaReset !== undefined ? normalizeDateValue(dataConsegnaReset) : normalizeDateValue((sourceFields as any).field_11);
 
     Object.entries(sourceFields).forEach(([key, value]) => {
       if (
@@ -460,6 +495,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
         key === "_IsRecord" ||
         key === "_Level" ||
         key === "_Version" ||
+        key === "field_26" ||
         key.startsWith("LinkTitle") ||
         key.startsWith("_Compliance") ||
         key.startsWith("@") ||
@@ -469,7 +505,37 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
       }
 
       if (key === "field_13") {
-        payload[key] = newColataValue;
+        payload[key] = colata;
+        return;
+      }
+
+      if (key === "field_1") {
+        payload[key] = ordineValue;
+        return;
+      }
+
+      if (key === "field_2") {
+        payload[key] = dataOrdineValue;
+        return;
+      }
+
+      if (key === "field_5") {
+        payload[key] = qtaValue;
+        return;
+      }
+
+      if (key === "field_22") {
+        payload[key] = giacenzaQtValue;
+        return;
+      }
+
+      if (key === "field_25") {
+        payload[key] = noteValue;
+        return;
+      }
+
+      if (key === "field_11") {
+        // Skip - will be handled after if needed
         return;
       }
 
@@ -481,9 +547,21 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
       payload[key] = value;
     });
 
-    if (!("field_13" in payload)) {
-      payload.field_13 = newColataValue;
-    }
+    if (!("field_13" in payload)) payload.field_13 = colata;
+    if (!("field_1" in payload)) payload.field_1 = ordineValue;
+    if (!("field_2" in payload)) payload.field_2 = dataOrdineValue;
+    if (!("field_5" in payload)) payload.field_5 = qtaValue;
+    if (!("field_22" in payload)) payload.field_22 = giacenzaQtValue;
+    if (!("field_25" in payload)) payload.field_25 = noteValue;
+    // Omit field_11 (Data consegna) entirely - let SharePoint set default or null
+
+    // Remove null/undefined/empty string values to avoid SharePoint errors
+    Object.keys(payload).forEach((k) => {
+      const v = payload[k];
+      if (v === null || v === undefined || v === "") {
+        delete payload[k];
+      }
+    });
 
     return payload;
   };
@@ -510,7 +588,17 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
     setLotSaveStatus("saving");
     setLotSaveMessage(null);
     try {
-      const payload = buildLotClonePayload(baseItem, normalized);
+      const ordineOverride = newLotOrdine.trim();
+      const dataOrdineInput = newLotDataOrdine.trim();
+      const payload = buildLotClonePayload(baseItem, {
+        colata: normalized,
+        ordine: ordineOverride ? ordineOverride : undefined,
+        dataOrdine: dataOrdineInput ? toIsoOrNull(dataOrdineInput) : undefined,
+        qtaReset: QTA_RESET_VALUE,
+        giacenzaQtReset: GIACENZA_QTA_RESET_VALUE,
+        noteReset: NOTE_RESET_VALUE,
+        dataConsegnaReset: null,
+      });
       await service.createItem<Record<string, unknown>>(listId, payload);
       setLotSaveStatus("success");
       setLotSaveMessage("Nuovo lotto creato. Aggiorno la lista...");
@@ -755,6 +843,31 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                       setLotSaveMessage(null);
                     }}
                     placeholder="Inserisci un valore diverso dai lotti esistenti"
+                  />
+                </label>
+                <label className="field">
+                  <span>Nuovo N° ORDINE</span>
+                  <input
+                    type="text"
+                    value={newLotOrdine}
+                    onChange={(e) => {
+                      setNewLotOrdine(e.target.value);
+                      setLotSaveStatus("idle");
+                      setLotSaveMessage(null);
+                    }}
+                    placeholder="Facoltativo"
+                  />
+                </label>
+                <label className="field">
+                  <span>Data ordine</span>
+                  <input
+                    type="date"
+                    value={newLotDataOrdine}
+                    onChange={(e) => {
+                      setNewLotDataOrdine(e.target.value);
+                      setLotSaveStatus("idle");
+                      setLotSaveMessage(null);
+                    }}
                   />
                 </label>
                 <button
