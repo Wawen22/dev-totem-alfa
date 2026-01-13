@@ -1174,8 +1174,11 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
     items: TubiItem[];
   } | null>(null);
   const [newLotColata, setNewLotColata] = useState("");
+  const [newLotOrdine, setNewLotOrdine] = useState("");
+  const [newLotDataOrdine, setNewLotDataOrdine] = useState("");
   const [lotSaveStatus, setLotSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [lotSaveMessage, setLotSaveMessage] = useState<string | null>(null);
+  const GIACENZA_RESET_VALUE = 500;
 
   const service = useMemo(() => {
     if (!siteId) return null;
@@ -1334,14 +1337,33 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
   useEffect(() => {
     if (lotSelection) {
       setNewLotColata("");
+      const baseItem = lotSelection.items[0];
+      const baseFields = (baseItem?.fields || {}) as any;
+      setNewLotOrdine(toStr(baseFields?.field_2));
+      setNewLotDataOrdine(toInputDate(baseFields?.field_3));
       setLotSaveStatus("idle");
       setLotSaveMessage(null);
     }
   }, [lotSelection]);
 
-  const buildLotClonePayload = (item: TubiItem, newColataValue: string) => {
+  const buildLotClonePayload = (
+    item: TubiItem,
+    options: {
+      colata: string;
+      ordine?: string;
+      dataOrdine?: string | null;
+      giacenzaNonTagliato: number | string;
+      giacenzaContabile: number | string;
+    }
+  ) => {
+    const { colata, ordine, dataOrdine, giacenzaNonTagliato, giacenzaContabile } = options;
     const sourceFields = (item.fields || {}) as Record<string, unknown>;
     const payload: Record<string, unknown> = {};
+
+    const ordineValue = ordine !== undefined ? ordine : toStr((sourceFields as any).field_2);
+    const dataOrdineValue = dataOrdine !== undefined ? dataOrdine : (sourceFields as any).field_3;
+    const giacenzaContabValue = typeof (sourceFields as any).field_19 === "string" ? String(giacenzaContabile) : giacenzaContabile;
+    const giacenzaNonTagliatoValue = typeof (sourceFields as any).field_20 === "string" ? String(giacenzaNonTagliato) : giacenzaNonTagliato;
 
     Object.entries(sourceFields).forEach(([key, value]) => {
       if (
@@ -1382,7 +1404,27 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
       }
 
       if (key === "field_18") {
-        payload[key] = newColataValue;
+        payload[key] = colata;
+        return;
+      }
+
+      if (key === "field_2") {
+        payload[key] = ordineValue;
+        return;
+      }
+
+      if (key === "field_3") {
+        payload[key] = dataOrdineValue;
+        return;
+      }
+
+      if (key === "field_19") {
+        payload[key] = giacenzaContabValue;
+        return;
+      }
+
+      if (key === "field_20") {
+        payload[key] = giacenzaNonTagliatoValue;
         return;
       }
 
@@ -1394,9 +1436,11 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
       payload[key] = value;
     });
 
-    if (!("field_18" in payload)) {
-      payload.field_18 = newColataValue;
-    }
+    if (!("field_18" in payload)) payload.field_18 = colata;
+    if (!("field_2" in payload)) payload.field_2 = ordineValue;
+    if (!("field_3" in payload)) payload.field_3 = dataOrdineValue;
+    if (!("field_19" in payload)) payload.field_19 = giacenzaContabValue;
+    if (!("field_20" in payload)) payload.field_20 = giacenzaNonTagliatoValue;
 
     return payload;
   };
@@ -1423,7 +1467,15 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
     setLotSaveStatus("saving");
     setLotSaveMessage(null);
     try {
-      const payload = buildLotClonePayload(baseItem, normalized);
+      const ordineOverride = newLotOrdine.trim();
+      const dataOrdineInput = newLotDataOrdine.trim();
+      const payload = buildLotClonePayload(baseItem, {
+        colata: normalized,
+        ordine: ordineOverride ? ordineOverride : undefined,
+        dataOrdine: dataOrdineInput ? toIsoOrNull(dataOrdineInput) : undefined,
+        giacenzaNonTagliato: GIACENZA_RESET_VALUE,
+        giacenzaContabile: GIACENZA_RESET_VALUE,
+      });
       await service.createItem<Record<string, unknown>>(listId, payload);
       setLotSaveStatus("success");
       setLotSaveMessage("Nuovo lotto creato. Aggiorno la lista...");
@@ -1667,6 +1719,31 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                       setLotSaveMessage(null);
                     }}
                     placeholder="Inserisci un valore diverso dai lotti esistenti"
+                  />
+                </label>
+                <label className="field">
+                  <span>Nuovo N° ORDINE</span>
+                  <input
+                    type="text"
+                    value={newLotOrdine}
+                    onChange={(e) => {
+                      setNewLotOrdine(e.target.value);
+                      setLotSaveStatus("idle");
+                      setLotSaveMessage(null);
+                    }}
+                    placeholder="Facoltativo"
+                  />
+                </label>
+                <label className="field">
+                  <span>Data ordine</span>
+                  <input
+                    type="date"
+                    value={newLotDataOrdine}
+                    onChange={(e) => {
+                      setNewLotDataOrdine(e.target.value);
+                      setLotSaveStatus("idle");
+                      setLotSaveMessage(null);
+                    }}
                   />
                 </label>
                 <button
