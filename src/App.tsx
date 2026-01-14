@@ -828,7 +828,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
               <div className="section-heading" style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <span className="pill ghost">Nuovo lotto</span>
-                  <p className="muted" style={{ margin: "6px 0 0" }}>Duplico l&apos;articolo: cambia solo N° COLATA.</p>
+                  <p className="muted" style={{ margin: "6px 0 0" }}>Duplico l&apos;articolo</p>
                 </div>
               </div>
               <div className="field-grid" style={{ marginTop: 8, alignItems: "flex-end" }}>
@@ -1817,7 +1817,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
               <div className="section-heading" style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <span className="pill ghost">Nuovo lotto</span>
-                  <p className="muted" style={{ margin: "6px 0 0" }}>Duplico l&apos;articolo: cambia solo N° COLATA.</p>
+                  <p className="muted" style={{ margin: "6px 0 0" }}>Duplico l&apos;articolo</p>
                 </div>
               </div>
               <div className="field-grid" style={{ marginTop: 8, alignItems: "flex-end" }}>
