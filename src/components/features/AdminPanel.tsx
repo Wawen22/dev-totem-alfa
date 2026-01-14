@@ -53,7 +53,7 @@ const FORGIATI_FIELDS: FieldConfig[] = [
   { key: "field_19", label: "Anello - Disco" },
   { key: "field_20", label: "Grezzo - Sgrossato" },
   { key: "field_26", label: "Data/ora modifica" },
-  { key: "field_28", label: "Codice SAM" },
+  { key: "CodiceSAM", label: "Codice SAM" },
   { key: "LottoProgressivo", label: "Lotto Progressivo" },
 ];
 

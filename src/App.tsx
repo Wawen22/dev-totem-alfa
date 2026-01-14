@@ -2020,7 +2020,7 @@ function StockUpdatePage({
                 { label: "Classe", value: raw["field_7"] },
                 { label: "Materiale", value: raw["field_9"] },
                 { label: "No. Disegno - Particolare", value: raw["field_8"] },
-                { label: "Codice SAM", value: raw["field_28"] },
+                { label: "Codice SAM", value: raw["CodiceSAM"] },
               ]
             : isOring
             ? [

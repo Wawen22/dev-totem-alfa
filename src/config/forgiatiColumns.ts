@@ -34,5 +34,5 @@ export const forgiatiColumns: ForgiatoColumn[] = [
   { field: "field_24", label: "Commessa" },
   { field: "field_25", label: "Note" },
   { field: "field_26", label: "Data/ora modifica", type: "date" },
-  { field: "field_28", label: "Codice SAM" },
+  { field: "CodiceSAM", label: "Codice SAM" },
 ];
