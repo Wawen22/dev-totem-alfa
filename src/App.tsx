@@ -139,6 +139,42 @@ const formatLottoProg = (val: string | undefined | null) => {
   return str ? str.toUpperCase() : "A";
 };
 
+const getNextLottoProg = (items: Array<{ id: string }>, map: Map<string, string>, lastUsedLetter?: string | null) => {
+  let maxCode = 64; // one before 'A'
+  items.forEach((itm) => {
+    const currentProg = map.get(itm.id);
+    if (currentProg) {
+      const prog = formatLottoProg(currentProg);
+      const code = prog.charCodeAt(0);
+      if (code >= 65 && code <= 90 && code > maxCode) {
+        maxCode = code;
+      }
+    }
+  });
+  if (lastUsedLetter) {
+    const letterCode = formatLottoProg(lastUsedLetter).charCodeAt(0);
+    if (letterCode >= 65 && letterCode <= 90 && letterCode > maxCode) {
+      maxCode = letterCode;
+    }
+  }
+  const nextCode = Math.min(90, maxCode + 1);
+  return String.fromCharCode(nextCode < 65 ? 65 : nextCode);
+};
+
+const extractProgLetter = (val: string | undefined | null): string | null => {
+  if (!val) return null;
+  const match = String(val).trim().match(/[a-z]/i);
+  return match ? match[0] : null;
+};
+
+const buildColataPlaceholder = (lottoProg?: string | null) => {
+  const prefix = lottoProg ? `${formatLottoProg(lottoProg)}-` : "";
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `${prefix}${timestamp}`;
+};
+
 function DateTimeWidget() {
   const [date, setDate] = useState(new Date());
 
@@ -425,15 +461,16 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
 
   useEffect(() => {
     if (lotSelection) {
-      setNewLotColata("");
       const baseItem = lotSelection.items[0];
       const baseFields = (baseItem?.fields || {}) as any;
+      const nextProg = getNextLottoProg(lotSelection.items, forgiatiProgressiveMap);
+      setNewLotColata(buildColataPlaceholder(nextProg));
       setNewLotOrdine(toStr(baseFields?.field_1));
       setNewLotDataOrdine(toInputDate(baseFields?.field_2));
       setLotSaveStatus("idle");
       setLotSaveMessage(null);
     }
-  }, [lotSelection]);
+  }, [lotSelection, forgiatiProgressiveMap]);
 
   const buildLotClonePayload = (
     item: ForgiatoItem,
@@ -602,7 +639,8 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
       await service.createItem<Record<string, unknown>>(listId, payload);
       setLotSaveStatus("success");
       setLotSaveMessage("Nuovo lotto creato. Aggiorno la lista...");
-      setNewLotColata("");
+      const fallbackProg = getNextLottoProg(lotSelection.items, forgiatiProgressiveMap, extractProgLetter(normalized));
+      setNewLotColata(buildColataPlaceholder(fallbackProg));
       await refresh();
     } catch (err: any) {
       setLotSaveStatus("error");
@@ -1449,15 +1487,16 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
 
   useEffect(() => {
     if (lotSelection) {
-      setNewLotColata("");
       const baseItem = lotSelection.items[0];
       const baseFields = (baseItem?.fields || {}) as any;
+      const nextProg = getNextLottoProg(lotSelection.items, tubiProgressiveMap);
+      setNewLotColata(buildColataPlaceholder(nextProg));
       setNewLotOrdine(toStr(baseFields?.field_2));
       setNewLotDataOrdine(toInputDate(baseFields?.field_3));
       setLotSaveStatus("idle");
       setLotSaveMessage(null);
     }
-  }, [lotSelection]);
+  }, [lotSelection, tubiProgressiveMap]);
 
   const buildLotClonePayload = (
     item: TubiItem,
@@ -1592,7 +1631,8 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
       await service.createItem<Record<string, unknown>>(listId, payload);
       setLotSaveStatus("success");
       setLotSaveMessage("Nuovo lotto creato. Aggiorno la lista...");
-      setNewLotColata("");
+      const fallbackProg = getNextLottoProg(lotSelection.items, tubiProgressiveMap, extractProgLetter(normalized));
+      setNewLotColata(buildColataPlaceholder(fallbackProg));
       await refresh();
     } catch (err: any) {
       setLotSaveStatus("error");
