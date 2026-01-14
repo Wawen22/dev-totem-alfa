@@ -28,7 +28,7 @@ type AdminPanelProps = {
 const FORGIATI_FIELDS: FieldConfig[] = [
   { key: "Title", label: "Codice / Title", required: true, placeholder: "Es. FOR-001" },
   { key: "field_1", label: "N° Ordine" },
-  { key: "field_2", label: "Data Ordine" },
+  { key: "field_2", label: "Data Ordine", type: "date" },
   { key: "field_10", label: "N° Bolla" },
   { key: "field_13", label: "N° Colata" },
   { key: "field_24", label: "Commessa" },
@@ -61,7 +61,7 @@ const TUBI_FIELDS: FieldConfig[] = [
   { key: "Title", label: "Codice / Title", required: true, placeholder: "Es. TUB-001" },
   { key: "field_1", label: "TIPO" },
   { key: "field_2", label: "N° Ordine" },
-  { key: "field_3", label: "Data Ordine" },
+  { key: "field_3", label: "Data Ordine", type: "date" },
   { key: "field_4", label: "Fornitore" },
   { key: "field_5", label: "P." },
   { key: "field_6", label: "Q.tà" },
@@ -93,28 +93,27 @@ const toStr = (val: unknown): string => {
   return String(val);
 };
 
-const toInputDate = (val: unknown): string => {
-  if (val === null || val === undefined || val === "") return "";
-
-  // Accept already formatted yyyy-MM-dd
+const getTimeValue = (val: unknown): number => {
+  if (val === null || val === undefined) return 0;
+  if (typeof val === "number") {
+    // Excel serial
+    return (val - 25569) * 86400 * 1000;
+  }
   if (typeof val === "string") {
     const trimmed = val.trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-    const parsed = new Date(trimmed);
-    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+    if (/^\d+$/.test(trimmed)) {
+      const serial = Number(trimmed);
+      return (serial - 25569) * 86400 * 1000;
+    }
   }
-
-  // Handle numeric Excel serials
-  if (typeof val === "number" && Number.isFinite(val)) {
-    const ms = (val - 25569) * 86400 * 1000;
-    const parsed = new Date(ms);
-    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
-  }
-
-  // Fallback: attempt generic Date parse, else empty
   const parsed = new Date(val as any);
-  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
-  return "";
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
+const toInputDate = (val: unknown): string => {
+  const t = getTimeValue(val);
+  if (!t) return "";
+  return new Date(t).toISOString().slice(0, 10);
 };
 
 const toIsoOrNull = (val?: string): string | null => {
@@ -209,21 +208,32 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId }: AdminPanelPro
   const activeRefresh = activeList === "FORGIATI" ? refreshForgiati : refreshTubi;
   const fieldSet = getFieldSet(activeList);
 
+  const sortedItems = useMemo(() => {
+    const items = [...activeItems];
+    const dateKey = activeList === "FORGIATI" ? "field_2" : "field_3";
+    items.sort(
+      (a, b) =>
+        getTimeValue((b.fields as Record<string, unknown>)[dateKey]) -
+        getTimeValue((a.fields as Record<string, unknown>)[dateKey])
+    );
+    return items;
+  }, [activeItems, activeList]);
+
   const filteredItems = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return activeItems;
-    return activeItems.filter((item) => {
+    if (!term) return sortedItems;
+    return sortedItems.filter((item) => {
       const fields = item.fields as Record<string, unknown>;
       const title = toStr(fields.Title).toLowerCase();
       const bolla = toStr(fields[activeList === "FORGIATI" ? "field_10" : "field_15"]).toLowerCase();
       const colata = toStr(fields[activeList === "FORGIATI" ? "field_13" : "field_18"]).toLowerCase();
       return title.includes(term) || bolla.includes(term) || colata.includes(term);
     });
-  }, [activeItems, search, activeList]);
+  }, [sortedItems, search, activeList]);
 
   useEffect(() => {
     setPage(1);
-  }, [search, activeList, activeItems.length]);
+  }, [search, activeList, sortedItems.length]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
   const currentPage = Math.min(page, totalPages);
