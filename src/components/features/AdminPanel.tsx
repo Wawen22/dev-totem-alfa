@@ -15,6 +15,7 @@ type FieldConfig = {
   type?: FieldType;
   required?: boolean;
   placeholder?: string;
+  writable?: boolean; // false -> visualizzato ma non inviato a SharePoint
 };
 
 type FormState = Record<string, string>;
@@ -52,9 +53,9 @@ const FORGIATI_FIELDS: FieldConfig[] = [
   { key: "field_18", label: "H Altez. (mm)" },
   { key: "field_19", label: "Anello - Disco" },
   { key: "field_20", label: "Grezzo - Sgrossato" },
-  { key: "field_26", label: "Data/ora modifica" },
+  { key: "field_26", label: "Data/ora modifica", type: "date", writable: false },
   { key: "CodiceSAM", label: "Codice SAM" },
-  { key: "LottoProgressivo", label: "Lotto Progressivo" },
+  { key: "LottoProgressivo", label: "Lotto Progressivo", writable: false },
 ];
 
 const TUBI_FIELDS: FieldConfig[] = [
@@ -83,9 +84,9 @@ const TUBI_FIELDS: FieldConfig[] = [
   { key: "field_22", label: "Prezzo kg/mt" },
   { key: "field_23", label: "Prezzo metro" },
   { key: "field_24", label: "Acquistato dal Curatore" },
-  { key: "field_26", label: "Esubero" },
+  { key: "field_26", label: "Esubero", writable: false },
   { key: "field_27", label: "RITARDO" },
-  { key: "LottoProgressivo", label: "Lotto Progressivo" },
+  { key: "LottoProgressivo", label: "Lotto Progressivo", writable: false },
 ];
 
 const toStr = (val: unknown): string => {
@@ -147,6 +148,7 @@ const buildFormFromItem = (
 const normalizePayload = (form: FormState, fields: FieldConfig[]): Record<string, unknown> => {
   const payload: Record<string, unknown> = {};
   fields.forEach((field) => {
+    if (field.writable === false) return;
     const raw = form[field.key];
     if (field.type === "number") {
       payload[field.key] = toNumberOrNull(raw);
@@ -350,6 +352,7 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId }: AdminPanelPro
       value: form[field.key] ?? "",
       onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(field.key, e.target.value),
       placeholder: field.placeholder,
+      disabled: field.writable === false,
     };
 
     if (field.type === "textarea") {
