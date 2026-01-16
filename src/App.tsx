@@ -2741,6 +2741,8 @@ function AuthenticatedShell() {
               siteId={siteId}
               forgiatiListId={forgiatiListId}
               tubiListId={tubiListId}
+              oringHnbrListId={oringHnbrListId}
+              oringNbrListId={oringNbrListId}
             />
           </main>
         </div>

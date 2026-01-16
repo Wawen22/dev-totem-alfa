@@ -5,7 +5,7 @@ import { useCachedList } from "../../hooks/useCachedList";
 import { formatSharePointDate } from "../../utils/dateUtils";
 import { SharePointListItem } from "../../types/sharepoint";
 
-type ListKind = "FORGIATI" | "TUBI";
+type ListKind = "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR";
 
 type FieldType = "text" | "number" | "date" | "textarea";
 
@@ -24,6 +24,8 @@ type AdminPanelProps = {
   siteId?: string;
   forgiatiListId?: string;
   tubiListId?: string;
+  oringHnbrListId?: string;
+  oringNbrListId?: string;
 };
 
 const FORGIATI_FIELDS: FieldConfig[] = [
@@ -87,6 +89,50 @@ const TUBI_FIELDS: FieldConfig[] = [
   { key: "field_26", label: "Esubero", writable: false },
   { key: "field_27", label: "RITARDO" },
   { key: "LottoProgressivo", label: "Lotto Progressivo", writable: false },
+];
+
+const ORING_HNBR_FIELDS: FieldConfig[] = [
+  { key: "Title", label: "Codice / Title", required: true, placeholder: "Es. ORH-001" },
+  { key: "field_0", label: "Posizione" },
+  { key: "field_2", label: "Codice cliente" },
+  { key: "field_3", label: "Colore Mescola" },
+  { key: "field_4", label: "Ø Int." },
+  { key: "field_5", label: "Ø Est." },
+  { key: "field_6", label: "Ø Corda" },
+  { key: "field_7", label: "Materiale" },
+  { key: "field_8", label: "Durezza" },
+  { key: "field_9", label: "FLUIDI" },
+  { key: "field_10", label: "Colonna1" },
+  { key: "field_11", label: "Colonna2" },
+  { key: "field_12", label: "Commessa" },
+  { key: "field_13", label: "Design temperature" },
+  { key: "field_14", label: "Prezzo unitario" },
+  { key: "field_15", label: "Giacenza", type: "number" },
+  { key: "field_16", label: "Prenotazione", type: "number" },
+  { key: "field_17", label: "Data prelievo", type: "date" },
+  { key: "field_18", label: "NR Ordine" },
+  { key: "field_19", label: "Data ordine", type: "date" },
+];
+
+const ORING_NBR_FIELDS: FieldConfig[] = [
+  { key: "Title", label: "Codice / Title", required: true, placeholder: "Es. ORN-001" },
+  { key: "field_1", label: "Codice cliente" },
+  { key: "field_2", label: "Colore Mescola" },
+  { key: "field_3", label: "Ø Int." },
+  { key: "field_4", label: "Ø Est." },
+  { key: "field_5", label: "Ø Corda" },
+  { key: "field_6", label: "Materiale" },
+  { key: "field_7", label: "Durezza" },
+  { key: "field_8", label: "Fluidi" },
+  { key: "field_9", label: "Colonna1" },
+  { key: "field_10", label: "Colonna2" },
+  { key: "field_11", label: "Commessa" },
+  { key: "field_12", label: "Design temperature" },
+  { key: "field_13", label: "Prezzo unitario" },
+  { key: "field_14", label: "Q.tà minima" },
+  { key: "field_15", label: "Prenotazione", type: "number" },
+  { key: "field_16", label: "Giacenza", type: "number" },
+  { key: "field_17", label: "Data prelievo", type: "date" },
 ];
 
 const toStr = (val: unknown): string => {
@@ -167,9 +213,71 @@ const normalizePayload = (form: FormState, fields: FieldConfig[]): Record<string
   return payload;
 };
 
-const getFieldSet = (kind: ListKind) => (kind === "FORGIATI" ? FORGIATI_FIELDS : TUBI_FIELDS);
+const LIST_OPTIONS: { kind: ListKind; label: string }[] = [
+  { kind: "FORGIATI", label: "1_FORGIATI" },
+  { kind: "ORING-HNBR", label: "2_ORING-HNBR" },
+  { kind: "ORING-NBR", label: "2_ORING-NBR" },
+  { kind: "TUBI", label: "3_TUBI" },
+];
 
-export function AdminPanel({ siteId, forgiatiListId, tubiListId }: AdminPanelProps) {
+const getFieldSet = (kind: ListKind) => {
+  if (kind === "FORGIATI") return FORGIATI_FIELDS;
+  if (kind === "TUBI") return TUBI_FIELDS;
+  if (kind === "ORING-HNBR") return ORING_HNBR_FIELDS;
+  return ORING_NBR_FIELDS;
+};
+
+const getListNoun = (kind: ListKind) => {
+  if (kind === "FORGIATI") return "forgiato";
+  if (kind === "TUBI") return "tubo";
+  if (kind === "ORING-HNBR") return "oring HNBR";
+  return "oring NBR";
+};
+
+const getSortDateKey = (kind: ListKind) => {
+  if (kind === "FORGIATI") return "field_2";
+  if (kind === "TUBI") return "field_3";
+  if (kind === "ORING-HNBR") return "field_19";
+  return "field_17";
+};
+
+const getSearchKeys = (kind: ListKind) => {
+  if (kind === "FORGIATI") return ["Title", "field_10", "field_13"];
+  if (kind === "TUBI") return ["Title", "field_15", "field_18"];
+  if (kind === "ORING-HNBR") return ["Title", "field_18", "field_12", "field_2"];
+  return ["Title", "field_11", "field_1"];
+};
+
+const getSummaryMeta = (kind: ListKind, fields: Record<string, unknown>) => {
+  if (kind === "FORGIATI") {
+    return [
+      { label: "Bolla", value: toStr(fields.field_10) || "-" },
+      { label: "Colata", value: toStr(fields.field_13) || "-" },
+      { label: "Giacenza", value: toStr(fields.field_22) || "-" },
+    ];
+  }
+  if (kind === "TUBI") {
+    return [
+      { label: "Bolla", value: toStr(fields.field_15) || "-" },
+      { label: "Colata", value: toStr(fields.field_18) || "-" },
+      { label: "Giacenza", value: toStr(fields.field_19) || "-" },
+    ];
+  }
+  if (kind === "ORING-HNBR") {
+    return [
+      { label: "Ordine", value: toStr(fields.field_18) || "-" },
+      { label: "Commessa", value: toStr(fields.field_12) || "-" },
+      { label: "Giacenza", value: toStr(fields.field_15) || "-" },
+    ];
+  }
+  return [
+    { label: "Commessa", value: toStr(fields.field_11) || "-" },
+    { label: "Prenotazione", value: toStr(fields.field_15) || "-" },
+    { label: "Giacenza", value: toStr(fields.field_16) || "-" },
+  ];
+};
+
+export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId, oringNbrListId }: AdminPanelProps) {
   const getClient = useAuthenticatedGraphClient();
 
   const service = useMemo(() => {
@@ -190,6 +298,20 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId }: AdminPanelPro
     "admin-tubi"
   );
 
+  const {
+    data: oringHnbrItems,
+    loading: oringHnbrLoading,
+    error: oringHnbrError,
+    refresh: refreshOringHnbr,
+  } = useCachedList<Record<string, unknown>>(service, oringHnbrListId, "admin-oring-hnbr");
+
+  const {
+    data: oringNbrItems,
+    loading: oringNbrLoading,
+    error: oringNbrError,
+    refresh: refreshOringNbr,
+  } = useCachedList<Record<string, unknown>>(service, oringNbrListId, "admin-oring-nbr");
+
   const [activeList, setActiveList] = useState<ListKind>("FORGIATI");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -203,16 +325,51 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId }: AdminPanelPro
   const [pageSize, setPageSize] = useState(50);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
-  const activeItems = activeList === "FORGIATI" ? forgiatiItems : tubiItems;
-  const activeLoading = activeList === "FORGIATI" ? forgiatiLoading : tubiLoading;
-  const activeError = activeList === "FORGIATI" ? forgiatiError : tubiError;
-  const activeListId = activeList === "FORGIATI" ? forgiatiListId : tubiListId;
-  const activeRefresh = activeList === "FORGIATI" ? refreshForgiati : refreshTubi;
+  const activeItems =
+    activeList === "FORGIATI"
+      ? forgiatiItems
+      : activeList === "TUBI"
+      ? tubiItems
+      : activeList === "ORING-HNBR"
+      ? oringHnbrItems
+      : oringNbrItems;
+  const activeLoading =
+    activeList === "FORGIATI"
+      ? forgiatiLoading
+      : activeList === "TUBI"
+      ? tubiLoading
+      : activeList === "ORING-HNBR"
+      ? oringHnbrLoading
+      : oringNbrLoading;
+  const activeError =
+    activeList === "FORGIATI"
+      ? forgiatiError
+      : activeList === "TUBI"
+      ? tubiError
+      : activeList === "ORING-HNBR"
+      ? oringHnbrError
+      : oringNbrError;
+  const activeListId =
+    activeList === "FORGIATI"
+      ? forgiatiListId
+      : activeList === "TUBI"
+      ? tubiListId
+      : activeList === "ORING-HNBR"
+      ? oringHnbrListId
+      : oringNbrListId;
+  const activeRefresh =
+    activeList === "FORGIATI"
+      ? refreshForgiati
+      : activeList === "TUBI"
+      ? refreshTubi
+      : activeList === "ORING-HNBR"
+      ? refreshOringHnbr
+      : refreshOringNbr;
   const fieldSet = getFieldSet(activeList);
 
   const sortedItems = useMemo(() => {
     const items = [...activeItems];
-    const dateKey = activeList === "FORGIATI" ? "field_2" : "field_3";
+    const dateKey = getSortDateKey(activeList);
     items.sort(
       (a, b) =>
         getTimeValue((b.fields as Record<string, unknown>)[dateKey]) -
@@ -226,10 +383,7 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId }: AdminPanelPro
     if (!term) return sortedItems;
     return sortedItems.filter((item) => {
       const fields = item.fields as Record<string, unknown>;
-      const title = toStr(fields.Title).toLowerCase();
-      const bolla = toStr(fields[activeList === "FORGIATI" ? "field_10" : "field_15"]).toLowerCase();
-      const colata = toStr(fields[activeList === "FORGIATI" ? "field_13" : "field_18"]).toLowerCase();
-      return title.includes(term) || bolla.includes(term) || colata.includes(term);
+      return getSearchKeys(activeList).some((key) => toStr(fields[key]).toLowerCase().includes(term));
     });
   }, [sortedItems, search, activeList]);
 
@@ -385,9 +539,7 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId }: AdminPanelPro
     const fields = item.fields as Record<string, unknown>;
     return {
       title: toStr(fields.Title) || "-",
-      bolla: toStr(fields[activeList === "FORGIATI" ? "field_10" : "field_15"]) || "-",
-      colata: toStr(fields[activeList === "FORGIATI" ? "field_13" : "field_18"]) || "-",
-      giacenza: toStr(fields[activeList === "FORGIATI" ? "field_22" : "field_19"]) || "-",
+      meta: getSummaryMeta(activeList, fields),
       modified:
         formatSharePointDate(fields.Modified) || formatSharePointDate(fields["field_26"] || fields["Modified"]),
     };
@@ -404,7 +556,7 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId }: AdminPanelPro
           </p>
           <h2 style={{ margin: 0 }}>Pannello Admin</h2>
           <p className="muted" style={{ marginTop: 6 }}>
-            Modifica o inserisci articoli di FORGIATI e TUBI senza uscire dal totem.
+            Modifica o inserisci articoli di FORGIATI, TUBI e ORING senza uscire dal totem.
           </p>
         </div>
         <div className="admin-header-actions">
@@ -418,14 +570,14 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId }: AdminPanelPro
       </div>
 
       <div className="admin-switch">
-        {(["FORGIATI", "TUBI"] as ListKind[]).map((kind) => (
+        {LIST_OPTIONS.map(({ kind, label }) => (
           <button
             key={kind}
             className={`admin-switch__btn ${activeList === kind ? "active" : ""}`}
             onClick={() => setActiveList(kind)}
             type="button"
           >
-            {kind === "FORGIATI" ? "1_FORGIATI" : "3_TUBI"}
+            {label}
           </button>
         ))}
       </div>
@@ -440,7 +592,7 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId }: AdminPanelPro
                 </span>
                 <input
                   type="search"
-                  placeholder="Cerca per codice, bolla o colata"
+                  placeholder="Cerca per codice o campi principali"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
@@ -514,9 +666,11 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId }: AdminPanelPro
                   >
                     <div className="admin-list-item__title">{summary.title}</div>
                     <div className="admin-list-item__meta">
-                      <span className="pill ghost">Bolla {summary.bolla}</span>
-                      <span className="pill ghost">Colata {summary.colata}</span>
-                      <span className="pill ghost">Giacenza {summary.giacenza}</span>
+                      {summary.meta.map((entry) => (
+                        <span key={entry.label} className="pill ghost">
+                          {entry.label} {entry.value}
+                        </span>
+                      ))}
                       {summary.modified && <span className="pill ghost">Mod. {summary.modified}</span>}
                     </div>
                   </button>
@@ -564,10 +718,10 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId }: AdminPanelPro
         <div className="modal-backdrop blur" role="dialog" aria-modal="true">
           <div className="modal" style={{ maxWidth: 900, width: "95%" }}>
             <div className="modal__header">
-              <div>
-                <p className="eyebrow" style={{ marginBottom: 4 }}>Inserisci nuovo articolo</p>
-                <h3 style={{ margin: 0 }}>Nuovo {activeList === "FORGIATI" ? "forgiato" : "tubo"}</h3>
-              </div>
+                <div>
+                  <p className="eyebrow" style={{ marginBottom: 4 }}>Inserisci nuovo articolo</p>
+                  <h3 style={{ margin: 0 }}>Nuovo {getListNoun(activeList)}</h3>
+                </div>
               <button className="icon-btn" aria-label="Chiudi" onClick={() => setIsCreateOpen(false)} type="button">✕</button>
             </div>
             <div className="modal__body">
