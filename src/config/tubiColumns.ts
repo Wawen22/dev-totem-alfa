@@ -2,6 +2,7 @@ import { ForgiatoColumn } from "./forgiatiColumns";
 
 export const tubiColumns: ForgiatoColumn[] = [
   { field: "Title", label: "Codice / Title", width: "200px" },
+  { field: "CodiceSAM", label: "Codice SAM" },
   { field: "field_1", label: "TIPO" },
   { field: "field_2", label: "N° ORDINE" },
   { field: "field_3", label: "DATA OD", type: "date" },

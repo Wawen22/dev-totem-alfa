@@ -297,6 +297,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
   const [newLotColata, setNewLotColata] = useState("");
   const [newLotOrdine, setNewLotOrdine] = useState("");
   const [newLotDataOrdine, setNewLotDataOrdine] = useState("");
+  const [newLotCodiceSam, setNewLotCodiceSam] = useState("");
   const [lotSaveStatus, setLotSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [lotSaveMessage, setLotSaveMessage] = useState<string | null>(null);
   const QTA_RESET_VALUE = 0;
@@ -461,12 +462,11 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
 
   useEffect(() => {
     if (lotSelection) {
-      const baseItem = lotSelection.items[0];
-      const baseFields = (baseItem?.fields || {}) as any;
       const nextProg = getNextLottoProg(lotSelection.items, forgiatiProgressiveMap);
       setNewLotColata(buildColataPlaceholder(nextProg));
-      setNewLotOrdine(toStr(baseFields?.field_1));
-      setNewLotDataOrdine(toInputDate(baseFields?.field_2));
+      setNewLotOrdine("");
+      setNewLotDataOrdine("");
+      setNewLotCodiceSam("");
       setLotSaveStatus("idle");
       setLotSaveMessage(null);
     }
@@ -478,13 +478,14 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
       colata: string;
       ordine?: string;
       dataOrdine?: string | null;
+      codiceSam?: string;
       qtaReset: number | string;
       giacenzaQtReset: number | string;
       noteReset: string;
       dataConsegnaReset: string | null;
     }
   ) => {
-    const { colata, ordine, dataOrdine, qtaReset, giacenzaQtReset, noteReset, dataConsegnaReset } = options;
+    const { colata, ordine, dataOrdine, codiceSam, qtaReset, giacenzaQtReset, noteReset, dataConsegnaReset } = options;
     const sourceFields = (item.fields || {}) as Record<string, unknown>;
     const payload: Record<string, unknown> = {};
 
@@ -495,11 +496,18 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
       return iso;
     };
 
+    const normalizeTextValue = (val: unknown): string | null => {
+      if (val === null || val === undefined) return null;
+      const trimmed = String(val).trim();
+      return trimmed ? trimmed : null;
+    };
+
     const ordineValue = ordine !== undefined ? ordine : toStr((sourceFields as any).field_1);
     const dataOrdineValue = dataOrdine !== undefined ? dataOrdine : normalizeDateValue((sourceFields as any).field_2);
     const qtaValue = String(qtaReset);
     const giacenzaQtValue = String(giacenzaQtReset);
     const noteValue = noteReset;
+    const codiceSamValue = normalizeTextValue(codiceSam);
     const dataConsegnaValue = dataConsegnaReset !== undefined ? normalizeDateValue(dataConsegnaReset) : normalizeDateValue((sourceFields as any).field_11);
 
     Object.entries(sourceFields).forEach(([key, value]) => {
@@ -571,6 +579,11 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
         return;
       }
 
+      if (key === "CodiceSAM") {
+        payload[key] = codiceSam !== undefined ? codiceSamValue : value;
+        return;
+      }
+
       if (key === "field_11") {
         // Skip - will be handled after if needed
         return;
@@ -629,8 +642,9 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
       const dataOrdineInput = newLotDataOrdine.trim();
       const payload = buildLotClonePayload(baseItem, {
         colata: normalized,
-        ordine: ordineOverride ? ordineOverride : undefined,
-        dataOrdine: dataOrdineInput ? toIsoOrNull(dataOrdineInput) : undefined,
+        ordine: ordineOverride,
+        dataOrdine: dataOrdineInput ? toIsoOrNull(dataOrdineInput) : null,
+        codiceSam: newLotCodiceSam.trim(),
         qtaReset: QTA_RESET_VALUE,
         giacenzaQtReset: GIACENZA_QTA_RESET_VALUE,
         noteReset: NOTE_RESET_VALUE,
@@ -641,6 +655,9 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
       setLotSaveMessage("Nuovo lotto creato. Aggiorno la lista...");
       const fallbackProg = getNextLottoProg(lotSelection.items, forgiatiProgressiveMap, extractProgLetter(normalized));
       setNewLotColata(buildColataPlaceholder(fallbackProg));
+      setNewLotOrdine("");
+      setNewLotDataOrdine("");
+      setNewLotCodiceSam("");
       await refresh();
     } catch (err: any) {
       setLotSaveStatus("error");
@@ -890,6 +907,19 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                     value={newLotOrdine}
                     onChange={(e) => {
                       setNewLotOrdine(e.target.value);
+                      setLotSaveStatus("idle");
+                      setLotSaveMessage(null);
+                    }}
+                    placeholder="Facoltativo"
+                  />
+                </label>
+                <label className="field">
+                  <span>Codice SAM</span>
+                  <input
+                    type="text"
+                    value={newLotCodiceSam}
+                    onChange={(e) => {
+                      setNewLotCodiceSam(e.target.value);
                       setLotSaveStatus("idle");
                       setLotSaveMessage(null);
                     }}
@@ -1327,6 +1357,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
   const [newLotColata, setNewLotColata] = useState("");
   const [newLotOrdine, setNewLotOrdine] = useState("");
   const [newLotDataOrdine, setNewLotDataOrdine] = useState("");
+  const [newLotCodiceSam, setNewLotCodiceSam] = useState("");
   const [lotSaveStatus, setLotSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [lotSaveMessage, setLotSaveMessage] = useState<string | null>(null);
   const GIACENZA_RESET_VALUE = 500;
@@ -1491,8 +1522,9 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
       const baseFields = (baseItem?.fields || {}) as any;
       const nextProg = getNextLottoProg(lotSelection.items, tubiProgressiveMap);
       setNewLotColata(buildColataPlaceholder(nextProg));
-      setNewLotOrdine(toStr(baseFields?.field_2));
+      setNewLotOrdine("");
       setNewLotDataOrdine(toInputDate(baseFields?.field_3));
+      setNewLotCodiceSam("");
       setLotSaveStatus("idle");
       setLotSaveMessage(null);
     }
@@ -1504,18 +1536,34 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
       colata: string;
       ordine?: string;
       dataOrdine?: string | null;
+      codiceSam?: string;
       giacenzaNonTagliato: number | string;
       giacenzaContabile: number | string;
     }
   ) => {
-    const { colata, ordine, dataOrdine, giacenzaNonTagliato, giacenzaContabile } = options;
+    const { colata, ordine, dataOrdine, codiceSam, giacenzaNonTagliato, giacenzaContabile } = options;
     const sourceFields = (item.fields || {}) as Record<string, unknown>;
     const payload: Record<string, unknown> = {};
 
-    const ordineValue = ordine !== undefined ? ordine : toStr((sourceFields as any).field_2);
-    const dataOrdineValue = dataOrdine !== undefined ? dataOrdine : (sourceFields as any).field_3;
-    const giacenzaContabValue = typeof (sourceFields as any).field_19 === "string" ? String(giacenzaContabile) : giacenzaContabile;
-    const giacenzaNonTagliatoValue = typeof (sourceFields as any).field_20 === "string" ? String(giacenzaNonTagliato) : giacenzaNonTagliato;
+    const normalizeDateValue = (val: unknown): string | null => {
+      const t = getTimeValue(val);
+      if (!t) return null;
+      return new Date(t).toISOString();
+    };
+
+    const normalizeTextValue = (val: unknown): string | null => {
+      if (val === null || val === undefined) return null;
+      const trimmed = String(val).trim();
+      return trimmed ? trimmed : null;
+    };
+
+    const ordineValue = normalizeTextValue(ordine !== undefined ? ordine : (sourceFields as any).field_2);
+    const dataOrdineValue = dataOrdine !== undefined ? dataOrdine : normalizeDateValue((sourceFields as any).field_3);
+    const dataConsegnaValue = normalizeDateValue((sourceFields as any).field_16);
+    const dataUltimoPrelievoValue = normalizeDateValue((sourceFields as any).field_21);
+    const codiceSamValue = normalizeTextValue(codiceSam);
+    const giacenzaContabValue = normalizeTextValue(giacenzaContabile);
+    const giacenzaNonTagliatoValue = normalizeTextValue(giacenzaNonTagliato);
 
     Object.entries(sourceFields).forEach(([key, value]) => {
       if (
@@ -1556,7 +1604,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
       }
 
       if (key === "field_18") {
-        payload[key] = colata;
+        payload[key] = normalizeTextValue(colata);
         return;
       }
 
@@ -1570,6 +1618,11 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
         return;
       }
 
+      if (key === "field_16") {
+        payload[key] = dataConsegnaValue;
+        return;
+      }
+
       if (key === "field_19") {
         payload[key] = giacenzaContabValue;
         return;
@@ -1580,19 +1633,30 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
         return;
       }
 
+      if (key === "field_21") {
+        payload[key] = dataUltimoPrelievoValue;
+        return;
+      }
+
+      if (key === "CodiceSAM") {
+        payload[key] = codiceSamValue;
+        return;
+      }
+
       if (key === "LottoProgressivo") {
         payload[key] = null;
         return;
       }
 
-      payload[key] = value;
+      payload[key] = normalizeTextValue(value);
     });
 
-    if (!("field_18" in payload)) payload.field_18 = colata;
+    if (!("field_18" in payload)) payload.field_18 = normalizeTextValue(colata);
     if (!("field_2" in payload)) payload.field_2 = ordineValue;
     if (!("field_3" in payload)) payload.field_3 = dataOrdineValue;
     if (!("field_19" in payload)) payload.field_19 = giacenzaContabValue;
     if (!("field_20" in payload)) payload.field_20 = giacenzaNonTagliatoValue;
+    if (!("CodiceSAM" in payload)) payload.CodiceSAM = null;
 
     return payload;
   };
@@ -1618,13 +1682,15 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
 
     setLotSaveStatus("saving");
     setLotSaveMessage(null);
+    let payload: Record<string, unknown> | null = null;
     try {
       const ordineOverride = newLotOrdine.trim();
       const dataOrdineInput = newLotDataOrdine.trim();
-      const payload = buildLotClonePayload(baseItem, {
+      payload = buildLotClonePayload(baseItem, {
         colata: normalized,
         ordine: ordineOverride ? ordineOverride : undefined,
         dataOrdine: dataOrdineInput ? toIsoOrNull(dataOrdineInput) : undefined,
+        codiceSam: newLotCodiceSam.trim() ? newLotCodiceSam : undefined,
         giacenzaNonTagliato: GIACENZA_RESET_VALUE,
         giacenzaContabile: GIACENZA_RESET_VALUE,
       });
@@ -1633,8 +1699,15 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
       setLotSaveMessage("Nuovo lotto creato. Aggiorno la lista...");
       const fallbackProg = getNextLottoProg(lotSelection.items, tubiProgressiveMap, extractProgLetter(normalized));
       setNewLotColata(buildColataPlaceholder(fallbackProg));
+      setNewLotOrdine("");
+      setNewLotCodiceSam("");
       await refresh();
     } catch (err: any) {
+      console.error("Errore creazione lotto TUBI", {
+        error: err,
+        listId,
+        payload,
+      });
       setLotSaveStatus("error");
       setLotSaveMessage(err?.message || "Errore durante la creazione del lotto.");
     }
@@ -1888,6 +1961,19 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                   />
                 </label>
                 <label className="field">
+                  <span>Codice SAM</span>
+                  <input
+                    type="text"
+                    value={newLotCodiceSam}
+                    onChange={(e) => {
+                      setNewLotCodiceSam(e.target.value);
+                      setLotSaveStatus("idle");
+                      setLotSaveMessage(null);
+                    }}
+                    placeholder="Facoltativo"
+                  />
+                </label>
+                <label className="field">
                   <span>Data ordine</span>
                   <input
                     type="date"
@@ -2090,6 +2176,7 @@ function StockUpdatePage({
               ]
             : [
                 { label: "N° Ordine", value: raw["field_2"] },
+                { label: "Codice SAM", value: raw["CodiceSAM"] },
                 { label: "Fornitore", value: raw["field_4"] },
                 { label: "DATA ORDINE", value: formatSharePointDate(raw["field_3"]) },
                 { label: "Q.tà", value: raw["field_6"] },
