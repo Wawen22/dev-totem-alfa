@@ -423,6 +423,28 @@ const findExcelRowIndex = (
   return null;
 };
 
+const findLastRowIndexByCodice = (
+  rows: Array<{ index: number; values: Array<Array<unknown>> }>,
+  excelColumns: string[],
+  codice: string,
+  getColumnIndex: (columns: string[], fieldKey: string) => number | null
+) => {
+  const titleIdx = getColumnIndex(excelColumns, "Title");
+  if (titleIdx === null) return null;
+  const targetCodice = normalizeExcelKey(codice || "");
+  let lastIndex: number | null = null;
+  rows.forEach((row) => {
+    const rowValues = row.values?.[0] || [];
+    const codiceVal = normalizeExcelKey(String(rowValues[titleIdx] ?? ""));
+    if (codiceVal === targetCodice) {
+      if (lastIndex === null || row.index > lastIndex) {
+        lastIndex = row.index;
+      }
+    }
+  });
+  return lastIndex;
+};
+
 const getNextLottoProg = (items: Array<{ id: string }>, map: Map<string, string>, lastUsedLetter?: string | null) => {
   let maxCode = 64; // one before 'A'
   items.forEach((itm) => {
@@ -956,6 +978,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
         try {
           const driveItem = await service.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
           const columns = await service.listWorkbookTableColumnsByItemId(driveItem.id, forgiatiExcelTable, resolvedDriveId || undefined);
+          const rows = await service.listWorkbookTableRowsByItemId(driveItem.id, forgiatiExcelTable, resolvedDriveId || undefined);
           const identIndex = getForgiatiExcelColumnIndex(columns, "IdentLotto");
           if (identIndex === null) {
             throw new Error("Colonna IdentLotto non trovata nella tabella Excel");
@@ -964,6 +987,9 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
             ...payload,
             IdentLotto: newLotProg,
           });
+          const codiceValue = toStr((baseItem.fields as any).Title) || toStr(payload.Title);
+          const insertAfter = findLastRowIndexByCodice(rows, columns, codiceValue, getForgiatiExcelColumnIndex);
+          const insertIndex = insertAfter !== null ? insertAfter + 1 : undefined;
           const sessionId = await service.createWorkbookSessionByItemId(
             driveItem.id,
             { persistChanges: true },
@@ -974,7 +1000,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
               driveItem.id,
               forgiatiExcelTable,
               rowValues,
-              { sessionId },
+              { sessionId, index: insertIndex },
               resolvedDriveId || undefined
             );
           } finally {
@@ -1920,8 +1946,8 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
 
     const ordineValue = normalizeTextValue(ordine !== undefined ? ordine : (sourceFields as any).field_2);
     const dataOrdineValue = dataOrdine !== undefined ? dataOrdine : normalizeDateValue((sourceFields as any).field_3);
-    const dataConsegnaValue = normalizeDateValue((sourceFields as any).field_16);
-    const dataUltimoPrelievoValue = normalizeDateValue((sourceFields as any).field_21);
+    const dataConsegnaValue = null;
+    const dataUltimoPrelievoValue = null;
     const codiceSamValue = normalizeTextValue(codiceSam);
     const giacenzaContabValue = normalizeTextValue(giacenzaContabile);
     const giacenzaNonTagliatoValue = normalizeTextValue(giacenzaNonTagliato);
@@ -2015,8 +2041,10 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
     if (!("field_18" in payload)) payload.field_18 = normalizeTextValue(colata);
     if (!("field_2" in payload)) payload.field_2 = ordineValue;
     if (!("field_3" in payload)) payload.field_3 = dataOrdineValue;
+    if (!("field_16" in payload)) payload.field_16 = dataConsegnaValue;
     if (!("field_19" in payload)) payload.field_19 = giacenzaContabValue;
     if (!("field_20" in payload)) payload.field_20 = giacenzaNonTagliatoValue;
+    if (!("field_21" in payload)) payload.field_21 = dataUltimoPrelievoValue;
     if (!("CodiceSAM" in payload)) payload.CodiceSAM = null;
 
     return payload;
@@ -2072,6 +2100,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
         try {
           const driveItem = await service.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
           const columns = await service.listWorkbookTableColumnsByItemId(driveItem.id, tubiExcelTable, resolvedDriveId || undefined);
+          const rows = await service.listWorkbookTableRowsByItemId(driveItem.id, tubiExcelTable, resolvedDriveId || undefined);
           const identIndex = getExcelColumnIndex(columns, "IdentLotto");
           if (identIndex === null) {
             throw new Error("Colonna IdentLotto non trovata nella tabella Excel");
@@ -2080,6 +2109,9 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
             ...payload,
             IdentLotto: newLotProg,
           });
+          const codiceValue = toStr((baseItem.fields as any).Title) || toStr(payload.Title);
+          const insertAfter = findLastRowIndexByCodice(rows, columns, codiceValue, getExcelColumnIndex);
+          const insertIndex = insertAfter !== null ? insertAfter + 1 : undefined;
           const sessionId = await service.createWorkbookSessionByItemId(
             driveItem.id,
             { persistChanges: true },
@@ -2090,7 +2122,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
               driveItem.id,
               tubiExcelTable,
               rowValues,
-              { sessionId },
+              { sessionId, index: insertIndex },
               resolvedDriveId || undefined
             );
           } finally {

@@ -255,7 +255,7 @@ export class SharePointService {
     itemId: string,
     tableName: string,
     values: Array<string | number | boolean | null>,
-    options: { sessionId?: string } = {},
+    options: { sessionId?: string; index?: number } = {},
     driveId?: string
   ): Promise<void> {
     if (!itemId) throw new Error("itemId mancante");
@@ -267,7 +267,11 @@ export class SharePointService {
     if (options.sessionId) {
       req = req.header("workbook-session-id", options.sessionId);
     }
-    await req.post({ values: [values] });
+    const body: { values: Array<Array<string | number | boolean | null>>; index?: number } = { values: [values] };
+    if (options.index !== undefined && Number.isFinite(options.index)) {
+      body.index = options.index;
+    }
+    await req.post(body);
   }
 
   async updateWorkbookRangeByAddress(
