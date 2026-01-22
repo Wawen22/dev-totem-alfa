@@ -203,10 +203,14 @@ const tubiExcelColumnFieldMap = (() => {
 
 const TUBI_DATE_FIELDS = new Set(["field_3", "field_16", "field_21", "Modified", "Created"]);
 
-const toExcelSerialDate = (val: unknown): number | "" => {
+const toExcelDateString = (val: unknown): string => {
   const t = getTimeValue(val);
   if (!t) return "";
-  return Math.round(t / 86400000 + 25569);
+  return new Date(t).toLocaleDateString("it-IT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 };
 
 const toExcelCellValueForDateFields = (
@@ -216,8 +220,7 @@ const toExcelCellValueForDateFields = (
 ): string | number | boolean | null => {
   if (!fieldKey) return "";
   if (dateFields.has(fieldKey)) {
-    const serial = toExcelSerialDate(value);
-    return serial === "" ? "" : serial;
+    return toExcelDateString(value);
   }
   if (value === null || value === undefined) return "";
   if (typeof value === "number" || typeof value === "boolean") return value;

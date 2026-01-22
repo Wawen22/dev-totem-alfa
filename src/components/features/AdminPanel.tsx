@@ -190,17 +190,20 @@ const normalizeExcelKey = (value: string) =>
 const TUBI_DATE_FIELDS = new Set(["field_3", "field_16", "field_21", "Modified", "Created"]);
 const FORGIATI_DATE_FIELDS = new Set(["field_2", "field_11", "field_23", "Modified", "Created"]);
 
-const toExcelSerialDate = (val: unknown): number | "" => {
+const toExcelDateString = (val: unknown): string => {
   const t = getTimeValue(val);
   if (!t) return "";
-  return Math.round(t / 86400000 + 25569);
+  return new Date(t).toLocaleDateString("it-IT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 };
 
 const toExcelCellValue = (fieldKey: string | null, value: unknown): string | number | boolean | null => {
   if (!fieldKey) return "";
   if (TUBI_DATE_FIELDS.has(fieldKey)) {
-    const serial = toExcelSerialDate(value);
-    return serial === "" ? "" : serial;
+    return toExcelDateString(value);
   }
   if (value === null || value === undefined) return "";
   if (typeof value === "number" || typeof value === "boolean") return value;
@@ -210,8 +213,7 @@ const toExcelCellValue = (fieldKey: string | null, value: unknown): string | num
 const toForgiatiExcelCellValue = (fieldKey: string | null, value: unknown): string | number | boolean | null => {
   if (!fieldKey) return "";
   if (FORGIATI_DATE_FIELDS.has(fieldKey)) {
-    const serial = toExcelSerialDate(value);
-    return serial === "" ? "" : serial;
+    return toExcelDateString(value);
   }
   if (value === null || value === undefined) return "";
   if (typeof value === "number" || typeof value === "boolean") return value;
