@@ -36,6 +36,8 @@ totem-alfa-app/
 - `VITE_CLIENT_ID`, `VITE_TENANT_ID`, `VITE_REDIRECT_URI`: dati registrazione SPA Entra ID.
 - `VITE_SHAREPOINT_SITE_ID`, `VITE_SHAREPOINT_SITE_URL`: sito SharePoint con le liste magazzino.
 - `VITE_FORGIATI_LIST_ID`, `VITE_ORING_HNBR_LIST_ID`, `VITE_ORING_NBR_LIST_ID`, `VITE_TUBI_LIST_ID`: GUID liste (fornisci almeno FORGIATI per partire).
+- `VITE_TUBI_EXCEL_PATH`, `VITE_TUBI_EXCEL_TABLE`: percorso del file Excel (relativo alla libreria) e nome tabella da aggiornare alla creazione lotto TUBI.
+- `VITE_TUBI_EXCEL_DRIVE_ID` o `VITE_TUBI_EXCEL_DRIVE_NAME`: opzionale, per puntare alla libreria corretta (es. `MAGAZZINO`).
 - `VITE_SETTINGS_LIST_ID`: opzionale, per salvare configurazioni runtime (modalità auth, feature flag).
 - `VITE_PA_FLOW_URL`: opzionale, endpoint Power Automate.
 - `VITE_ADMIN_EMAILS`, `VITE_ADMIN_GROUP_IDS`: opzionali per pannello admin futuro.

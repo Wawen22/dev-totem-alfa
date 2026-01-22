@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AuthenticatedTemplate, UnauthenticatedTemplate, useMsal, MsalProvider } from "@azure/msal-react";
 import { EventType, PublicClientApplication } from "@azure/msal-browser";
 import { msalConfig, loginRequest } from "./auth/authConfig";
@@ -137,6 +137,142 @@ const formatCellValue = (value: unknown, type?: "text" | "date" | "number") => {
 const formatLottoProg = (val: string | undefined | null) => {
   const str = val ? String(val) : "";
   return str ? str.toUpperCase() : "A";
+};
+
+const normalizeExcelKey = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+const buildExcelColumnFieldMap = (columns: ForgiatoColumn[]) => {
+  const map = new Map<string, string>();
+  columns.forEach((col) => {
+    map.set(normalizeExcelKey(col.field), col.field);
+    map.set(normalizeExcelKey(col.label), col.field);
+  });
+  return map;
+};
+
+const tubiExcelColumnFieldMap = (() => {
+  const map = buildExcelColumnFieldMap(tubiColumns);
+  map.set(normalizeExcelKey("CODICE"), "Title");
+  map.set(normalizeExcelKey("CODICE SAM"), "CodiceSAM");
+  map.set(normalizeExcelKey("NORDINE"), "field_2");
+  map.set(normalizeExcelKey("N ORDINE"), "field_2");
+  map.set(normalizeExcelKey("DATA OD"), "field_3");
+  map.set(normalizeExcelKey("DATA ORDINE"), "field_3");
+  map.set(normalizeExcelKey("FORNITORE"), "field_4");
+  map.set(normalizeExcelKey("PRODUTTORE"), "field_5");
+  map.set(normalizeExcelKey("QTA"), "field_6");
+  map.set(normalizeExcelKey("QTA."), "field_6");
+  map.set(normalizeExcelKey("LUNGH TUBO METRO"), "field_7");
+  map.set(normalizeExcelKey("LUNGH TUBO METRI"), "field_7");
+  map.set(normalizeExcelKey("LUNGH TUBO M"), "field_7");
+  map.set(normalizeExcelKey("DN"), "field_8");
+  map.set(normalizeExcelKey("DNMM"), "field_9");
+  map.set(normalizeExcelKey("DN MM"), "field_9");
+  map.set(normalizeExcelKey("SP"), "field_10");
+  map.set(normalizeExcelKey("GRADO"), "field_11");
+  map.set(normalizeExcelKey("PSL1PSL2"), "field_12");
+  map.set(normalizeExcelKey("PED"), "field_13");
+  map.set(normalizeExcelKey("HIC"), "field_14");
+  map.set(normalizeExcelKey("NBOLLA"), "field_15");
+  map.set(normalizeExcelKey("N BOLLA"), "field_15");
+  map.set(normalizeExcelKey("DATA CONSEGNA"), "field_16");
+  map.set(normalizeExcelKey("DATA CONSEGNA."), "field_16");
+  map.set(normalizeExcelKey("N CERT"), "field_17");
+  map.set(normalizeExcelKey("N CERT."), "field_17");
+  map.set(normalizeExcelKey("N COLATA"), "field_18");
+  map.set(normalizeExcelKey("GIACENZAMM PER CONTABILITA"), "field_19");
+  map.set(normalizeExcelKey("GIACENZAMM CONTABILE"), "field_19");
+  map.set(normalizeExcelKey("GIACENZAMM X GESTIONE MAGAZZINO"), "field_20");
+  map.set(normalizeExcelKey("GIACENZAMM NON TAGLIATO"), "field_20");
+  map.set(normalizeExcelKey("DATA ULTIMO PRELIEVO"), "field_21");
+  map.set(normalizeExcelKey("PREZZO KGMT"), "field_22");
+  map.set(normalizeExcelKey("PREZZO METRO"), "field_23");
+  map.set(normalizeExcelKey("ACQUISTATO DAL CURATORE"), "field_24");
+  map.set(normalizeExcelKey("NO COMMESSA"), "field_25");
+  map.set(normalizeExcelKey("N COMMESSA"), "field_25");
+  map.set(normalizeExcelKey("ESUBERO"), "field_26");
+  map.set(normalizeExcelKey("RITARDO"), "field_27");
+  map.set(normalizeExcelKey("IDENTLOTTO"), "IdentLotto");
+  map.set(normalizeExcelKey("IDENT LOTTO"), "IdentLotto");
+  map.set(normalizeExcelKey("LOTTO PROGRESSIVO"), "LottoProgressivo");
+  return map;
+})();
+
+const TUBI_DATE_FIELDS = new Set(["field_3", "field_16", "field_21", "Modified", "Created"]);
+
+const toExcelSerialDate = (val: unknown): number | "" => {
+  const t = getTimeValue(val);
+  if (!t) return "";
+  return Math.round(t / 86400000 + 25569);
+};
+
+const toExcelCellValue = (fieldKey: string | null, value: unknown): string | number | boolean | null => {
+  if (!fieldKey) return "";
+  if (TUBI_DATE_FIELDS.has(fieldKey)) {
+    const serial = toExcelSerialDate(value);
+    return serial === "" ? "" : serial;
+  }
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  return String(value);
+};
+
+const buildTubiExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
+  const fieldKeyLookup = new Map<string, string>();
+  Object.keys(fields).forEach((key) => {
+    fieldKeyLookup.set(normalizeExcelKey(key), key);
+  });
+
+  return excelColumns.map((columnName) => {
+    const normalized = normalizeExcelKey(columnName || "");
+    const fieldKey =
+      tubiExcelColumnFieldMap.get(normalized) || fieldKeyLookup.get(normalized) || null;
+    const rawValue = fieldKey ? fields[fieldKey] : null;
+    return toExcelCellValue(fieldKey, rawValue);
+  });
+};
+
+const getExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
+  const target = normalizeExcelKey(fieldKey);
+  for (let i = 0; i < excelColumns.length; i++) {
+    const normalized = normalizeExcelKey(excelColumns[i] || "");
+    const mapped = tubiExcelColumnFieldMap.get(normalized);
+    if (mapped && normalizeExcelKey(mapped) === target) {
+      return i;
+    }
+  }
+  return null;
+};
+
+const findExcelRowIndex = (
+  rows: Array<{ index: number; values: Array<Array<unknown>> }>,
+  excelColumns: string[],
+  options: { codice: string; identLotto: string }
+) => {
+  const titleIdx = getExcelColumnIndex(excelColumns, "Title");
+  const identIdx = getExcelColumnIndex(excelColumns, "IdentLotto");
+  if (titleIdx === null || identIdx === null) return null;
+
+  const targetCodice = normalizeExcelKey(options.codice || "");
+  const targetIdent = normalizeExcelKey(options.identLotto || "");
+
+  for (const row of rows) {
+    const rowValues = row.values?.[0] || [];
+    const codiceVal = normalizeExcelKey(String(rowValues[titleIdx] ?? ""));
+    const identValRaw = String(rowValues[identIdx] ?? "");
+    const identVal = normalizeExcelKey(identValRaw);
+    const identMatches =
+      identVal === targetIdent ||
+      (!identVal && targetIdent === "a");
+    if (codiceVal === targetCodice && identMatches) {
+      return row.index;
+    }
+  }
+
+  return null;
 };
 
 const getNextLottoProg = (items: Array<{ id: string }>, map: Map<string, string>, lastUsedLetter?: string | null) => {
@@ -1346,6 +1482,13 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
   const getClient = useAuthenticatedGraphClient();
   const siteId = import.meta.env.VITE_SHAREPOINT_SITE_ID;
   const listId = import.meta.env.VITE_TUBI_LIST_ID;
+  const tubiExcelPath = (import.meta.env.VITE_TUBI_EXCEL_PATH || "").trim();
+  const tubiExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
+  const tubiExcelFilename = (import.meta.env.VITE_SP_TUBI_FILENAME || import.meta.env.VITE_TUBI_EXCEL_FILE || "").trim();
+  const tubiExcelTable = (import.meta.env.VITE_TUBI_EXCEL_TABLE || "tblTUBI").trim();
+  const tubiExcelDriveIdEnv = (import.meta.env.VITE_TUBI_EXCEL_DRIVE_ID || "").trim();
+  const tubiExcelDriveNameEnv = (import.meta.env.VITE_TUBI_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
+  const tubiExcelDriveIdRef = useRef<string | null>(tubiExcelDriveIdEnv || null);
 
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -1694,10 +1837,75 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
         giacenzaNonTagliato: GIACENZA_RESET_VALUE,
         giacenzaContabile: GIACENZA_RESET_VALUE,
       });
+      const newLotProg = formatLottoProg(
+        getNextLottoProg(lotSelection.items, tubiProgressiveMap)
+      );
       await service.createItem<Record<string, unknown>>(listId, payload);
+      let excelError: string | null = null;
+      const resolvedPath = tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : "");
+      let resolvedDriveId = tubiExcelDriveIdRef.current;
+      if (!resolvedDriveId && tubiExcelDriveNameEnv) {
+        resolvedDriveId = await service.getDriveIdByName(tubiExcelDriveNameEnv);
+        tubiExcelDriveIdRef.current = resolvedDriveId;
+      }
+      if (!resolvedDriveId && tubiExcelDriveNameEnv) {
+        excelError = `Libreria "${tubiExcelDriveNameEnv}" non trovata`;
+      } else if (resolvedPath && tubiExcelTable) {
+        try {
+          const driveItem = await service.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
+          const columns = await service.listWorkbookTableColumnsByItemId(driveItem.id, tubiExcelTable, resolvedDriveId || undefined);
+          const identIndex = getExcelColumnIndex(columns, "IdentLotto");
+          if (identIndex === null) {
+            throw new Error("Colonna IdentLotto non trovata nella tabella Excel");
+          }
+          const rowValues = buildTubiExcelRow(columns, {
+            ...payload,
+            IdentLotto: newLotProg,
+          });
+          const sessionId = await service.createWorkbookSessionByItemId(
+            driveItem.id,
+            { persistChanges: true },
+            resolvedDriveId || undefined
+          );
+          try {
+            await service.appendWorkbookTableRowByItemId(
+              driveItem.id,
+              tubiExcelTable,
+              rowValues,
+              { sessionId },
+              resolvedDriveId || undefined
+            );
+          } finally {
+            try {
+              await service.closeWorkbookSessionByItemId(
+                driveItem.id,
+                sessionId,
+                resolvedDriveId || undefined
+              );
+            } catch (closeErr) {
+              console.warn("Errore chiusura sessione Excel TUBI", closeErr);
+            }
+          }
+        } catch (err: any) {
+          console.error("Errore aggiornamento Excel TUBI", {
+            error: err,
+            filePath: resolvedPath,
+            driveId: resolvedDriveId,
+            tableName: tubiExcelTable,
+            payload,
+          });
+          excelError = err?.message || "Errore aggiornamento Excel";
+        }
+      } else {
+        excelError = "Percorso Excel o tabella non configurati";
+      }
       setLotSaveStatus("success");
-      setLotSaveMessage("Nuovo lotto creato. Aggiorno la lista...");
-      const fallbackProg = getNextLottoProg(lotSelection.items, tubiProgressiveMap, extractProgLetter(normalized));
+      setLotSaveMessage(
+        excelError
+          ? `Nuovo lotto creato su SharePoint. Excel non aggiornato: ${excelError}`
+          : "Nuovo lotto creato e registrato su Excel. Aggiorno la lista..."
+      );
+      const fallbackProg = getNextLottoProg(lotSelection.items, tubiProgressiveMap);
       setNewLotColata(buildColataPlaceholder(fallbackProg));
       setNewLotOrdine("");
       setNewLotCodiceSam("");
@@ -2468,6 +2676,13 @@ function AuthenticatedShell() {
   const oringHnbrListId = import.meta.env.VITE_ORING_HNBR_LIST_ID;
   const oringNbrListId = import.meta.env.VITE_ORING_NBR_LIST_ID;
   const tubiListId = import.meta.env.VITE_TUBI_LIST_ID;
+  const tubiExcelPath = (import.meta.env.VITE_TUBI_EXCEL_PATH || "").trim();
+  const tubiExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
+  const tubiExcelFilename = (import.meta.env.VITE_SP_TUBI_FILENAME || import.meta.env.VITE_TUBI_EXCEL_FILE || "").trim();
+  const tubiExcelTable = (import.meta.env.VITE_TUBI_EXCEL_TABLE || "tblTUBI").trim();
+  const tubiExcelDriveIdEnv = (import.meta.env.VITE_TUBI_EXCEL_DRIVE_ID || "").trim();
+  const tubiExcelDriveNameEnv = (import.meta.env.VITE_TUBI_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
+  const tubiExcelDriveIdRef = useRef<string | null>(tubiExcelDriveIdEnv || null);
   const sharepointService = useMemo(() => {
     if (!siteId) return null;
     return new SharePointService(getClient, siteId);
@@ -2619,54 +2834,154 @@ function AuthenticatedShell() {
     setSaveMessage(null);
 
     try {
+      const updates = cartList.map((item) => {
+        const values = editValues[item.key] || buildEditableState(item);
+        const isForgiati = item.source === "FORGIATI";
+        const isOring = item.source === "ORING-HNBR";
+        const isOringNbr = item.source === "ORING-NBR";
+        const listId = isForgiati ? forgiatiListId : isOring ? oringHnbrListId : isOringNbr ? oringNbrListId : tubiListId;
+        if (!listId) {
+          throw new Error(`List ID non configurato per ${item.source}.`);
+        }
+
+        const contabSum = sumAdditiveExpression(values.giacenzaContab);
+
+        const payload = isForgiati
+          ? {
+              field_24: values.commessa ?? null,
+              field_23: toIsoOrNull(values.dataPrelievo),
+              field_22: toNumberOrNull(values.giacenzaQt),
+              field_25: values.note ?? null,
+              field_21: toNumberOrNull(values.giacenzaBarra),
+            }
+          : isOring
+          ? {
+              field_12: values.commessa ?? null,
+              field_15: toNumberOrNull(values.giacenza),
+              field_16: toNumberOrNull(values.prenotazione),
+              field_17: toIsoOrNull(values.dataPrelievo),
+              field_18: values.nrOrdine ?? null,
+              field_19: toIsoOrNull(values.dataOrdine),
+            }
+          : isOringNbr
+          ? {
+              field_11: values.commessa ?? null,
+              field_14: toNumberOrNull(values.qtaMinima),
+              field_16: toNumberOrNull(values.giacenza),
+              field_15: toNumberOrNull(values.prenotazione),
+              field_17: toIsoOrNull(values.dataPrelievo),
+            }
+          : {
+              field_21: toIsoOrNull(values.dataUltimoPrelievo),
+              field_25: values.commessa ?? null,
+              field_20: contabSum ?? toNumberOrNull(values.giacenzaBib),
+              field_19: values.giacenzaContab ?? null,
+            };
+
+        return { item, listId, values, payload };
+      });
+
       await Promise.all(
-        cartList.map((item) => {
-          const values = editValues[item.key] || buildEditableState(item);
-          const isForgiati = item.source === "FORGIATI";
-          const isOring = item.source === "ORING-HNBR";
-          const isOringNbr = item.source === "ORING-NBR";
-          const listId = isForgiati ? forgiatiListId : isOring ? oringHnbrListId : isOringNbr ? oringNbrListId : tubiListId;
-          if (!listId) {
-            throw new Error(`List ID non configurato per ${item.source}.`);
+        updates.map(({ item, listId, payload }) =>
+          sharepointService.updateItem<Record<string, unknown>>(listId, item.itemId, payload)
+        )
+      );
+
+      let excelUpdateError: string | null = null;
+      const tubiUpdates = updates.filter((update) => update.item.source === "TUBI");
+      if (tubiUpdates.length > 0) {
+        try {
+          const resolvedPath = tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : "");
+          let resolvedDriveId = tubiExcelDriveIdRef.current;
+          if (!resolvedDriveId && tubiExcelDriveNameEnv) {
+            resolvedDriveId = await sharepointService.getDriveIdByName(tubiExcelDriveNameEnv);
+            tubiExcelDriveIdRef.current = resolvedDriveId;
+          }
+          if (!resolvedDriveId && tubiExcelDriveNameEnv) {
+            throw new Error(`Libreria "${tubiExcelDriveNameEnv}" non trovata`);
+          }
+          if (!resolvedPath || !tubiExcelTable) {
+            throw new Error("Percorso Excel o tabella non configurati");
           }
 
-          const contabSum = sumAdditiveExpression(values.giacenzaContab);
+          const driveItem = await sharepointService.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
+          const columns = await sharepointService.listWorkbookTableColumnsByItemId(driveItem.id, tubiExcelTable, resolvedDriveId || undefined);
+          const codiceIndex = getExcelColumnIndex(columns, "Title");
+          const identIndex = getExcelColumnIndex(columns, "IdentLotto");
+          if (codiceIndex === null || identIndex === null) {
+            throw new Error("Colonne CODICE/IdentLotto non trovate nella tabella Excel");
+          }
+          const rows = await sharepointService.listWorkbookTableRowsByItemId(driveItem.id, tubiExcelTable, resolvedDriveId || undefined);
+          const sessionId = await sharepointService.createWorkbookSessionByItemId(
+            driveItem.id,
+            { persistChanges: true },
+            resolvedDriveId || undefined
+          );
+          const missing: string[] = [];
+          const targetCodici = new Set(tubiUpdates.map((update) => normalizeExcelKey(update.item.title)));
+          try {
+            for (const row of rows) {
+              const rowValues = row.values?.[0] || [];
+              const codiceVal = normalizeExcelKey(String(rowValues[codiceIndex] ?? ""));
+              if (!targetCodici.has(codiceVal)) continue;
+              const identVal = normalizeExcelKey(String(rowValues[identIndex] ?? ""));
+              if (identVal) continue;
+              const nextValues = [...rowValues];
+              nextValues[identIndex] = "A";
+              await sharepointService.updateWorkbookTableRowByIndex(
+                driveItem.id,
+                tubiExcelTable,
+                row.index,
+                nextValues as Array<string | number | boolean | null>,
+                { sessionId },
+                resolvedDriveId || undefined
+              );
+            }
+            for (const update of tubiUpdates) {
+              const identLotto = formatLottoProg(update.item.lottoProg);
+              const rowIndex = findExcelRowIndex(rows, columns, {
+                codice: update.item.title,
+                identLotto,
+              });
+              if (rowIndex === null) {
+                missing.push(`${update.item.title} (${identLotto})`);
+                continue;
+              }
+              const excelFields = {
+                ...(update.item.fields || {}),
+                ...update.payload,
+                IdentLotto: identLotto,
+              } as Record<string, unknown>;
+              const rowValues = buildTubiExcelRow(columns, excelFields);
+              await sharepointService.updateWorkbookTableRowByIndex(
+                driveItem.id,
+                tubiExcelTable,
+                rowIndex,
+                rowValues,
+                { sessionId },
+                resolvedDriveId || undefined
+              );
+            }
+          } finally {
+            try {
+              await sharepointService.closeWorkbookSessionByItemId(
+                driveItem.id,
+                sessionId,
+                resolvedDriveId || undefined
+              );
+            } catch (closeErr) {
+              console.warn("Errore chiusura sessione Excel TUBI", closeErr);
+            }
+          }
 
-          const payload = isForgiati
-            ? {
-                field_24: values.commessa ?? null,
-                field_23: toIsoOrNull(values.dataPrelievo),
-                field_22: toNumberOrNull(values.giacenzaQt),
-                field_25: values.note ?? null,
-                field_21: toNumberOrNull(values.giacenzaBarra),
-              }
-            : isOring
-            ? {
-                field_12: values.commessa ?? null,
-                field_15: toNumberOrNull(values.giacenza),
-                field_16: toNumberOrNull(values.prenotazione),
-                field_17: toIsoOrNull(values.dataPrelievo),
-                field_18: values.nrOrdine ?? null,
-                field_19: toIsoOrNull(values.dataOrdine),
-              }
-            : isOringNbr
-            ? {
-                field_11: values.commessa ?? null,
-                field_14: toNumberOrNull(values.qtaMinima),
-                field_16: toNumberOrNull(values.giacenza),
-                field_15: toNumberOrNull(values.prenotazione),
-                field_17: toIsoOrNull(values.dataPrelievo),
-              }
-            : {
-                field_21: toIsoOrNull(values.dataUltimoPrelievo),
-                field_25: values.commessa ?? null,
-                field_20: contabSum ?? toNumberOrNull(values.giacenzaBib),
-                field_19: values.giacenzaContab ?? null,
-              };
-
-          return sharepointService.updateItem<Record<string, unknown>>(listId, item.itemId, payload);
-        })
-      );
+          if (missing.length > 0) {
+            throw new Error(`Righe non trovate: ${missing.join(", ")}`);
+          }
+        } catch (excelErr: any) {
+          console.error("Errore aggiornamento Excel TUBI", excelErr);
+          excelUpdateError = excelErr?.message || "Errore aggiornamento Excel";
+        }
+      }
 
       const account = accounts[0];
       const sources = Array.from(new Set(cartList.map((i) => i.source)));
@@ -2704,14 +3019,17 @@ function AuthenticatedShell() {
         timestamp: new Date().toISOString(),
       };
 
+      const baseMessage = excelUpdateError
+        ? `Giacenza aggiornata; Excel non aggiornato: ${excelUpdateError}`
+        : "Giacenza aggiornata con successo.";
       setSaveStatus("success");
-      setSaveMessage("Giacenza aggiornata con successo.");
+      setSaveMessage(baseMessage);
 
       try {
         await flowService.invoke(flowPayload);
       } catch (flowErr: any) {
         console.error("Errore Power Automate", flowErr);
-        setSaveMessage(`Giacenza aggiornata; notifica Teams non inviata: ${flowErr?.message || "errore flow"}`);
+        setSaveMessage(`${baseMessage}; notifica Teams non inviata: ${flowErr?.message || "errore flow"}`);
       }
     } catch (err: any) {
       console.error("Errore aggiornamento", err);
