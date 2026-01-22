@@ -209,9 +209,13 @@ const toExcelSerialDate = (val: unknown): number | "" => {
   return Math.round(t / 86400000 + 25569);
 };
 
-const toExcelCellValue = (fieldKey: string | null, value: unknown): string | number | boolean | null => {
+const toExcelCellValueForDateFields = (
+  dateFields: Set<string>,
+  fieldKey: string | null,
+  value: unknown
+): string | number | boolean | null => {
   if (!fieldKey) return "";
-  if (TUBI_DATE_FIELDS.has(fieldKey)) {
+  if (dateFields.has(fieldKey)) {
     const serial = toExcelSerialDate(value);
     return serial === "" ? "" : serial;
   }
@@ -231,8 +235,149 @@ const buildTubiExcelRow = (excelColumns: string[], fields: Record<string, unknow
     const fieldKey =
       tubiExcelColumnFieldMap.get(normalized) || fieldKeyLookup.get(normalized) || null;
     const rawValue = fieldKey ? fields[fieldKey] : null;
-    return toExcelCellValue(fieldKey, rawValue);
+    return toExcelCellValueForDateFields(TUBI_DATE_FIELDS, fieldKey, rawValue);
   });
+};
+
+const forgiatiExcelColumnFieldMap = (() => {
+  const map = buildExcelColumnFieldMap(forgiatiColumns);
+  map.set(normalizeExcelKey("CODICE"), "Title");
+  map.set(normalizeExcelKey("CODICE SAM"), "CodiceSAM");
+  map.set(normalizeExcelKey("NORDINE"), "field_1");
+  map.set(normalizeExcelKey("N ORDINE"), "field_1");
+  map.set(normalizeExcelKey("DATA ORD"), "field_2");
+  map.set(normalizeExcelKey("DATA ORDINE"), "field_2");
+  map.set(normalizeExcelKey("FORNITORE"), "field_3");
+  map.set(normalizeExcelKey("POS"), "field_4");
+  map.set(normalizeExcelKey("QTA"), "field_5");
+  map.set(normalizeExcelKey("QTA."), "field_5");
+  map.set(normalizeExcelKey("DN"), "field_6");
+  map.set(normalizeExcelKey("CLASSE"), "field_7");
+  map.set(normalizeExcelKey("NO DISEGNO PARTICOLARE"), "field_8");
+  map.set(normalizeExcelKey("NO. DISEGNO - PARTICOLARE"), "field_8");
+  map.set(normalizeExcelKey("GRADO MATERIALE"), "field_9");
+  map.set(normalizeExcelKey("N BOLLA"), "field_10");
+  map.set(normalizeExcelKey("N BOLLA."), "field_10");
+  map.set(normalizeExcelKey("DATA CONSEGNA"), "field_11");
+  map.set(normalizeExcelKey("N CERT"), "field_12");
+  map.set(normalizeExcelKey("N CERT."), "field_12");
+  map.set(normalizeExcelKey("N COLATA"), "field_13");
+  map.set(normalizeExcelKey("TIPO CERTIFICAZIONE"), "field_14");
+  map.set(normalizeExcelKey("PREZ C D"), "field_15");
+  map.set(normalizeExcelKey("PREZ C/D"), "field_15");
+  map.set(normalizeExcelKey("Ø EST MM"), "field_16");
+  map.set(normalizeExcelKey("O EST MM"), "field_16");
+  map.set(normalizeExcelKey("Ø INT MM"), "field_17");
+  map.set(normalizeExcelKey("O INT MM"), "field_17");
+  map.set(normalizeExcelKey("H ALTEZ MM"), "field_18");
+  map.set(normalizeExcelKey("ANELLO DISCO"), "field_19");
+  map.set(normalizeExcelKey("GREZZO SGROSSATO"), "field_20");
+  map.set(normalizeExcelKey("GIACENZA MM LUNGHEZZA DA BARRA"), "field_21");
+  map.set(normalizeExcelKey("GIACENZA QTA"), "field_22");
+  map.set(normalizeExcelKey("GIACENZA Q.TA"), "field_22");
+  map.set(normalizeExcelKey("DATA PRELIEVO"), "field_23");
+  map.set(normalizeExcelKey("COMMESSA"), "field_24");
+  map.set(normalizeExcelKey("NOTE"), "field_25");
+  map.set(normalizeExcelKey("IDENTLOTTO"), "IdentLotto");
+  map.set(normalizeExcelKey("IDENT LOTTO"), "IdentLotto");
+  map.set(normalizeExcelKey("LOTTO PROGRESSIVO"), "LottoProgressivo");
+  return map;
+})();
+
+const FORGIATI_DATE_FIELDS = new Set(["field_2", "field_11", "field_23", "Modified", "Created"]);
+
+const buildForgiatiExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
+  const fieldKeyLookup = new Map<string, string>();
+  Object.keys(fields).forEach((key) => {
+    fieldKeyLookup.set(normalizeExcelKey(key), key);
+  });
+
+  return excelColumns.map((columnName) => {
+    const normalized = normalizeExcelKey(columnName || "");
+    const fieldKey =
+      forgiatiExcelColumnFieldMap.get(normalized) || fieldKeyLookup.get(normalized) || null;
+    const rawValue = fieldKey ? fields[fieldKey] : null;
+    return toExcelCellValueForDateFields(FORGIATI_DATE_FIELDS, fieldKey, rawValue);
+  });
+};
+
+const getForgiatiExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
+  const target = normalizeExcelKey(fieldKey);
+  for (let i = 0; i < excelColumns.length; i++) {
+    const normalized = normalizeExcelKey(excelColumns[i] || "");
+    const mapped = forgiatiExcelColumnFieldMap.get(normalized);
+    if (mapped && normalizeExcelKey(mapped) === target) {
+      return i;
+    }
+  }
+  return null;
+};
+
+const findForgiatiExcelRowIndex = (
+  rows: Array<{ index: number; values: Array<Array<unknown>> }>,
+  excelColumns: string[],
+  options: { codice: string; identLotto: string }
+) => {
+  const titleIdx = getForgiatiExcelColumnIndex(excelColumns, "Title");
+  const identIdx = getForgiatiExcelColumnIndex(excelColumns, "IdentLotto");
+  if (titleIdx === null || identIdx === null) return null;
+
+  const targetCodice = normalizeExcelKey(options.codice || "");
+  const targetIdent = normalizeExcelKey(options.identLotto || "");
+
+  for (const row of rows) {
+    const rowValues = row.values?.[0] || [];
+    const codiceVal = normalizeExcelKey(String(rowValues[titleIdx] ?? ""));
+    const identValRaw = String(rowValues[identIdx] ?? "");
+    const identVal = normalizeExcelKey(identValRaw);
+    const identMatches =
+      identVal === targetIdent ||
+      (!identVal && targetIdent === "a");
+    if (codiceVal === targetCodice && identMatches) {
+      return row.index;
+    }
+  }
+
+  return null;
+};
+
+const parseExcelAddress = (address: string) => {
+  const [sheetPartRaw, rangePartRaw] = address.split("!");
+  const sheetPart = sheetPartRaw || "";
+  const rangePart = rangePartRaw || "";
+  const sheetName = sheetPart.replace(/^'+|'+$/g, "");
+  const [startCellRaw, endCellRaw] = rangePart.split(":");
+  const parseCell = (cell: string) => {
+    const match = cell.match(/^([A-Z]+)(\d+)$/i);
+    if (!match) return null;
+    return { col: match[1].toUpperCase(), row: Number(match[2]) };
+  };
+  const startCell = parseCell(startCellRaw || "");
+  const endCell = parseCell(endCellRaw || startCellRaw || "");
+  if (!startCell) return null;
+  return {
+    sheetName,
+    startCol: startCell.col,
+    startRow: startCell.row,
+    endCol: endCell ? endCell.col : startCell.col,
+    endRow: endCell ? endCell.row : startCell.row,
+  };
+};
+
+const buildRowRangeAddress = (
+  dataBodyAddress: string,
+  rowIndex: number,
+  rowCount?: number
+) => {
+  const parsed = parseExcelAddress(dataBodyAddress);
+  if (!parsed) return null;
+  const effectiveRowCount = rowCount ?? Math.max(0, parsed.endRow - parsed.startRow + 1);
+  if (rowIndex < 0 || rowIndex >= effectiveRowCount) return null;
+  const rowNumber = parsed.startRow + rowIndex;
+  return {
+    sheetName: parsed.sheetName,
+    address: `${parsed.startCol}${rowNumber}:${parsed.endCol}${rowNumber}`,
+  };
 };
 
 const getExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
@@ -422,6 +567,13 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
   const getClient = useAuthenticatedGraphClient();
   const siteId = import.meta.env.VITE_SHAREPOINT_SITE_ID;
   const listId = import.meta.env.VITE_FORGIATI_LIST_ID;
+  const forgiatiExcelPath = (import.meta.env.VITE_FORGIATI_EXCEL_PATH || "").trim();
+  const forgiatiExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
+  const forgiatiExcelFilename = (import.meta.env.VITE_SP_FORGIATI_FILENAME || import.meta.env.VITE_FORGIATI_EXCEL_FILE || "").trim();
+  const forgiatiExcelTable = (import.meta.env.VITE_FORGIATI_EXCEL_TABLE || "tblFORGIATI").trim();
+  const forgiatiExcelDriveIdEnv = (import.meta.env.VITE_FORGIATI_EXCEL_DRIVE_ID || "").trim();
+  const forgiatiExcelDriveNameEnv = (import.meta.env.VITE_FORGIATI_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
+  const forgiatiExcelDriveIdRef = useRef<string | null>(forgiatiExcelDriveIdEnv || null);
 
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -776,6 +928,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
     try {
       const ordineOverride = newLotOrdine.trim();
       const dataOrdineInput = newLotDataOrdine.trim();
+      const newLotProg = formatLottoProg(getNextLottoProg(lotSelection.items, forgiatiProgressiveMap));
       const payload = buildLotClonePayload(baseItem, {
         colata: normalized,
         ordine: ordineOverride,
@@ -787,9 +940,71 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
         dataConsegnaReset: null,
       });
       await service.createItem<Record<string, unknown>>(listId, payload);
+      let excelError: string | null = null;
+      const resolvedPath = forgiatiExcelPath || (forgiatiExcelFolder && forgiatiExcelFilename ? `${forgiatiExcelFolder}/${forgiatiExcelFilename}` : "");
+      let resolvedDriveId = forgiatiExcelDriveIdRef.current;
+      if (!resolvedDriveId && forgiatiExcelDriveNameEnv) {
+        resolvedDriveId = await service.getDriveIdByName(forgiatiExcelDriveNameEnv);
+        forgiatiExcelDriveIdRef.current = resolvedDriveId;
+      }
+      if (!resolvedDriveId && forgiatiExcelDriveNameEnv) {
+        excelError = `Libreria "${forgiatiExcelDriveNameEnv}" non trovata`;
+      } else if (resolvedPath && forgiatiExcelTable) {
+        try {
+          const driveItem = await service.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
+          const columns = await service.listWorkbookTableColumnsByItemId(driveItem.id, forgiatiExcelTable, resolvedDriveId || undefined);
+          const identIndex = getForgiatiExcelColumnIndex(columns, "IdentLotto");
+          if (identIndex === null) {
+            throw new Error("Colonna IdentLotto non trovata nella tabella Excel");
+          }
+          const rowValues = buildForgiatiExcelRow(columns, {
+            ...payload,
+            IdentLotto: newLotProg,
+          });
+          const sessionId = await service.createWorkbookSessionByItemId(
+            driveItem.id,
+            { persistChanges: true },
+            resolvedDriveId || undefined
+          );
+          try {
+            await service.appendWorkbookTableRowByItemId(
+              driveItem.id,
+              forgiatiExcelTable,
+              rowValues,
+              { sessionId },
+              resolvedDriveId || undefined
+            );
+          } finally {
+            try {
+              await service.closeWorkbookSessionByItemId(
+                driveItem.id,
+                sessionId,
+                resolvedDriveId || undefined
+              );
+            } catch (closeErr) {
+              console.warn("Errore chiusura sessione Excel FORGIATI", closeErr);
+            }
+          }
+        } catch (err: any) {
+          console.error("Errore aggiornamento Excel FORGIATI", {
+            error: err,
+            filePath: resolvedPath,
+            driveId: resolvedDriveId,
+            tableName: forgiatiExcelTable,
+            payload,
+          });
+          excelError = err?.message || "Errore aggiornamento Excel";
+        }
+      } else {
+        excelError = "Percorso Excel o tabella non configurati";
+      }
       setLotSaveStatus("success");
-      setLotSaveMessage("Nuovo lotto creato. Aggiorno la lista...");
-      const fallbackProg = getNextLottoProg(lotSelection.items, forgiatiProgressiveMap, extractProgLetter(normalized));
+      setLotSaveMessage(
+        excelError
+          ? `Nuovo lotto creato su SharePoint. Excel non aggiornato: ${excelError}`
+          : "Nuovo lotto creato e registrato su Excel. Aggiorno la lista..."
+      );
+      const fallbackProg = getNextLottoProg(lotSelection.items, forgiatiProgressiveMap);
       setNewLotColata(buildColataPlaceholder(fallbackProg));
       setNewLotOrdine("");
       setNewLotDataOrdine("");
@@ -2676,6 +2891,13 @@ function AuthenticatedShell() {
   const oringHnbrListId = import.meta.env.VITE_ORING_HNBR_LIST_ID;
   const oringNbrListId = import.meta.env.VITE_ORING_NBR_LIST_ID;
   const tubiListId = import.meta.env.VITE_TUBI_LIST_ID;
+  const forgiatiExcelPath = (import.meta.env.VITE_FORGIATI_EXCEL_PATH || "").trim();
+  const forgiatiExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
+  const forgiatiExcelFilename = (import.meta.env.VITE_SP_FORGIATI_FILENAME || import.meta.env.VITE_FORGIATI_EXCEL_FILE || "").trim();
+  const forgiatiExcelTable = (import.meta.env.VITE_FORGIATI_EXCEL_TABLE || "tblFORGIATI").trim();
+  const forgiatiExcelDriveIdEnv = (import.meta.env.VITE_FORGIATI_EXCEL_DRIVE_ID || "").trim();
+  const forgiatiExcelDriveNameEnv = (import.meta.env.VITE_FORGIATI_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
+  const forgiatiExcelDriveIdRef = useRef<string | null>(forgiatiExcelDriveIdEnv || null);
   const tubiExcelPath = (import.meta.env.VITE_TUBI_EXCEL_PATH || "").trim();
   const tubiExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
   const tubiExcelFilename = (import.meta.env.VITE_SP_TUBI_FILENAME || import.meta.env.VITE_TUBI_EXCEL_FILE || "").trim();
@@ -2887,7 +3109,116 @@ function AuthenticatedShell() {
         )
       );
 
-      let excelUpdateError: string | null = null;
+      const excelErrors: string[] = [];
+      const forgiatiUpdates = updates.filter((update) => update.item.source === "FORGIATI");
+      if (forgiatiUpdates.length > 0) {
+        try {
+          const resolvedPath =
+            forgiatiExcelPath || (forgiatiExcelFolder && forgiatiExcelFilename ? `${forgiatiExcelFolder}/${forgiatiExcelFilename}` : "");
+          let resolvedDriveId = forgiatiExcelDriveIdRef.current;
+          if (!resolvedDriveId && forgiatiExcelDriveNameEnv) {
+            resolvedDriveId = await sharepointService.getDriveIdByName(forgiatiExcelDriveNameEnv);
+            forgiatiExcelDriveIdRef.current = resolvedDriveId;
+          }
+          if (!resolvedDriveId && forgiatiExcelDriveNameEnv) {
+            throw new Error(`Libreria "${forgiatiExcelDriveNameEnv}" non trovata`);
+          }
+          if (!resolvedPath || !forgiatiExcelTable) {
+            throw new Error("Percorso Excel o tabella non configurati");
+          }
+
+          const driveItem = await sharepointService.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
+          const columns = await sharepointService.listWorkbookTableColumnsByItemId(driveItem.id, forgiatiExcelTable, resolvedDriveId || undefined);
+          const rows = await sharepointService.listWorkbookTableRowsByItemId(driveItem.id, forgiatiExcelTable, resolvedDriveId || undefined);
+          const dataBodyRange = await sharepointService.getWorkbookTableDataBodyRangeByItemId(
+            driveItem.id,
+            forgiatiExcelTable,
+            resolvedDriveId || undefined
+          );
+          const codiceIndex = getForgiatiExcelColumnIndex(columns, "Title");
+          const identIndex = getForgiatiExcelColumnIndex(columns, "IdentLotto");
+          if (codiceIndex === null || identIndex === null) {
+            throw new Error("Colonne CODICE/IdentLotto non trovate nella tabella Excel");
+          }
+          const sessionId = await sharepointService.createWorkbookSessionByItemId(
+            driveItem.id,
+            { persistChanges: true },
+            resolvedDriveId || undefined
+          );
+          const missing: string[] = [];
+          const targetCodici = new Set(forgiatiUpdates.map((update) => normalizeExcelKey(update.item.title)));
+          try {
+            for (const row of rows) {
+              const rowValues = row.values?.[0] || [];
+              const codiceVal = normalizeExcelKey(String(rowValues[codiceIndex] ?? ""));
+              if (!targetCodici.has(codiceVal)) continue;
+              const identVal = normalizeExcelKey(String(rowValues[identIndex] ?? ""));
+              if (identVal) continue;
+              const rowRange = buildRowRangeAddress(dataBodyRange.address, row.index, dataBodyRange.rowCount);
+              if (!rowRange) continue;
+              const nextValues = [...rowValues];
+              nextValues[identIndex] = "A";
+              await sharepointService.updateWorkbookRangeByAddress(
+                driveItem.id,
+                rowRange.sheetName,
+                rowRange.address,
+                [nextValues as Array<string | number | boolean | null>],
+                { sessionId },
+                resolvedDriveId || undefined
+              );
+            }
+
+            for (const update of forgiatiUpdates) {
+              const identLotto = formatLottoProg(update.item.lottoProg || (update.item.fields as any)?.LottoProgressivo || "A");
+              const rowIndex = findForgiatiExcelRowIndex(rows, columns, {
+                codice: update.item.title,
+                identLotto,
+              });
+              if (rowIndex === null) {
+                missing.push(`${update.item.title} (${identLotto})`);
+                continue;
+              }
+              const rowRange = buildRowRangeAddress(dataBodyRange.address, rowIndex, dataBodyRange.rowCount);
+              if (!rowRange) {
+                missing.push(`${update.item.title} (${identLotto})`);
+                continue;
+              }
+              const excelFields = {
+                ...(update.item.fields || {}),
+                ...update.payload,
+                IdentLotto: identLotto,
+              } as Record<string, unknown>;
+              const rowValues = buildForgiatiExcelRow(columns, excelFields);
+              await sharepointService.updateWorkbookRangeByAddress(
+                driveItem.id,
+                rowRange.sheetName,
+                rowRange.address,
+                [rowValues],
+                { sessionId },
+                resolvedDriveId || undefined
+              );
+            }
+          } finally {
+            try {
+              await sharepointService.closeWorkbookSessionByItemId(
+                driveItem.id,
+                sessionId,
+                resolvedDriveId || undefined
+              );
+            } catch (closeErr) {
+              console.warn("Errore chiusura sessione Excel FORGIATI", closeErr);
+            }
+          }
+
+          if (missing.length > 0) {
+            throw new Error(`Righe non trovate: ${missing.join(", ")}`);
+          }
+        } catch (excelErr: any) {
+          console.error("Errore aggiornamento Excel FORGIATI", excelErr);
+          excelErrors.push(`FORGIATI: ${excelErr?.message || "Errore aggiornamento Excel"}`);
+        }
+      }
+
       const tubiUpdates = updates.filter((update) => update.item.source === "TUBI");
       if (tubiUpdates.length > 0) {
         try {
@@ -2979,7 +3310,7 @@ function AuthenticatedShell() {
           }
         } catch (excelErr: any) {
           console.error("Errore aggiornamento Excel TUBI", excelErr);
-          excelUpdateError = excelErr?.message || "Errore aggiornamento Excel";
+          excelErrors.push(`TUBI: ${excelErr?.message || "Errore aggiornamento Excel"}`);
         }
       }
 
@@ -3019,8 +3350,8 @@ function AuthenticatedShell() {
         timestamp: new Date().toISOString(),
       };
 
-      const baseMessage = excelUpdateError
-        ? `Giacenza aggiornata; Excel non aggiornato: ${excelUpdateError}`
+      const baseMessage = excelErrors.length > 0
+        ? `Giacenza aggiornata; Excel non aggiornato: ${excelErrors.join(" | ")}`
         : "Giacenza aggiornata con successo.";
       setSaveStatus("success");
       setSaveMessage(baseMessage);
@@ -3036,7 +3367,27 @@ function AuthenticatedShell() {
       setSaveStatus("error");
       setSaveMessage(err?.message || "Errore durante il salvataggio.");
     }
-  }, [accounts, cartList, editValues, flowService, forgiatiListId, oringHnbrListId, oringNbrListId, sharepointService, tubiListId]);
+  }, [
+    accounts,
+    cartList,
+    editValues,
+    flowService,
+    forgiatiListId,
+    oringHnbrListId,
+    oringNbrListId,
+    sharepointService,
+    tubiListId,
+    forgiatiExcelPath,
+    forgiatiExcelFolder,
+    forgiatiExcelFilename,
+    forgiatiExcelTable,
+    forgiatiExcelDriveNameEnv,
+    tubiExcelPath,
+    tubiExcelFolder,
+    tubiExcelFilename,
+    tubiExcelTable,
+    tubiExcelDriveNameEnv,
+  ]);
 
   const renderActivePanel = () => {
     const selectionProps: SelectionStateProps = {

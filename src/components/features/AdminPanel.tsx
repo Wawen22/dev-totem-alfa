@@ -188,6 +188,7 @@ const normalizeExcelKey = (value: string) =>
     .replace(/[^a-z0-9]/g, "");
 
 const TUBI_DATE_FIELDS = new Set(["field_3", "field_16", "field_21", "Modified", "Created"]);
+const FORGIATI_DATE_FIELDS = new Set(["field_2", "field_11", "field_23", "Modified", "Created"]);
 
 const toExcelSerialDate = (val: unknown): number | "" => {
   const t = getTimeValue(val);
@@ -198,6 +199,17 @@ const toExcelSerialDate = (val: unknown): number | "" => {
 const toExcelCellValue = (fieldKey: string | null, value: unknown): string | number | boolean | null => {
   if (!fieldKey) return "";
   if (TUBI_DATE_FIELDS.has(fieldKey)) {
+    const serial = toExcelSerialDate(value);
+    return serial === "" ? "" : serial;
+  }
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  return String(value);
+};
+
+const toForgiatiExcelCellValue = (fieldKey: string | null, value: unknown): string | number | boolean | null => {
+  if (!fieldKey) return "";
+  if (FORGIATI_DATE_FIELDS.has(fieldKey)) {
     const serial = toExcelSerialDate(value);
     return serial === "" ? "" : serial;
   }
@@ -255,6 +267,52 @@ const buildTubiExcelColumnMap = () => {
 
 const TUBI_EXCEL_COLUMN_MAP = buildTubiExcelColumnMap();
 
+const buildForgiatiExcelColumnMap = () => {
+  const map = new Map<string, string>();
+  map.set(normalizeExcelKey("CODICE"), "Title");
+  map.set(normalizeExcelKey("CODICE SAM"), "CodiceSAM");
+  map.set(normalizeExcelKey("NORDINE"), "field_1");
+  map.set(normalizeExcelKey("N ORDINE"), "field_1");
+  map.set(normalizeExcelKey("DATA ORD"), "field_2");
+  map.set(normalizeExcelKey("DATA ORDINE"), "field_2");
+  map.set(normalizeExcelKey("FORNITORE"), "field_3");
+  map.set(normalizeExcelKey("POS"), "field_4");
+  map.set(normalizeExcelKey("QTA"), "field_5");
+  map.set(normalizeExcelKey("QTA."), "field_5");
+  map.set(normalizeExcelKey("DN"), "field_6");
+  map.set(normalizeExcelKey("CLASSE"), "field_7");
+  map.set(normalizeExcelKey("NO DISEGNO PARTICOLARE"), "field_8");
+  map.set(normalizeExcelKey("NO. DISEGNO - PARTICOLARE"), "field_8");
+  map.set(normalizeExcelKey("GRADO MATERIALE"), "field_9");
+  map.set(normalizeExcelKey("N BOLLA"), "field_10");
+  map.set(normalizeExcelKey("N BOLLA."), "field_10");
+  map.set(normalizeExcelKey("DATA CONSEGNA"), "field_11");
+  map.set(normalizeExcelKey("N CERT"), "field_12");
+  map.set(normalizeExcelKey("N CERT."), "field_12");
+  map.set(normalizeExcelKey("N COLATA"), "field_13");
+  map.set(normalizeExcelKey("TIPO CERTIFICAZIONE"), "field_14");
+  map.set(normalizeExcelKey("PREZ C D"), "field_15");
+  map.set(normalizeExcelKey("PREZ C/D"), "field_15");
+  map.set(normalizeExcelKey("Ø EST MM"), "field_16");
+  map.set(normalizeExcelKey("O EST MM"), "field_16");
+  map.set(normalizeExcelKey("Ø INT MM"), "field_17");
+  map.set(normalizeExcelKey("O INT MM"), "field_17");
+  map.set(normalizeExcelKey("H ALTEZ MM"), "field_18");
+  map.set(normalizeExcelKey("ANELLO DISCO"), "field_19");
+  map.set(normalizeExcelKey("GREZZO SGROSSATO"), "field_20");
+  map.set(normalizeExcelKey("GIACENZA MM LUNGHEZZA DA BARRA"), "field_21");
+  map.set(normalizeExcelKey("GIACENZA QTA"), "field_22");
+  map.set(normalizeExcelKey("GIACENZA Q.TA"), "field_22");
+  map.set(normalizeExcelKey("DATA PRELIEVO"), "field_23");
+  map.set(normalizeExcelKey("COMMESSA"), "field_24");
+  map.set(normalizeExcelKey("NOTE"), "field_25");
+  map.set(normalizeExcelKey("IDENTLOTTO"), "IdentLotto");
+  map.set(normalizeExcelKey("IDENT LOTTO"), "IdentLotto");
+  return map;
+};
+
+const FORGIATI_EXCEL_COLUMN_MAP = buildForgiatiExcelColumnMap();
+
 const buildTubiExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
   const fieldKeyLookup = new Map<string, string>();
   Object.keys(fields).forEach((key) => {
@@ -270,11 +328,38 @@ const buildTubiExcelRow = (excelColumns: string[], fields: Record<string, unknow
   });
 };
 
+const buildForgiatiExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
+  const fieldKeyLookup = new Map<string, string>();
+  Object.keys(fields).forEach((key) => {
+    fieldKeyLookup.set(normalizeExcelKey(key), key);
+  });
+
+  return excelColumns.map((columnName) => {
+    const normalized = normalizeExcelKey(columnName || "");
+    const fieldKey =
+      FORGIATI_EXCEL_COLUMN_MAP.get(normalized) || fieldKeyLookup.get(normalized) || null;
+    const rawValue = fieldKey ? fields[fieldKey] : null;
+    return toForgiatiExcelCellValue(fieldKey, rawValue);
+  });
+};
+
 const getExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
   const target = normalizeExcelKey(fieldKey);
   for (let i = 0; i < excelColumns.length; i++) {
     const normalized = normalizeExcelKey(excelColumns[i] || "");
     const mapped = TUBI_EXCEL_COLUMN_MAP.get(normalized);
+    if (mapped && normalizeExcelKey(mapped) === target) {
+      return i;
+    }
+  }
+  return null;
+};
+
+const getForgiatiExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
+  const target = normalizeExcelKey(fieldKey);
+  for (let i = 0; i < excelColumns.length; i++) {
+    const normalized = normalizeExcelKey(excelColumns[i] || "");
+    const mapped = FORGIATI_EXCEL_COLUMN_MAP.get(normalized);
     if (mapped && normalizeExcelKey(mapped) === target) {
       return i;
     }
@@ -289,6 +374,34 @@ const findExcelRowIndex = (
 ) => {
   const titleIdx = getExcelColumnIndex(excelColumns, "Title");
   const identIdx = getExcelColumnIndex(excelColumns, "IdentLotto");
+  if (titleIdx === null || identIdx === null) return null;
+
+  const targetCodice = normalizeExcelKey(options.codice || "");
+  const targetIdent = normalizeExcelKey(options.identLotto || "");
+
+  for (const row of rows) {
+    const rowValues = row.values?.[0] || [];
+    const codiceVal = normalizeExcelKey(String(rowValues[titleIdx] ?? ""));
+    const identValRaw = String(rowValues[identIdx] ?? "");
+    const identVal = normalizeExcelKey(identValRaw);
+    const identMatches =
+      identVal === targetIdent ||
+      (!identVal && targetIdent === "a");
+    if (codiceVal === targetCodice && identMatches) {
+      return row.index;
+    }
+  }
+
+  return null;
+};
+
+const findForgiatiExcelRowIndex = (
+  rows: Array<{ index: number; values: Array<Array<unknown>> }>,
+  excelColumns: string[],
+  options: { codice: string; identLotto: string }
+) => {
+  const titleIdx = getForgiatiExcelColumnIndex(excelColumns, "Title");
+  const identIdx = getForgiatiExcelColumnIndex(excelColumns, "IdentLotto");
   if (titleIdx === null || identIdx === null) return null;
 
   const targetCodice = normalizeExcelKey(options.codice || "");
@@ -439,6 +552,7 @@ const getSummaryMeta = (
       { label: "Bolla", value: toStr(fields.field_10) || "-" },
       { label: "Colata", value: toStr(fields.field_13) || "-" },
       { label: "Giacenza", value: toStr(fields.field_22) || "-" },
+      { label: "Lotto", value: formatLottoProg(options.lottoProg || toStr(fields.LottoProgressivo) || "A") },
     ];
   }
   if (kind === "TUBI") {
@@ -465,6 +579,13 @@ const getSummaryMeta = (
 
 export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId, oringNbrListId }: AdminPanelProps) {
   const getClient = useAuthenticatedGraphClient();
+  const forgiatiExcelPath = (import.meta.env.VITE_FORGIATI_EXCEL_PATH || "").trim();
+  const forgiatiExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
+  const forgiatiExcelFilename = (import.meta.env.VITE_SP_FORGIATI_FILENAME || import.meta.env.VITE_FORGIATI_EXCEL_FILE || "").trim();
+  const forgiatiExcelTable = (import.meta.env.VITE_FORGIATI_EXCEL_TABLE || "tblFORGIATI").trim();
+  const forgiatiExcelDriveIdEnv = (import.meta.env.VITE_FORGIATI_EXCEL_DRIVE_ID || "").trim();
+  const forgiatiExcelDriveNameEnv = (import.meta.env.VITE_FORGIATI_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
+  const [forgiatiExcelDriveId, setForgiatiExcelDriveId] = useState<string | null>(forgiatiExcelDriveIdEnv || null);
   const tubiExcelPath = (import.meta.env.VITE_TUBI_EXCEL_PATH || "").trim();
   const tubiExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
   const tubiExcelFilename = (import.meta.env.VITE_SP_TUBI_FILENAME || import.meta.env.VITE_TUBI_EXCEL_FILE || "").trim();
@@ -617,6 +738,52 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
     return items;
   }, [activeItems, activeList]);
 
+  const forgiatiGroupedRows = useMemo(() => {
+    const map = new Map<string, SharePointListItem<Record<string, unknown>>[]>();
+    (forgiatiItems || []).forEach((item) => {
+      const title = toStr((item.fields as Record<string, unknown>).Title) || "(senza codice)";
+      const existing = map.get(title) || [];
+      map.set(title, [...existing, item]);
+    });
+    return Array.from(map.entries()).map(([title, items]) => ({ title, items }));
+  }, [forgiatiItems]);
+
+  const forgiatiProgressiveMap = useMemo(() => {
+    const map = new Map<string, string>();
+    const normalizeLetter = (val: string | null | undefined) => {
+      if (!val) return null;
+      const cleaned = String(val).trim().toLowerCase();
+      if (/^[a-z]$/.test(cleaned)) return cleaned;
+      return null;
+    };
+    const getCreatedKey = (item: SharePointListItem<Record<string, unknown>>) => {
+      const created = getTimeValue((item.fields as Record<string, unknown>).Created);
+      if (created) return created;
+      const idNum = Number(item.id);
+      return Number.isFinite(idNum) ? idNum : 0;
+    };
+
+    forgiatiGroupedRows.forEach((group) => {
+      const sorted = [...group.items].sort((a, b) => getCreatedKey(a) - getCreatedKey(b));
+      const used = new Set<string>();
+      sorted.forEach((item) => {
+        const existing = normalizeLetter((item.fields as Record<string, unknown>).LottoProgressivo as string | undefined);
+        let letter = existing;
+        if (!letter || used.has(letter)) {
+          let code = "a".charCodeAt(0);
+          while (used.has(String.fromCharCode(code))) {
+            code++;
+          }
+          letter = String.fromCharCode(code);
+        }
+        used.add(letter);
+        map.set(item.id, letter);
+      });
+    });
+
+    return map;
+  }, [forgiatiGroupedRows]);
+
   const filteredItems = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return sortedItems;
@@ -695,35 +862,47 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
     try {
       await service.updateItem<Record<string, unknown>>(activeListId, selectedId, payload);
       let excelError: string | null = null;
-      if (activeList === "TUBI") {
+      if (activeList === "TUBI" || activeList === "FORGIATI") {
         try {
-          const resolvedPath = tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : "");
-          let resolvedDriveId = tubiExcelDriveId;
-          if (!resolvedDriveId && tubiExcelDriveNameEnv) {
-            resolvedDriveId = await service.getDriveIdByName(tubiExcelDriveNameEnv);
-            setTubiExcelDriveId(resolvedDriveId);
+          const isForgiati = activeList === "FORGIATI";
+          const resolvedPath = isForgiati
+            ? forgiatiExcelPath || (forgiatiExcelFolder && forgiatiExcelFilename ? `${forgiatiExcelFolder}/${forgiatiExcelFilename}` : "")
+            : tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : "");
+          let resolvedDriveId = isForgiati ? forgiatiExcelDriveId : tubiExcelDriveId;
+          const driveNameEnv = isForgiati ? forgiatiExcelDriveNameEnv : tubiExcelDriveNameEnv;
+          if (!resolvedDriveId && driveNameEnv) {
+            resolvedDriveId = await service.getDriveIdByName(driveNameEnv);
+            if (isForgiati) {
+              setForgiatiExcelDriveId(resolvedDriveId);
+            } else {
+              setTubiExcelDriveId(resolvedDriveId);
+            }
           }
-          if (!resolvedDriveId && tubiExcelDriveNameEnv) {
-            throw new Error(`Libreria "${tubiExcelDriveNameEnv}" non trovata`);
+          if (!resolvedDriveId && driveNameEnv) {
+            throw new Error(`Libreria "${driveNameEnv}" non trovata`);
           }
-          if (!resolvedPath || !tubiExcelTable) {
+          const tableName = isForgiati ? forgiatiExcelTable : tubiExcelTable;
+          if (!resolvedPath || !tableName) {
             throw new Error("Percorso Excel o tabella non configurati");
           }
 
           const currentItem = filteredItems.find((item) => item.id === selectedId) || null;
           const identRaw =
             (currentItem?.fields as any)?.LottoProgressivo ||
-            (currentItem?.id ? tubiProgressiveMap.get(currentItem.id) : undefined);
+            (currentItem?.id
+              ? isForgiati
+                ? forgiatiProgressiveMap.get(currentItem.id)
+                : tubiProgressiveMap.get(currentItem.id)
+              : undefined);
           const identLotto = formatLottoProg(identRaw || "A");
           const lookupTitle = toStr((currentItem?.fields as any)?.Title) || editForm.Title || "";
 
           const driveItem = await service.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
-          const columns = await service.listWorkbookTableColumnsByItemId(driveItem.id, tubiExcelTable, resolvedDriveId || undefined);
-          const rows = await service.listWorkbookTableRowsByItemId(driveItem.id, tubiExcelTable, resolvedDriveId || undefined);
-          const rowIndex = findExcelRowIndex(rows, columns, {
-            codice: lookupTitle,
-            identLotto,
-          });
+          const columns = await service.listWorkbookTableColumnsByItemId(driveItem.id, tableName, resolvedDriveId || undefined);
+          const rows = await service.listWorkbookTableRowsByItemId(driveItem.id, tableName, resolvedDriveId || undefined);
+          const rowIndex = isForgiati
+            ? findForgiatiExcelRowIndex(rows, columns, { codice: lookupTitle, identLotto })
+            : findExcelRowIndex(rows, columns, { codice: lookupTitle, identLotto });
 
           if (rowIndex === null) {
             throw new Error(`Riga Excel non trovata per ${editForm.Title || "codice"} (${identLotto})`);
@@ -731,7 +910,7 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
 
           const dataBodyRange = await service.getWorkbookTableDataBodyRangeByItemId(
             driveItem.id,
-            tubiExcelTable,
+            tableName,
             resolvedDriveId || undefined
           );
           const rowRange = buildRowRangeAddress(dataBodyRange.address, rowIndex, dataBodyRange.rowCount);
@@ -744,7 +923,9 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
             ...payload,
             IdentLotto: identLotto,
           } as Record<string, unknown>;
-          const rowValues = buildTubiExcelRow(columns, excelFields);
+          const rowValues = isForgiati
+            ? buildForgiatiExcelRow(columns, excelFields)
+            : buildTubiExcelRow(columns, excelFields);
           const sessionId = await service.createWorkbookSessionByItemId(
             driveItem.id,
             { persistChanges: true },
@@ -767,11 +948,11 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
                 resolvedDriveId || undefined
               );
             } catch (closeErr) {
-              console.warn("Errore chiusura sessione Excel TUBI (admin)", closeErr);
+              console.warn("Errore chiusura sessione Excel (admin)", closeErr);
             }
           }
         } catch (excelErr: any) {
-          console.error("Errore aggiornamento Excel TUBI (admin)", excelErr);
+          console.error("Errore aggiornamento Excel (admin)", excelErr);
           excelError = excelErr?.message || "Errore aggiornamento Excel";
         }
       }
@@ -876,7 +1057,16 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
 
   const activeSummary = (item: SharePointListItem<Record<string, unknown>>) => {
     const fields = item.fields as Record<string, unknown>;
-    const lottoProg = item.id ? tubiProgressiveMap.get(item.id) : undefined;
+    const lottoProg =
+      activeList === "TUBI"
+        ? item.id
+          ? tubiProgressiveMap.get(item.id)
+          : undefined
+        : activeList === "FORGIATI"
+        ? item.id
+          ? forgiatiProgressiveMap.get(item.id)
+          : undefined
+        : undefined;
     return {
       title: toStr(fields.Title) || "-",
       meta: getSummaryMeta(activeList, fields, { lottoProg }),
