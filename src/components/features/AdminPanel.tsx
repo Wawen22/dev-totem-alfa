@@ -47,7 +47,7 @@ const FORGIATI_FIELDS: FieldConfig[] = [
   { key: "field_7", label: "Classe" },
   { key: "field_8", label: "No. Disegno - Particolare" },
   { key: "field_9", label: "Grado Materiale" },
-  { key: "field_11", label: "Data consegna" },
+  { key: "field_11", label: "Data consegna", type: "date" },
   { key: "field_12", label: "N° cert" },
   { key: "field_14", label: "Tipo Certificazione" },
   { key: "field_15", label: "Prez. C/D €" },
@@ -305,6 +305,7 @@ const buildForgiatiExcelColumnMap = () => {
   map.set(normalizeExcelKey("GIACENZA MM LUNGHEZZA DA BARRA"), "field_21");
   map.set(normalizeExcelKey("GIACENZA QTA"), "field_22");
   map.set(normalizeExcelKey("GIACENZA Q.TA"), "field_22");
+  map.set(normalizeExcelKey("GIACENZA Q.TÀ"), "field_22");
   map.set(normalizeExcelKey("DATA PRELIEVO"), "field_23");
   map.set(normalizeExcelKey("COMMESSA"), "field_24");
   map.set(normalizeExcelKey("NOTE"), "field_25");
