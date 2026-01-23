@@ -775,11 +775,13 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
 
   useEffect(() => {
     if (lotSelection) {
+      const baseItem = lotSelection.items[0];
+      const baseFields = (baseItem?.fields || {}) as any;
       const nextProg = getNextLottoProg(lotSelection.items, forgiatiProgressiveMap);
       setNewLotColata(buildColataPlaceholder(nextProg));
       setNewLotOrdine("");
       setNewLotDataOrdine("");
-      setNewLotCodiceSam("");
+      setNewLotCodiceSam(toStr(baseFields?.CodiceSAM));
       setLotSaveStatus("idle");
       setLotSaveMessage(null);
     }
@@ -1911,7 +1913,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
       setNewLotColata(buildColataPlaceholder(nextProg));
       setNewLotOrdine("");
       setNewLotDataOrdine(toInputDate(baseFields?.field_3));
-      setNewLotCodiceSam("");
+      setNewLotCodiceSam(toStr(baseFields?.CodiceSAM));
       setLotSaveStatus("idle");
       setLotSaveMessage(null);
     }
