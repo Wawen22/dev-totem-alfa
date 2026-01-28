@@ -8,6 +8,7 @@ import { forgiatiColumns, ForgiatoColumn } from "./config/forgiatiColumns";
 import { tubiColumns } from "./config/tubiColumns";
 import { oringHnbrColumns } from "./config/oringHnbrColumns";
 import { oringNbrColumns } from "./config/oringNbrColumns";
+import { sparkGupsColumns } from "./config/sparkGupsColumns";
 import { SharePointListItem } from "./types/sharepoint";
 import { formatSharePointDate } from "./utils/dateUtils";
 import { WebsiteViewer } from "./components/features/WebsiteViewer";
@@ -40,7 +41,7 @@ type TubiItem = SharePointListItem<Record<string, unknown>>;
 
 type CartItem = {
   key: string;
-  source: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR";
+  source: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS";
   itemId: string;
   title: string;
   bolla?: unknown;
@@ -65,6 +66,13 @@ type EditableItemState = {
   nrOrdine?: string;
   dataOrdine?: string;
   qtaMinima?: string;
+  lotto?: string;
+  codiceSam?: string;
+  tipologiaArticolo?: string;
+  fornitore?: string;
+  qtaOrdinata?: string;
+  dataConsegna?: string;
+  prezzoUnitario?: string;
   bolla?: string;
   colata?: string;
   raw?: Record<string, unknown>;
@@ -327,6 +335,31 @@ const forgiatiExcelColumnFieldMap = (() => {
 
 const FORGIATI_DATE_FIELDS = new Set(["field_2", "field_11", "field_23", "Modified", "Created"]);
 
+const sparkExcelColumnFieldMap = (() => {
+  const map = buildExcelColumnFieldMap(sparkGupsColumns);
+  map.set(normalizeExcelKey("CODICE"), "Title");
+  map.set(normalizeExcelKey("TITLE"), "Title");
+  map.set(normalizeExcelKey("LOTTO"), "field_1");
+  map.set(normalizeExcelKey("CODICE SAM"), "field_2");
+  map.set(normalizeExcelKey("TIPOLOGIA ARTICOLO"), "field_3");
+  map.set(normalizeExcelKey("N ORDINE"), "field_4");
+  map.set(normalizeExcelKey("N. ORDINE"), "field_4");
+  map.set(normalizeExcelKey("DATA ORDINE"), "field_5");
+  map.set(normalizeExcelKey("FORNITORE"), "field_6");
+  map.set(normalizeExcelKey("QUANTITA ORDINATA"), "field_7");
+  map.set(normalizeExcelKey("QUANTITÀ ORDINATA"), "field_7");
+  map.set(normalizeExcelKey("N BOLLA"), "field_8");
+  map.set(normalizeExcelKey("N. BOLLA"), "field_8");
+  map.set(normalizeExcelKey("DATA CONSEGNA"), "field_9");
+  map.set(normalizeExcelKey("GIACENZA"), "field_10");
+  map.set(normalizeExcelKey("DATA ULTIMO PRELIEVO"), "field_11");
+  map.set(normalizeExcelKey("PREZZO UNITARIO"), "field_12");
+  map.set(normalizeExcelKey("COMMESSA"), "field_13");
+  return map;
+})();
+
+const SPARK_DATE_FIELDS = new Set<string>();
+
 const buildForgiatiExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
   const fieldKeyLookup = new Map<string, string>();
   Object.keys(fields).forEach((key) => {
@@ -342,11 +375,38 @@ const buildForgiatiExcelRow = (excelColumns: string[], fields: Record<string, un
   });
 };
 
+const buildSparkExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
+  const fieldKeyLookup = new Map<string, string>();
+  Object.keys(fields).forEach((key) => {
+    fieldKeyLookup.set(normalizeExcelKey(key), key);
+  });
+
+  return excelColumns.map((columnName) => {
+    const normalized = normalizeExcelKey(columnName || "");
+    const fieldKey =
+      sparkExcelColumnFieldMap.get(normalized) || fieldKeyLookup.get(normalized) || null;
+    const rawValue = fieldKey ? fields[fieldKey] : null;
+    return toExcelCellValueForDateFields(SPARK_DATE_FIELDS, fieldKey, rawValue);
+  });
+};
+
 const getForgiatiExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
   const target = normalizeExcelKey(fieldKey);
   for (let i = 0; i < excelColumns.length; i++) {
     const normalized = normalizeExcelKey(excelColumns[i] || "");
     const mapped = forgiatiExcelColumnFieldMap.get(normalized);
+    if (mapped && normalizeExcelKey(mapped) === target) {
+      return i;
+    }
+  }
+  return null;
+};
+
+const getSparkExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
+  const target = normalizeExcelKey(fieldKey);
+  for (let i = 0; i < excelColumns.length; i++) {
+    const normalized = normalizeExcelKey(excelColumns[i] || "");
+    const mapped = sparkExcelColumnFieldMap.get(normalized);
     if (mapped && normalizeExcelKey(mapped) === target) {
       return i;
     }
@@ -382,6 +442,31 @@ const findForgiatiExcelRowIndex = (
   return null;
 };
 
+const findSparkExcelRowIndex = (
+  rows: Array<{ index: number; values: Array<Array<unknown>> }>,
+  excelColumns: string[],
+  options: { codice: string; lotto?: string }
+) => {
+  const titleIdx = getSparkExcelColumnIndex(excelColumns, "Title");
+  if (titleIdx === null) return null;
+  const lottoIdx = getSparkExcelColumnIndex(excelColumns, "field_1");
+
+  const targetCodice = normalizeExcelKey(options.codice || "");
+  const targetLotto = normalizeExcelKey(options.lotto || "");
+
+  for (const row of rows) {
+    const rowValues = row.values?.[0] || [];
+    const codiceVal = normalizeExcelKey(String(rowValues[titleIdx] ?? ""));
+    if (codiceVal !== targetCodice) continue;
+    if (lottoIdx === null) return row.index;
+    const lottoVal = normalizeExcelKey(String(rowValues[lottoIdx] ?? ""));
+    if (lottoVal === targetLotto || (!lottoVal && !targetLotto)) {
+      return row.index;
+    }
+  }
+
+  return null;
+};
 const parseExcelAddress = (address: string) => {
   const [sheetPartRaw, rangePartRaw] = address.split("!");
   const sheetPart = sheetPartRaw || "";
@@ -1762,6 +1847,199 @@ function OringNbrPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
   );
 }
 
+function SparkGupsPanel({ selectedItems, onToggle, selectionLimitReached }: SelectionStateProps) {
+  const getClient = useAuthenticatedGraphClient();
+  const siteId = import.meta.env.VITE_SHAREPOINT_SITE_ID;
+  const listId = import.meta.env.VITE_SPARK_GUPS_LIST_ID;
+
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+
+  const service = useMemo(() => {
+    if (!siteId) return null;
+    return new SharePointService(getClient, siteId);
+  }, [getClient, siteId]);
+
+  const { data: rawRows, loading, error, refresh } = useCachedList<Record<string, unknown>>(
+    service,
+    listId,
+    "spark-gups"
+  );
+
+  const rows = useMemo(() => {
+    const sorted = [...rawRows];
+    sorted.sort((a, b) => {
+      const valA = (a.fields as any).field_5;
+      const valB = (b.fields as any).field_5;
+      return getTimeValue(valB) - getTimeValue(valA);
+    });
+    return sorted;
+  }, [rawRows]);
+
+  const visibleColumns = sparkGupsColumns;
+
+  const normalizedRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter((item) =>
+      visibleColumns.some((col) => {
+        const v = (item.fields as Record<string, unknown>)[col.field];
+        if (v === null || v === undefined) return false;
+
+        let valStr = String(v);
+        if (col.type === "date") {
+          valStr = formatSharePointDate(v);
+        }
+
+        return valStr.toLowerCase().includes(term);
+      })
+    );
+  }, [rows, search, visibleColumns]);
+
+  const totalPages = Math.max(1, Math.ceil(normalizedRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageSliceStart = (currentPage - 1) * pageSize;
+  const visibleRows = normalizedRows.slice(pageSliceStart, pageSliceStart + pageSize);
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearch(e.target.value);
+    setPage(1);
+  };
+
+  const handleClearSearch = () => {
+    setSearch("");
+    setPage(1);
+  };
+
+  const handlePrev = () => setPage((p) => Math.max(1, p - 1));
+  const handleNext = () => setPage((p) => Math.min(totalPages, p + 1));
+
+  return (
+    <div className="panel inventory-panel">
+      <div className="panel-content">
+        {error && <div className="alert error">{error}</div>}
+        {!listId && (
+          <div className="alert warning">
+            Inserisci il GUID della lista SPARK GUPS in .env.local (VITE_SPARK_GUPS_LIST_ID).
+          </div>
+        )}
+
+        <div className="toolbar">
+          <div className="search-box">
+            <input
+              type="search"
+              placeholder="Cerca in tutte le colonne..."
+              value={search}
+              onChange={handleSearchChange}
+            />
+            {search && <button className="icon-btn" onClick={handleClearSearch} aria-label="Clear search">✕</button>}
+          </div>
+
+          <div className="pager-info">
+            <button className="btn secondary" onClick={() => refresh()} disabled={loading} style={{ padding: "8px 12px", fontSize: "13px" }}>
+              {loading ? "..." : "Aggiorna"}
+            </button>
+            <span className="pill">{normalizedRows.length} risultati</span>
+            <label className="page-size">
+              <span>Per pagina</span>
+              <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
+                {[100, 200].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </label>
+            <div className="pager">
+              <button className="icon-btn" onClick={handlePrev} disabled={currentPage === 1}>←</button>
+              <span>{currentPage} / {totalPages}</span>
+              <button className="icon-btn" onClick={handleNext} disabled={currentPage === totalPages}>→</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="table-scroll">
+          <table className="inventory-table">
+            <thead>
+              <tr>
+                <th scope="col" className="selection-col" aria-label="Seleziona">
+                  <span className="selection-col__icon" aria-hidden="true"></span>
+                </th>
+                {visibleColumns.map((col) => (
+                  <th
+                    scope="col"
+                    key={col.field}
+                    className={col.field === "Title" ? "sticky-col" : undefined}
+                    style={col.width ? { width: col.width } : undefined}
+                  >
+                    <span>{col.label}</span>
+                    <small>{col.field}</small>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={visibleColumns.length + 1} className="muted" style={{ textAlign: "center" }}>
+                    {loading ? "Carico dati..." : "Nessun elemento trovato"}
+                  </td>
+                </tr>
+              )}
+              {visibleRows.map((item) => {
+                const fields = item.fields as Record<string, unknown>;
+                const cartItem: CartItem = {
+                  key: `SPARK-GUPS-${item.id}`,
+                  source: "SPARK-GUPS",
+                  itemId: item.id,
+                  title: (fields.Title as string) || "-",
+                  bolla: fields.field_8,
+                  colata: fields.field_8,
+                  lottoProg: toStr(fields.field_1),
+                  fields,
+                };
+                const checked = Boolean(selectedItems[cartItem.key]);
+
+                return (
+                  <tr key={item.id}>
+                    <td className="selection-col">
+                      <input
+                        type="checkbox"
+                        aria-label="Seleziona riga"
+                        checked={checked}
+                        disabled={!checked && selectionLimitReached}
+                        onChange={() => onToggle(cartItem, checked)}
+                      />
+                    </td>
+                    {visibleColumns.map((col) => {
+                      const isTitle = col.field === "Title";
+                      const className = isTitle ? "sticky-col" : undefined;
+                      const content = formatCellValue(fields[col.field], col.type);
+
+                      if (isTitle) {
+                        return (
+                          <th scope="row" key={col.field} className={className}>
+                            {content}
+                          </th>
+                        );
+                      }
+
+                      return (
+                        <td key={col.field} className={className}>
+                          {content}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: SelectionStateProps) {
   const getClient = useAuthenticatedGraphClient();
   const siteId = import.meta.env.VITE_SHAREPOINT_SITE_ID;
@@ -2558,6 +2836,28 @@ function buildEditableState(item: CartItem): EditableItemState {
     };
   }
 
+  if (item.source === "SPARK-GUPS") {
+    return {
+      type: "SPARK-GUPS",
+      title: item.title || "-",
+      lotto: toStr((fields as any).field_1),
+      codiceSam: toStr((fields as any).field_2),
+      tipologiaArticolo: toStr((fields as any).field_3),
+      nrOrdine: toStr((fields as any).field_4),
+      dataOrdine: toStr((fields as any).field_5),
+      fornitore: toStr((fields as any).field_6),
+      qtaOrdinata: toStr((fields as any).field_7),
+      bolla: toStr((fields as any).field_8),
+      colata: toStr((fields as any).field_8),
+      dataConsegna: toStr((fields as any).field_9),
+      giacenza: toStr((fields as any).field_10),
+      dataUltimoPrelievo: toStr((fields as any).field_11),
+      prezzoUnitario: toStr((fields as any).field_12),
+      commessa: toStr((fields as any).field_13),
+      raw: fields,
+    };
+  }
+
   return {
     type: "TUBI",
     title: item.title || "-",
@@ -2633,6 +2933,7 @@ function StockUpdatePage({
           const isForgiati = item.source === "FORGIATI";
           const isOring = item.source === "ORING-HNBR";
           const isOringNbr = item.source === "ORING-NBR";
+          const isSpark = item.source === "SPARK-GUPS";
           const raw = (cardValues.raw || {}) as Record<string, unknown>;
 
           const infoItems = isForgiati
@@ -2672,6 +2973,17 @@ function StockUpdatePage({
                 { label: "Giacenza", value: raw["field_16"] },
                 { label: "Prenotazione", value: raw["field_15"] },
               ]
+            : isSpark
+            ? [
+                { label: "Lotto", value: raw["field_1"] },
+                { label: "Codice SAM", value: raw["field_2"] },
+                { label: "Tipologia", value: raw["field_3"] },
+                { label: "N° Ordine", value: raw["field_4"] },
+                { label: "Fornitore", value: raw["field_6"] },
+                { label: "Quantità Ordinata", value: raw["field_7"] },
+                { label: "N° Bolla", value: raw["field_8"] },
+                { label: "Prezzo unitario", value: raw["field_12"] },
+              ]
             : [
                 { label: "N° Ordine", value: raw["field_2"] },
                 { label: "Codice SAM", value: raw["CodiceSAM"] },
@@ -2697,6 +3009,8 @@ function StockUpdatePage({
                   ? "stock-card--oring"
                   : isOringNbr
                   ? "stock-card--oring-nbr"
+                  : isSpark
+                  ? "stock-card--spark"
                   : "stock-card--tubi"
               }`}
             >
@@ -2727,7 +3041,15 @@ function StockUpdatePage({
 
               <div
                 className={`stock-card__body ${
-                  isForgiati ? "is-forgiati" : isOring ? "is-oring" : isOringNbr ? "is-oring-nbr" : "is-tubi"
+                  isForgiati
+                    ? "is-forgiati"
+                    : isOring
+                    ? "is-oring"
+                    : isOringNbr
+                    ? "is-oring-nbr"
+                    : isSpark
+                    ? "is-spark"
+                    : "is-tubi"
                 }`}
               >
                 <div className="section-heading">
@@ -2879,6 +3201,122 @@ function StockUpdatePage({
                       />
                     </label>
                   </div>
+                ) : isSpark ? (
+                  <div className="field-grid">
+                    <label className="field">
+                      <span>Lotto</span>
+                      <input
+                        type="text"
+                        value={cardValues.lotto || ""}
+                        onChange={(e) => onChange(item.key, "lotto", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Codice SAM</span>
+                      <input
+                        type="text"
+                        value={cardValues.codiceSam || ""}
+                        onChange={(e) => onChange(item.key, "codiceSam", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Tipologia Articolo</span>
+                      <input
+                        type="text"
+                        value={cardValues.tipologiaArticolo || ""}
+                        onChange={(e) => onChange(item.key, "tipologiaArticolo", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>N. Ordine</span>
+                      <input
+                        type="text"
+                        value={cardValues.nrOrdine || ""}
+                        onChange={(e) => onChange(item.key, "nrOrdine", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Data Ordine</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="gg/mm/aaaa"
+                        value={cardValues.dataOrdine || ""}
+                        onChange={(e) => onChange(item.key, "dataOrdine", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Fornitore</span>
+                      <input
+                        type="text"
+                        value={cardValues.fornitore || ""}
+                        onChange={(e) => onChange(item.key, "fornitore", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Quantità Ordinata</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={cardValues.qtaOrdinata || ""}
+                        onChange={(e) => onChange(item.key, "qtaOrdinata", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>N. Bolla</span>
+                      <input
+                        type="text"
+                        value={cardValues.bolla || ""}
+                        onChange={(e) => onChange(item.key, "bolla", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Data Consegna</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="gg/mm/aaaa"
+                        value={cardValues.dataConsegna || ""}
+                        onChange={(e) => onChange(item.key, "dataConsegna", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Giacenza</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={cardValues.giacenza || ""}
+                        onChange={(e) => onChange(item.key, "giacenza", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Data Ultimo Prelievo</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="gg/mm/aaaa"
+                        value={cardValues.dataUltimoPrelievo || ""}
+                        onChange={(e) => onChange(item.key, "dataUltimoPrelievo", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Prezzo unitario</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={cardValues.prezzoUnitario || ""}
+                        onChange={(e) => onChange(item.key, "prezzoUnitario", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Commessa</span>
+                      <input
+                        type="text"
+                        value={cardValues.commessa || ""}
+                        onChange={(e) => onChange(item.key, "commessa", e.target.value)}
+                      />
+                    </label>
+                  </div>
                 ) : (
                   <div className="field-grid">
                     <label className="field">
@@ -2932,14 +3370,15 @@ function NavigationTabs({
   activeTab,
   onTabChange,
 }: {
-  activeTab: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi";
-  onTabChange: (id: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi") => void;
+  activeTab: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups";
+  onTabChange: (id: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups") => void;
 }) {
   const tabs = [
     { id: "forgiati", label: "1_FORGIATI", enabled: true },
     { id: "oring-hnbr", label: "2_ORING-HNBR", enabled: true },
     { id: "oring-nbr", label: "2_ORING-NBR", enabled: true },
     { id: "tubi", label: "3_TUBI", enabled: true },
+    { id: "spark-gups", label: "6_SPARK GUPS", enabled: true },
   ] as const;
 
   return (
@@ -2966,6 +3405,7 @@ function AuthenticatedShell() {
   const oringHnbrListId = import.meta.env.VITE_ORING_HNBR_LIST_ID;
   const oringNbrListId = import.meta.env.VITE_ORING_NBR_LIST_ID;
   const tubiListId = import.meta.env.VITE_TUBI_LIST_ID;
+  const sparkGupsListId = import.meta.env.VITE_SPARK_GUPS_LIST_ID;
   const forgiatiExcelPath = (import.meta.env.VITE_FORGIATI_EXCEL_PATH || "").trim();
   const forgiatiExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
   const forgiatiExcelFilename = (import.meta.env.VITE_SP_FORGIATI_FILENAME || import.meta.env.VITE_FORGIATI_EXCEL_FILE || "").trim();
@@ -2980,13 +3420,20 @@ function AuthenticatedShell() {
   const tubiExcelDriveIdEnv = (import.meta.env.VITE_TUBI_EXCEL_DRIVE_ID || "").trim();
   const tubiExcelDriveNameEnv = (import.meta.env.VITE_TUBI_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
   const tubiExcelDriveIdRef = useRef<string | null>(tubiExcelDriveIdEnv || null);
+  const sparkGupsExcelPath = (import.meta.env.VITE_SPARK_GUPS_EXCEL_PATH || "").trim();
+  const sparkGupsExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
+  const sparkGupsExcelFilename = (import.meta.env.VITE_SP_SPARK_GUPS_FILENAME || import.meta.env.VITE_SPARK_GUPS_EXCEL_FILE || "").trim();
+  const sparkGupsExcelTable = (import.meta.env.VITE_SPARK_GUPS_EXCEL_TABLE || "tblSPARKGUPS").trim();
+  const sparkGupsExcelDriveIdEnv = (import.meta.env.VITE_SPARK_GUPS_EXCEL_DRIVE_ID || "").trim();
+  const sparkGupsExcelDriveNameEnv = (import.meta.env.VITE_SPARK_GUPS_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
+  const sparkGupsExcelDriveIdRef = useRef<string | null>(sparkGupsExcelDriveIdEnv || null);
   const sharepointService = useMemo(() => {
     if (!siteId) return null;
     return new SharePointService(getClient, siteId);
   }, [getClient, siteId]);
   const flowService = useMemo(() => new PowerAutomateService(), []);
   const [view, setView] = useState<'dashboard' | 'inventory' | 'update-stock' | 'website' | 'docs' | 'admin'>('dashboard');
-  const [activeTab, setActiveTab] = useState<"forgiati" | "oring-hnbr" | "oring-nbr" | "tubi">("forgiati");
+  const [activeTab, setActiveTab] = useState<"forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups">("forgiati");
   const [cartItems, setCartItems] = useState<Record<string, CartItem>>({});
   const [selectionMessage, setSelectionMessage] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, EditableItemState>>({});
@@ -3065,6 +3512,7 @@ function AuthenticatedShell() {
     if (item.source === "FORGIATI") return toStr((raw as any).field_1);
     if (item.source === "TUBI") return toStr((raw as any).field_2);
     if (item.source === "ORING-HNBR") return toStr((raw as any).field_18);
+    if (item.source === "SPARK-GUPS") return toStr((raw as any).field_4);
     return "";
   };
 
@@ -3136,7 +3584,16 @@ function AuthenticatedShell() {
         const isForgiati = item.source === "FORGIATI";
         const isOring = item.source === "ORING-HNBR";
         const isOringNbr = item.source === "ORING-NBR";
-        const listId = isForgiati ? forgiatiListId : isOring ? oringHnbrListId : isOringNbr ? oringNbrListId : tubiListId;
+        const isSpark = item.source === "SPARK-GUPS";
+        const listId = isForgiati
+          ? forgiatiListId
+          : isOring
+          ? oringHnbrListId
+          : isOringNbr
+          ? oringNbrListId
+          : isSpark
+          ? sparkGupsListId
+          : tubiListId;
         if (!listId) {
           throw new Error(`List ID non configurato per ${item.source}.`);
         }
@@ -3167,6 +3624,22 @@ function AuthenticatedShell() {
               field_16: toNumberOrNull(values.giacenza),
               field_15: toNumberOrNull(values.prenotazione),
               field_17: toIsoOrNull(values.dataPrelievo),
+            }
+          : isSpark
+          ? {
+              field_1: values.lotto ?? null,
+              field_2: values.codiceSam ?? null,
+              field_3: values.tipologiaArticolo ?? null,
+              field_4: values.nrOrdine ?? null,
+              field_5: values.dataOrdine ?? null,
+              field_6: values.fornitore ?? null,
+              field_7: values.qtaOrdinata ?? null,
+              field_8: values.bolla ?? null,
+              field_9: values.dataConsegna ?? null,
+              field_10: values.giacenza ?? null,
+              field_11: values.dataUltimoPrelievo ?? null,
+              field_12: values.prezzoUnitario ?? null,
+              field_13: values.commessa ?? null,
             }
           : {
               field_21: toIsoOrNull(values.dataUltimoPrelievo),
@@ -3389,6 +3862,92 @@ function AuthenticatedShell() {
         }
       }
 
+      const sparkUpdates = updates.filter((update) => update.item.source === "SPARK-GUPS");
+      if (sparkUpdates.length > 0) {
+        try {
+          const resolvedPath =
+            sparkGupsExcelPath || (sparkGupsExcelFolder && sparkGupsExcelFilename ? `${sparkGupsExcelFolder}/${sparkGupsExcelFilename}` : "");
+          let resolvedDriveId = sparkGupsExcelDriveIdRef.current;
+          if (!resolvedDriveId && sparkGupsExcelDriveNameEnv) {
+            resolvedDriveId = await sharepointService.getDriveIdByName(sparkGupsExcelDriveNameEnv);
+            sparkGupsExcelDriveIdRef.current = resolvedDriveId;
+          }
+          if (!resolvedDriveId && sparkGupsExcelDriveNameEnv) {
+            throw new Error(`Libreria "${sparkGupsExcelDriveNameEnv}" non trovata`);
+          }
+          if (!resolvedPath || !sparkGupsExcelTable) {
+            throw new Error("Percorso Excel o tabella non configurati");
+          }
+
+          const driveItem = await sharepointService.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
+          const columns = await sharepointService.listWorkbookTableColumnsByItemId(driveItem.id, sparkGupsExcelTable, resolvedDriveId || undefined);
+          const rows = await sharepointService.listWorkbookTableRowsByItemId(driveItem.id, sparkGupsExcelTable, resolvedDriveId || undefined);
+          const dataBodyRange = await sharepointService.getWorkbookTableDataBodyRangeByItemId(
+            driveItem.id,
+            sparkGupsExcelTable,
+            resolvedDriveId || undefined
+          );
+          const titleIndex = getSparkExcelColumnIndex(columns, "Title");
+          if (titleIndex === null) {
+            throw new Error("Colonna Title non trovata nella tabella Excel");
+          }
+          const sessionId = await sharepointService.createWorkbookSessionByItemId(
+            driveItem.id,
+            { persistChanges: true },
+            resolvedDriveId || undefined
+          );
+          const missing: string[] = [];
+          try {
+            for (const update of sparkUpdates) {
+              const lottoValue = toStr((update.payload as any)?.field_1 ?? (update.item.fields as any)?.field_1);
+              const rowIndex = findSparkExcelRowIndex(rows, columns, {
+                codice: update.item.title,
+                lotto: lottoValue,
+              });
+              if (rowIndex === null) {
+                missing.push(`${update.item.title}${lottoValue ? ` (${lottoValue})` : ""}`);
+                continue;
+              }
+              const rowRange = buildRowRangeAddress(dataBodyRange.address, rowIndex, dataBodyRange.rowCount);
+              if (!rowRange) {
+                missing.push(`${update.item.title}${lottoValue ? ` (${lottoValue})` : ""}`);
+                continue;
+              }
+              const excelFields = {
+                ...(update.item.fields || {}),
+                ...update.payload,
+              } as Record<string, unknown>;
+              const rowValues = buildSparkExcelRow(columns, excelFields);
+              await sharepointService.updateWorkbookRangeByAddress(
+                driveItem.id,
+                rowRange.sheetName,
+                rowRange.address,
+                [rowValues],
+                { sessionId },
+                resolvedDriveId || undefined
+              );
+            }
+          } finally {
+            try {
+              await sharepointService.closeWorkbookSessionByItemId(
+                driveItem.id,
+                sessionId,
+                resolvedDriveId || undefined
+              );
+            } catch (closeErr) {
+              console.warn("Errore chiusura sessione Excel SPARK GUPS", closeErr);
+            }
+          }
+
+          if (missing.length > 0) {
+            throw new Error(`Righe non trovate: ${missing.join(", ")}`);
+          }
+        } catch (excelErr: any) {
+          console.error("Errore aggiornamento Excel SPARK GUPS", excelErr);
+          excelErrors.push(`SPARK GUPS: ${excelErr?.message || "Errore aggiornamento Excel"}`);
+        }
+      }
+
       const account = accounts[0];
       const sources = Array.from(new Set(cartList.map((i) => i.source)));
       const flowPayload = {
@@ -3401,6 +3960,7 @@ function AuthenticatedShell() {
         hasTubi: sources.includes("TUBI"),
         hasOringHnbr: sources.includes("ORING-HNBR"),
         hasOringNbr: sources.includes("ORING-NBR"),
+        hasSparkGups: sources.includes("SPARK-GUPS"),
         items: cartList.map((item) => {
           const values = editValues[item.key] || buildEditableState(item);
           const isTubi = item.source === "TUBI";
@@ -3420,6 +3980,16 @@ function AuthenticatedShell() {
             dataPrelievo: isForgiati ? values.dataPrelievo ?? null : null,
             giacenzaQt: isForgiati ? values.giacenzaQt ?? null : null,
             giacenzaBarra: isForgiati ? values.giacenzaBarra ?? null : null,
+            lotto: values.lotto ?? null,
+            codiceSam: values.codiceSam ?? null,
+            tipologiaArticolo: values.tipologiaArticolo ?? null,
+            nrOrdine: values.nrOrdine ?? null,
+            dataOrdine: values.dataOrdine ?? null,
+            fornitore: values.fornitore ?? null,
+            qtaOrdinata: values.qtaOrdinata ?? null,
+            bolla: values.bolla ?? null,
+            dataConsegna: values.dataConsegna ?? null,
+            prezzoUnitario: values.prezzoUnitario ?? null,
           };
         }),
         timestamp: new Date().toISOString(),
@@ -3450,6 +4020,7 @@ function AuthenticatedShell() {
     forgiatiListId,
     oringHnbrListId,
     oringNbrListId,
+    sparkGupsListId,
     sharepointService,
     tubiListId,
     forgiatiExcelPath,
@@ -3462,6 +4033,11 @@ function AuthenticatedShell() {
     tubiExcelFilename,
     tubiExcelTable,
     tubiExcelDriveNameEnv,
+    sparkGupsExcelPath,
+    sparkGupsExcelFolder,
+    sparkGupsExcelFilename,
+    sparkGupsExcelTable,
+    sparkGupsExcelDriveNameEnv,
   ]);
 
   const renderActivePanel = () => {
@@ -3478,6 +4054,8 @@ function AuthenticatedShell() {
         return <OringNbrPanel {...selectionProps} />;
       case "tubi":
         return <TubiPanel {...selectionProps} />;
+      case "spark-gups":
+        return <SparkGupsPanel {...selectionProps} />;
       default:
         return <ForgiatiPanel {...selectionProps} />;
     }
@@ -3574,6 +4152,7 @@ function AuthenticatedShell() {
               tubiListId={tubiListId}
               oringHnbrListId={oringHnbrListId}
               oringNbrListId={oringNbrListId}
+              sparkGupsListId={sparkGupsListId}
             />
           </main>
         </div>
@@ -3667,6 +4246,8 @@ function AuthenticatedShell() {
                             ? "cart-row-tubi"
                             : item.source === "ORING-HNBR"
                             ? "cart-row-oring"
+                            : item.source === "SPARK-GUPS"
+                            ? "cart-row-spark"
                             : "cart-row-oring-nbr"
                         }`}
                       >

@@ -1988,6 +1988,7 @@ h3 { font-size: 20px; }
 .stock-card--tubi { border-left: 8px solid #16a34a; }
 .stock-card--oring { border-left: 8px solid #f59e0b; }
 .stock-card--oring-nbr { border-left: 8px solid #a855f7; }
+.stock-card--spark { border-left: 8px solid #0ea5e9; }
 
 .stock-card__head {
   display: flex;
@@ -2042,6 +2043,7 @@ h3 { font-size: 20px; }
 .stock-card__body.is-tubi .field { border-color: rgba(22, 163, 74, 0.3); background: rgba(22,163,74,0.05); }
 .stock-card__body.is-oring .field { border-color: rgba(245, 158, 11, 0.28); background: rgba(245,158,11,0.06); }
 .stock-card__body.is-oring-nbr .field { border-color: rgba(168, 85, 247, 0.28); background: rgba(168,85,247,0.06); }
+.stock-card__body.is-spark .field { border-color: rgba(14, 165, 233, 0.28); background: rgba(14,165,233,0.06); }
 
 .field.full { grid-column: 1 / -1; }
 
@@ -2121,6 +2123,7 @@ h3 { font-size: 20px; }
 .stock-card__body.is-tubi { border-color: rgba(22, 163, 74, 0.35); background: linear-gradient(180deg, rgba(22,163,74,0.06), #f8fff9); }
 .stock-card__body.is-oring { border-color: rgba(245, 158, 11, 0.45); background: linear-gradient(180deg, rgba(245,158,11,0.09), #fffdf5); }
 .stock-card__body.is-oring-nbr { border-color: rgba(168, 85, 247, 0.45); background: linear-gradient(180deg, rgba(168,85,247,0.1), #fbf7ff); }
+.stock-card__body.is-spark { border-color: rgba(14, 165, 233, 0.4); background: linear-gradient(180deg, rgba(14,165,233,0.08), #f4fbff); }
 
 .section-heading {
   display: flex;
@@ -2360,6 +2363,7 @@ h3 { font-size: 20px; }
 .cart-row-tubi { background: rgba(22, 163, 74, 0.08); border-left: 6px solid rgba(22, 163, 74, 0.5); }
 .cart-row-oring { background: rgba(245, 158, 11, 0.12); border-left: 6px solid rgba(245, 158, 11, 0.6); }
 .cart-row-oring-nbr { background: rgba(168, 85, 247, 0.10); border-left: 6px solid rgba(168, 85, 247, 0.55); }
+.cart-row-spark { background: rgba(14, 165, 233, 0.1); border-left: 6px solid rgba(14, 165, 233, 0.55); }
 .cart-row:hover { box-shadow: inset 0 1px 0 rgba(255,255,255,0.8); }
 
 .icon-btn.danger {

@@ -5,7 +5,7 @@ import { useCachedList } from "../../hooks/useCachedList";
 import { formatSharePointDate } from "../../utils/dateUtils";
 import { SharePointListItem } from "../../types/sharepoint";
 
-type ListKind = "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR";
+type ListKind = "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS";
 
 type FieldType = "text" | "number" | "date" | "textarea";
 
@@ -27,6 +27,7 @@ type AdminPanelProps = {
   tubiListId?: string;
   oringHnbrListId?: string;
   oringNbrListId?: string;
+  sparkGupsListId?: string;
 };
 
 const FORGIATI_FIELDS: FieldConfig[] = [
@@ -138,6 +139,23 @@ const ORING_NBR_FIELDS: FieldConfig[] = [
   { key: "field_17", label: "Data prelievo", type: "date" },
 ];
 
+const SPARK_GUPS_FIELDS: FieldConfig[] = [
+  { key: "Title", label: "Title", required: true, placeholder: "Es. SPK-001" },
+  { key: "field_1", label: "Lotto" },
+  { key: "field_2", label: "Codice SAM" },
+  { key: "field_3", label: "Tipologia Articolo" },
+  { key: "field_4", label: "N. Ordine" },
+  { key: "field_5", label: "Data Ordine" },
+  { key: "field_6", label: "Fornitore" },
+  { key: "field_7", label: "Quantità Ordinata" },
+  { key: "field_8", label: "N. Bolla" },
+  { key: "field_9", label: "Data Consegna" },
+  { key: "field_10", label: "Giacenza" },
+  { key: "field_11", label: "Data Ultimo Prelievo" },
+  { key: "field_12", label: "Prezzo unitario" },
+  { key: "field_13", label: "Commessa" },
+];
+
 const toStr = (val: unknown): string => {
   if (val === null || val === undefined) return "";
   return String(val);
@@ -225,6 +243,7 @@ const normalizeExcelKey = (value: string) =>
 
 const TUBI_DATE_FIELDS = new Set(["field_3", "field_16", "field_21", "Modified", "Created"]);
 const FORGIATI_DATE_FIELDS = new Set(["field_2", "field_11", "field_23", "Modified", "Created"]);
+const SPARK_DATE_FIELDS = new Set<string>();
 
 const toExcelDateString = (val: unknown): string => {
   const t = getTimeValue(val);
@@ -236,9 +255,13 @@ const toExcelDateString = (val: unknown): string => {
   });
 };
 
-const toExcelCellValue = (fieldKey: string | null, value: unknown): string | number | boolean | null => {
+const toExcelCellValueForDateFields = (
+  dateFields: Set<string>,
+  fieldKey: string | null,
+  value: unknown
+): string | number | boolean | null => {
   if (!fieldKey) return "";
-  if (TUBI_DATE_FIELDS.has(fieldKey)) {
+  if (dateFields.has(fieldKey)) {
     return toExcelDateString(value);
   }
   if (value === null || value === undefined) return "";
@@ -246,14 +269,12 @@ const toExcelCellValue = (fieldKey: string | null, value: unknown): string | num
   return String(value);
 };
 
+const toExcelCellValue = (fieldKey: string | null, value: unknown): string | number | boolean | null => {
+  return toExcelCellValueForDateFields(TUBI_DATE_FIELDS, fieldKey, value);
+};
+
 const toForgiatiExcelCellValue = (fieldKey: string | null, value: unknown): string | number | boolean | null => {
-  if (!fieldKey) return "";
-  if (FORGIATI_DATE_FIELDS.has(fieldKey)) {
-    return toExcelDateString(value);
-  }
-  if (value === null || value === undefined) return "";
-  if (typeof value === "number" || typeof value === "boolean") return value;
-  return String(value);
+  return toExcelCellValueForDateFields(FORGIATI_DATE_FIELDS, fieldKey, value);
 };
 
 const buildTubiExcelColumnMap = () => {
@@ -352,6 +373,31 @@ const buildForgiatiExcelColumnMap = () => {
 
 const FORGIATI_EXCEL_COLUMN_MAP = buildForgiatiExcelColumnMap();
 
+const buildSparkExcelColumnMap = () => {
+  const map = new Map<string, string>();
+  map.set(normalizeExcelKey("CODICE"), "Title");
+  map.set(normalizeExcelKey("TITLE"), "Title");
+  map.set(normalizeExcelKey("LOTTO"), "field_1");
+  map.set(normalizeExcelKey("CODICE SAM"), "field_2");
+  map.set(normalizeExcelKey("TIPOLOGIA ARTICOLO"), "field_3");
+  map.set(normalizeExcelKey("N ORDINE"), "field_4");
+  map.set(normalizeExcelKey("N. ORDINE"), "field_4");
+  map.set(normalizeExcelKey("DATA ORDINE"), "field_5");
+  map.set(normalizeExcelKey("FORNITORE"), "field_6");
+  map.set(normalizeExcelKey("QUANTITA ORDINATA"), "field_7");
+  map.set(normalizeExcelKey("QUANTITÀ ORDINATA"), "field_7");
+  map.set(normalizeExcelKey("N BOLLA"), "field_8");
+  map.set(normalizeExcelKey("N. BOLLA"), "field_8");
+  map.set(normalizeExcelKey("DATA CONSEGNA"), "field_9");
+  map.set(normalizeExcelKey("GIACENZA"), "field_10");
+  map.set(normalizeExcelKey("DATA ULTIMO PRELIEVO"), "field_11");
+  map.set(normalizeExcelKey("PREZZO UNITARIO"), "field_12");
+  map.set(normalizeExcelKey("COMMESSA"), "field_13");
+  return map;
+};
+
+const SPARK_EXCEL_COLUMN_MAP = buildSparkExcelColumnMap();
+
 const buildTubiExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
   const fieldKeyLookup = new Map<string, string>();
   Object.keys(fields).forEach((key) => {
@@ -382,6 +428,20 @@ const buildForgiatiExcelRow = (excelColumns: string[], fields: Record<string, un
   });
 };
 
+const buildSparkExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
+  const fieldKeyLookup = new Map<string, string>();
+  Object.keys(fields).forEach((key) => {
+    fieldKeyLookup.set(normalizeExcelKey(key), key);
+  });
+
+  return excelColumns.map((columnName) => {
+    const normalized = normalizeExcelKey(columnName || "");
+    const fieldKey =
+      SPARK_EXCEL_COLUMN_MAP.get(normalized) || fieldKeyLookup.get(normalized) || null;
+    const rawValue = fieldKey ? fields[fieldKey] : null;
+    return toExcelCellValueForDateFields(SPARK_DATE_FIELDS, fieldKey, rawValue);
+  });
+};
 const getExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
   const target = normalizeExcelKey(fieldKey);
   for (let i = 0; i < excelColumns.length; i++) {
@@ -399,6 +459,18 @@ const getForgiatiExcelColumnIndex = (excelColumns: string[], fieldKey: string) =
   for (let i = 0; i < excelColumns.length; i++) {
     const normalized = normalizeExcelKey(excelColumns[i] || "");
     const mapped = FORGIATI_EXCEL_COLUMN_MAP.get(normalized);
+    if (mapped && normalizeExcelKey(mapped) === target) {
+      return i;
+    }
+  }
+  return null;
+};
+
+const getSparkExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
+  const target = normalizeExcelKey(fieldKey);
+  for (let i = 0; i < excelColumns.length; i++) {
+    const normalized = normalizeExcelKey(excelColumns[i] || "");
+    const mapped = SPARK_EXCEL_COLUMN_MAP.get(normalized);
     if (mapped && normalizeExcelKey(mapped) === target) {
       return i;
     }
@@ -455,6 +527,32 @@ const findForgiatiExcelRowIndex = (
       identVal === targetIdent ||
       (!identVal && targetIdent === "a");
     if (codiceVal === targetCodice && identMatches) {
+      return row.index;
+    }
+  }
+
+  return null;
+};
+
+const findSparkExcelRowIndex = (
+  rows: Array<{ index: number; values: Array<Array<unknown>> }>,
+  excelColumns: string[],
+  options: { codice: string; lotto?: string }
+) => {
+  const titleIdx = getSparkExcelColumnIndex(excelColumns, "Title");
+  if (titleIdx === null) return null;
+  const lottoIdx = getSparkExcelColumnIndex(excelColumns, "field_1");
+
+  const targetCodice = normalizeExcelKey(options.codice || "");
+  const targetLotto = normalizeExcelKey(options.lotto || "");
+
+  for (const row of rows) {
+    const rowValues = row.values?.[0] || [];
+    const codiceVal = normalizeExcelKey(String(rowValues[titleIdx] ?? ""));
+    if (codiceVal !== targetCodice) continue;
+    if (lottoIdx === null) return row.index;
+    const lottoVal = normalizeExcelKey(String(rowValues[lottoIdx] ?? ""));
+    if (lottoVal === targetLotto || (!lottoVal && !targetLotto)) {
       return row.index;
     }
   }
@@ -551,12 +649,14 @@ const LIST_OPTIONS: { kind: ListKind; label: string }[] = [
   { kind: "ORING-HNBR", label: "2_ORING-HNBR" },
   { kind: "ORING-NBR", label: "2_ORING-NBR" },
   { kind: "TUBI", label: "3_TUBI" },
+  { kind: "SPARK-GUPS", label: "6_SPARK GUPS" },
 ];
 
 const getFieldSet = (kind: ListKind) => {
   if (kind === "FORGIATI") return FORGIATI_FIELDS;
   if (kind === "TUBI") return TUBI_FIELDS;
   if (kind === "ORING-HNBR") return ORING_HNBR_FIELDS;
+  if (kind === "SPARK-GUPS") return SPARK_GUPS_FIELDS;
   return ORING_NBR_FIELDS;
 };
 
@@ -564,6 +664,7 @@ const getListNoun = (kind: ListKind) => {
   if (kind === "FORGIATI") return "forgiato";
   if (kind === "TUBI") return "tubo";
   if (kind === "ORING-HNBR") return "oring HNBR";
+  if (kind === "SPARK-GUPS") return "spark gups";
   return "oring NBR";
 };
 
@@ -571,6 +672,7 @@ const getSortDateKey = (kind: ListKind) => {
   if (kind === "FORGIATI") return "field_2";
   if (kind === "TUBI") return "field_3";
   if (kind === "ORING-HNBR") return "field_19";
+  if (kind === "SPARK-GUPS") return "field_5";
   return "field_17";
 };
 
@@ -578,6 +680,7 @@ const getSearchKeys = (kind: ListKind) => {
   if (kind === "FORGIATI") return ["Title", "field_10", "field_13"];
   if (kind === "TUBI") return ["Title", "field_15", "field_18"];
   if (kind === "ORING-HNBR") return ["Title", "field_18", "field_12", "field_2"];
+  if (kind === "SPARK-GUPS") return ["Title", "field_1", "field_4", "field_8"];
   return ["Title", "field_11", "field_1"];
 };
 
@@ -609,6 +712,14 @@ const getSummaryMeta = (
       { label: "Giacenza", value: toStr(fields.field_15) || "-" },
     ];
   }
+  if (kind === "SPARK-GUPS") {
+    return [
+      { label: "Lotto", value: toStr(fields.field_1) || "-" },
+      { label: "Ordine", value: toStr(fields.field_4) || "-" },
+      { label: "Bolla", value: toStr(fields.field_8) || "-" },
+      { label: "Giacenza", value: toStr(fields.field_10) || "-" },
+    ];
+  }
   return [
     { label: "Commessa", value: toStr(fields.field_11) || "-" },
     { label: "Prenotazione", value: toStr(fields.field_15) || "-" },
@@ -616,7 +727,14 @@ const getSummaryMeta = (
   ];
 };
 
-export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId, oringNbrListId }: AdminPanelProps) {
+export function AdminPanel({
+  siteId,
+  forgiatiListId,
+  tubiListId,
+  oringHnbrListId,
+  oringNbrListId,
+  sparkGupsListId,
+}: AdminPanelProps) {
   const getClient = useAuthenticatedGraphClient();
   const forgiatiExcelPath = (import.meta.env.VITE_FORGIATI_EXCEL_PATH || "").trim();
   const forgiatiExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
@@ -632,6 +750,13 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
   const tubiExcelDriveIdEnv = (import.meta.env.VITE_TUBI_EXCEL_DRIVE_ID || "").trim();
   const tubiExcelDriveNameEnv = (import.meta.env.VITE_TUBI_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
   const [tubiExcelDriveId, setTubiExcelDriveId] = useState<string | null>(tubiExcelDriveIdEnv || null);
+  const sparkExcelPath = (import.meta.env.VITE_SPARK_GUPS_EXCEL_PATH || "").trim();
+  const sparkExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
+  const sparkExcelFilename = (import.meta.env.VITE_SP_SPARK_GUPS_FILENAME || import.meta.env.VITE_SPARK_GUPS_EXCEL_FILE || "").trim();
+  const sparkExcelTable = (import.meta.env.VITE_SPARK_GUPS_EXCEL_TABLE || "tblSPARKGUPS").trim();
+  const sparkExcelDriveIdEnv = (import.meta.env.VITE_SPARK_GUPS_EXCEL_DRIVE_ID || "").trim();
+  const sparkExcelDriveNameEnv = (import.meta.env.VITE_SPARK_GUPS_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
+  const [sparkExcelDriveId, setSparkExcelDriveId] = useState<string | null>(sparkExcelDriveIdEnv || null);
 
   const service = useMemo(() => {
     if (!siteId) return null;
@@ -665,6 +790,13 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
     refresh: refreshOringNbr,
   } = useCachedList<Record<string, unknown>>(service, oringNbrListId, "admin-oring-nbr");
 
+  const {
+    data: sparkGupsItems,
+    loading: sparkGupsLoading,
+    error: sparkGupsError,
+    refresh: refreshSparkGups,
+  } = useCachedList<Record<string, unknown>>(service, sparkGupsListId, "admin-spark-gups");
+
   const [activeList, setActiveList] = useState<ListKind>("FORGIATI");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -685,6 +817,8 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
       ? tubiItems
       : activeList === "ORING-HNBR"
       ? oringHnbrItems
+      : activeList === "SPARK-GUPS"
+      ? sparkGupsItems
       : oringNbrItems;
   const activeLoading =
     activeList === "FORGIATI"
@@ -693,6 +827,8 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
       ? tubiLoading
       : activeList === "ORING-HNBR"
       ? oringHnbrLoading
+      : activeList === "SPARK-GUPS"
+      ? sparkGupsLoading
       : oringNbrLoading;
   const activeError =
     activeList === "FORGIATI"
@@ -701,6 +837,8 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
       ? tubiError
       : activeList === "ORING-HNBR"
       ? oringHnbrError
+      : activeList === "SPARK-GUPS"
+      ? sparkGupsError
       : oringNbrError;
   const activeListId =
     activeList === "FORGIATI"
@@ -709,6 +847,8 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
       ? tubiListId
       : activeList === "ORING-HNBR"
       ? oringHnbrListId
+      : activeList === "SPARK-GUPS"
+      ? sparkGupsListId
       : oringNbrListId;
   const activeRefresh =
     activeList === "FORGIATI"
@@ -717,6 +857,8 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
       ? refreshTubi
       : activeList === "ORING-HNBR"
       ? refreshOringHnbr
+      : activeList === "SPARK-GUPS"
+      ? refreshSparkGups
       : refreshOringNbr;
   const fieldSet = getFieldSet(activeList);
 
@@ -901,18 +1043,23 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
     try {
       await service.updateItem<Record<string, unknown>>(activeListId, selectedId, payload);
       let excelError: string | null = null;
-      if (activeList === "TUBI" || activeList === "FORGIATI") {
+      if (activeList === "TUBI" || activeList === "FORGIATI" || activeList === "SPARK-GUPS") {
         try {
           const isForgiati = activeList === "FORGIATI";
+          const isSpark = activeList === "SPARK-GUPS";
           const resolvedPath = isForgiati
             ? forgiatiExcelPath || (forgiatiExcelFolder && forgiatiExcelFilename ? `${forgiatiExcelFolder}/${forgiatiExcelFilename}` : "")
+            : isSpark
+            ? sparkExcelPath || (sparkExcelFolder && sparkExcelFilename ? `${sparkExcelFolder}/${sparkExcelFilename}` : "")
             : tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : "");
-          let resolvedDriveId = isForgiati ? forgiatiExcelDriveId : tubiExcelDriveId;
-          const driveNameEnv = isForgiati ? forgiatiExcelDriveNameEnv : tubiExcelDriveNameEnv;
+          let resolvedDriveId = isForgiati ? forgiatiExcelDriveId : isSpark ? sparkExcelDriveId : tubiExcelDriveId;
+          const driveNameEnv = isForgiati ? forgiatiExcelDriveNameEnv : isSpark ? sparkExcelDriveNameEnv : tubiExcelDriveNameEnv;
           if (!resolvedDriveId && driveNameEnv) {
             resolvedDriveId = await service.getDriveIdByName(driveNameEnv);
             if (isForgiati) {
               setForgiatiExcelDriveId(resolvedDriveId);
+            } else if (isSpark) {
+              setSparkExcelDriveId(resolvedDriveId);
             } else {
               setTubiExcelDriveId(resolvedDriveId);
             }
@@ -920,7 +1067,7 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
           if (!resolvedDriveId && driveNameEnv) {
             throw new Error(`Libreria "${driveNameEnv}" non trovata`);
           }
-          const tableName = isForgiati ? forgiatiExcelTable : tubiExcelTable;
+          const tableName = isForgiati ? forgiatiExcelTable : isSpark ? sparkExcelTable : tubiExcelTable;
           if (!resolvedPath || !tableName) {
             throw new Error("Percorso Excel o tabella non configurati");
           }
@@ -941,10 +1088,14 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
           const rows = await service.listWorkbookTableRowsByItemId(driveItem.id, tableName, resolvedDriveId || undefined);
           const rowIndex = isForgiati
             ? findForgiatiExcelRowIndex(rows, columns, { codice: lookupTitle, identLotto })
+            : isSpark
+            ? findSparkExcelRowIndex(rows, columns, { codice: lookupTitle, lotto: toStr(editForm.field_1) })
             : findExcelRowIndex(rows, columns, { codice: lookupTitle, identLotto });
 
           if (rowIndex === null) {
-            throw new Error(`Riga Excel non trovata per ${editForm.Title || "codice"} (${identLotto})`);
+            throw new Error(
+              `Riga Excel non trovata per ${editForm.Title || "codice"}${isSpark ? "" : ` (${identLotto})`}`
+            );
           }
 
           const dataBodyRange = await service.getWorkbookTableDataBodyRangeByItemId(
@@ -960,10 +1111,12 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
           const excelFields = {
             ...(currentItem?.fields || {}),
             ...payload,
-            IdentLotto: identLotto,
+            ...(isSpark ? {} : { IdentLotto: identLotto }),
           } as Record<string, unknown>;
           const rowValues = isForgiati
             ? buildForgiatiExcelRow(columns, excelFields)
+            : isSpark
+            ? buildSparkExcelRow(columns, excelFields)
             : buildTubiExcelRow(columns, excelFields);
           const sessionId = await service.createWorkbookSessionByItemId(
             driveItem.id,
@@ -1021,6 +1174,12 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
     tubiExcelTable,
     tubiExcelDriveId,
     tubiExcelDriveNameEnv,
+    sparkExcelPath,
+    sparkExcelFolder,
+    sparkExcelFilename,
+    sparkExcelTable,
+    sparkExcelDriveId,
+    sparkExcelDriveNameEnv,
   ]);
 
   const handleCreate = useCallback(async () => {
