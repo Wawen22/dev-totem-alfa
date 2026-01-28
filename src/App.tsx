@@ -76,6 +76,28 @@ const getTimeValue = (val: unknown): number => {
     // Excel serial
     return (val - 25569) * 86400 * 1000;
   }
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const serial = Number(trimmed);
+      return (serial - 25569) * 86400 * 1000;
+    }
+    const itMatch = trimmed.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);
+    if (itMatch) {
+      const day = Number(itMatch[1]);
+      const month = Number(itMatch[2]);
+      let year = Number(itMatch[3]);
+      if (year < 100) year += 2000;
+      const date = new Date(year, month - 1, day);
+      if (
+        date.getFullYear() === year &&
+        date.getMonth() === month - 1 &&
+        date.getDate() === day
+      ) {
+        return date.getTime();
+      }
+    }
+  }
   const d = new Date(String(val));
   return isNaN(d.getTime()) ? 0 : d.getTime();
 };
@@ -141,6 +163,8 @@ const formatLottoProg = (val: string | undefined | null) => {
 
 const normalizeExcelKey = (value: string) =>
   value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 

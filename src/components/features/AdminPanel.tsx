@@ -79,12 +79,13 @@ const TUBI_FIELDS: FieldConfig[] = [
   { key: "field_13", label: "PED" },
   { key: "field_14", label: "HIC" },
   { key: "field_15", label: "N° Bolla" },
+  { key: "field_17", label: "N° Certificato" },
   { key: "field_18", label: "N° Colata" },
   { key: "field_25", label: "No. Commessa" },
   { key: "field_21", label: "Data ultimo prelievo" },
   { key: "field_19", label: "Giacenza contab. (mm)", placeholder: "es. 100+20" },
   { key: "field_20", label: "Giacenza non tagliato (mm)" },
-  { key: "field_16", label: "Data consegna" },
+  { key: "field_16", label: "Data consegna", type: "date" },
   { key: "field_22", label: "Prezzo kg/mt" },
   { key: "field_23", label: "Prezzo metro" },
   { key: "field_24", label: "Acquistato dal Curatore" },
@@ -154,6 +155,21 @@ const getTimeValue = (val: unknown): number => {
       const serial = Number(trimmed);
       return (serial - 25569) * 86400 * 1000;
     }
+    const itMatch = trimmed.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);
+    if (itMatch) {
+      const day = Number(itMatch[1]);
+      const month = Number(itMatch[2]);
+      let year = Number(itMatch[3]);
+      if (year < 100) year += 2000;
+      const date = new Date(year, month - 1, day);
+      if (
+        date.getFullYear() === year &&
+        date.getMonth() === month - 1 &&
+        date.getDate() === day
+      ) {
+        return date.getTime();
+      }
+    }
   }
   const parsed = new Date(val as any);
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
@@ -184,6 +200,8 @@ const formatLottoProg = (val: string | undefined | null) => {
 
 const normalizeExcelKey = (value: string) =>
   value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
