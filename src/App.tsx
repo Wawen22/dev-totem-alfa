@@ -116,7 +116,21 @@ const toStr = (val: unknown): string => {
 
 const toIsoOrNull = (val: string | undefined): string | null => {
   if (!val) return null;
-  const d = new Date(val);
+  const trimmed = val.trim();
+  if (!trimmed) return null;
+  const itMatch = trimmed.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);
+  if (itMatch) {
+    const day = Number(itMatch[1]);
+    const month = Number(itMatch[2]);
+    let year = Number(itMatch[3]);
+    if (year < 100) year += 2000;
+    const yyyy = String(year).padStart(4, "0");
+    const mm = String(month).padStart(2, "0");
+    const dd = String(day).padStart(2, "0");
+    const d = new Date(`${yyyy}-${mm}-${dd}`);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  const d = new Date(trimmed);
   return isNaN(d.getTime()) ? null : d.toISOString();
 };
 

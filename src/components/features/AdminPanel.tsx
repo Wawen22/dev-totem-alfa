@@ -178,12 +178,30 @@ const getTimeValue = (val: unknown): number => {
 const toInputDate = (val: unknown): string => {
   const t = getTimeValue(val);
   if (!t) return "";
-  return new Date(t).toISOString().slice(0, 10);
+  return new Date(t).toLocaleDateString("it-IT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 };
 
 const toIsoOrNull = (val?: string): string | null => {
   if (!val) return null;
-  const d = new Date(val);
+  const trimmed = val.trim();
+  if (!trimmed) return null;
+  const itMatch = trimmed.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);
+  if (itMatch) {
+    const day = Number(itMatch[1]);
+    const month = Number(itMatch[2]);
+    let year = Number(itMatch[3]);
+    if (year < 100) year += 2000;
+    const yyyy = String(year).padStart(4, "0");
+    const mm = String(month).padStart(2, "0");
+    const dd = String(day).padStart(2, "0");
+    const d = new Date(`${yyyy}-${mm}-${dd}`);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  const d = new Date(trimmed);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 };
 
@@ -1043,10 +1061,11 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
   }, [service, activeListId, createForm, activeRefresh, activeList]);
 
   const renderField = (field: FieldConfig, form: FormState, onChange: (key: string, val: string) => void) => {
+    const isDateField = field.type === "date";
     const commonProps = {
       value: form[field.key] ?? "",
       onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(field.key, e.target.value),
-      placeholder: field.placeholder,
+      placeholder: field.placeholder ?? (isDateField ? "gg/mm/aaaa" : undefined),
       disabled: field.writable === false,
     };
 
@@ -1069,7 +1088,8 @@ export function AdminPanel({ siteId, forgiatiListId, tubiListId, oringHnbrListId
           {field.required ? " *" : ""}
         </span>
         <input
-          type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"}
+          type={field.type === "number" ? "number" : "text"}
+          inputMode={isDateField ? "numeric" : undefined}
           {...commonProps}
         />
       </label>
