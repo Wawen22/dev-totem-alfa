@@ -1121,13 +1121,28 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
             resolvedDriveId || undefined
           );
           try {
-            await service.appendWorkbookTableRowByItemId(
-              driveItem.id,
-              forgiatiExcelTable,
-              rowValues,
-              { sessionId, index: insertIndex },
-              resolvedDriveId || undefined
-            );
+            try {
+              await service.appendWorkbookTableRowByItemId(
+                driveItem.id,
+                forgiatiExcelTable,
+                rowValues,
+                { sessionId, index: insertIndex },
+                resolvedDriveId || undefined
+              );
+            } catch (appendErr) {
+              if (insertIndex !== undefined) {
+                console.warn("Inserimento Excel FORGIATI in posizione fallito, riprovo in coda", appendErr);
+                await service.appendWorkbookTableRowByItemId(
+                  driveItem.id,
+                  forgiatiExcelTable,
+                  rowValues,
+                  { sessionId },
+                  resolvedDriveId || undefined
+                );
+              } else {
+                throw appendErr;
+              }
+            }
           } finally {
             try {
               await service.closeWorkbookSessionByItemId(
@@ -2436,13 +2451,28 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
             resolvedDriveId || undefined
           );
           try {
-            await service.appendWorkbookTableRowByItemId(
-              driveItem.id,
-              tubiExcelTable,
-              rowValues,
-              { sessionId, index: insertIndex },
-              resolvedDriveId || undefined
-            );
+            try {
+              await service.appendWorkbookTableRowByItemId(
+                driveItem.id,
+                tubiExcelTable,
+                rowValues,
+                { sessionId, index: insertIndex },
+                resolvedDriveId || undefined
+              );
+            } catch (appendErr) {
+              if (insertIndex !== undefined) {
+                console.warn("Inserimento Excel TUBI in posizione fallito, riprovo in coda", appendErr);
+                await service.appendWorkbookTableRowByItemId(
+                  driveItem.id,
+                  tubiExcelTable,
+                  rowValues,
+                  { sessionId },
+                  resolvedDriveId || undefined
+                );
+              } else {
+                throw appendErr;
+              }
+            }
           } finally {
             try {
               await service.closeWorkbookSessionByItemId(

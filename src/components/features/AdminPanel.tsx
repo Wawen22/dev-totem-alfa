@@ -1523,13 +1523,28 @@ export function AdminPanel({
             resolvedDriveId || undefined
           );
           try {
-            await service.appendWorkbookTableRowByItemId(
-              driveItem.id,
-              tableName,
-              rowValues,
-              { sessionId, index: insertIndex },
-              resolvedDriveId || undefined
-            );
+            try {
+              await service.appendWorkbookTableRowByItemId(
+                driveItem.id,
+                tableName,
+                rowValues,
+                { sessionId, index: insertIndex },
+                resolvedDriveId || undefined
+              );
+            } catch (appendErr) {
+              if (insertIndex !== undefined) {
+                console.warn("Inserimento Excel (admin) in posizione fallito, riprovo in coda", appendErr);
+                await service.appendWorkbookTableRowByItemId(
+                  driveItem.id,
+                  tableName,
+                  rowValues,
+                  { sessionId },
+                  resolvedDriveId || undefined
+                );
+              } else {
+                throw appendErr;
+              }
+            }
           } finally {
             try {
               await service.closeWorkbookSessionByItemId(
