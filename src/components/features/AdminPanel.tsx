@@ -245,14 +245,12 @@ const TUBI_DATE_FIELDS = new Set(["field_3", "field_16", "field_21", "Modified",
 const FORGIATI_DATE_FIELDS = new Set(["field_2", "field_11", "field_23", "Modified", "Created"]);
 const SPARK_DATE_FIELDS = new Set<string>();
 
-const toExcelDateString = (val: unknown): string => {
+const toExcelDateSerial = (val: unknown): number | "" => {
   const t = getTimeValue(val);
   if (!t) return "";
-  return new Date(t).toLocaleDateString("it-IT", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
+  const d = new Date(t);
+  const utcMidnight = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  return utcMidnight / 86400000 + 25569;
 };
 
 const toExcelCellValueForDateFields = (
@@ -262,7 +260,7 @@ const toExcelCellValueForDateFields = (
 ): string | number | boolean | null => {
   if (!fieldKey) return "";
   if (dateFields.has(fieldKey)) {
-    return toExcelDateString(value);
+    return toExcelDateSerial(value);
   }
   if (value === null || value === undefined) return "";
   if (typeof value === "number" || typeof value === "boolean") return value;
