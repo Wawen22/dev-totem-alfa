@@ -560,6 +560,50 @@ const findSparkExcelRowIndex = (
   return null;
 };
 
+const findLastRowIndexByCodice = (
+  rows: Array<{ index: number; values: Array<Array<unknown>> }>,
+  excelColumns: string[],
+  codice: string,
+  getColumnIndex: (columns: string[], fieldKey: string) => number | null
+) => {
+  const titleIdx = getColumnIndex(excelColumns, "Title");
+  if (titleIdx === null) return null;
+  const targetCodice = normalizeExcelKey(codice || "");
+  let lastIndex: number | null = null;
+  rows.forEach((row) => {
+    const rowValues = row.values?.[0] || [];
+    const codiceVal = normalizeExcelKey(String(rowValues[titleIdx] ?? ""));
+    if (codiceVal === targetCodice) {
+      if (lastIndex === null || row.index > lastIndex) {
+        lastIndex = row.index;
+      }
+    }
+  });
+  return lastIndex;
+};
+
+const getNextLottoProg = (items: Array<{ id: string }>, map: Map<string, string>, lastUsedLetter?: string | null) => {
+  let maxCode = 64; // one before 'A'
+  items.forEach((itm) => {
+    const currentProg = map.get(itm.id);
+    if (currentProg) {
+      const prog = formatLottoProg(currentProg);
+      const code = prog.charCodeAt(0);
+      if (code >= 65 && code <= 90 && code > maxCode) {
+        maxCode = code;
+      }
+    }
+  });
+  if (lastUsedLetter) {
+    const letterCode = formatLottoProg(lastUsedLetter).charCodeAt(0);
+    if (letterCode >= 65 && letterCode <= 90 && letterCode > maxCode) {
+      maxCode = letterCode;
+    }
+  }
+  const nextCode = Math.min(90, maxCode + 1);
+  return String.fromCharCode(nextCode < 65 ? 65 : nextCode);
+};
+
 const parseExcelAddress = (address: string) => {
   const [sheetPartRaw, rangePartRaw] = address.split("!");
   const sheetPart = sheetPartRaw || "";
@@ -804,6 +848,9 @@ export function AdminPanel({
   const [createForm, setCreateForm] = useState<FormState>(() => buildFormFromItem(null, FORGIATI_FIELDS));
   const [updateStatus, setUpdateStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [deleteStatus, setDeleteStatus] = useState<"idle" | "deleting" | "success" | "error">("idle");
+  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [createStatus, setCreateStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [createMessage, setCreateMessage] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -1002,6 +1049,9 @@ export function AdminPanel({
     setCreateForm(buildFormFromItem(null, fieldSet));
     setUpdateStatus("idle");
     setUpdateMessage(null);
+    setDeleteStatus("idle");
+    setDeleteMessage(null);
+    setDeletingId(null);
     setCreateStatus("idle");
     setCreateMessage(null);
     setIsCreateOpen(false);
@@ -1182,6 +1232,195 @@ export function AdminPanel({
     sparkExcelDriveNameEnv,
   ]);
 
+  const handleDelete = useCallback(async (item: SharePointListItem<Record<string, unknown>>) => {
+    if (!service) {
+      setDeleteStatus("error");
+      setDeleteMessage("Servizio SharePoint non configurato");
+      return;
+    }
+    if (!activeListId) {
+      setDeleteStatus("error");
+      setDeleteMessage("List ID mancante per la lista selezionata");
+      return;
+    }
+
+    const fields = item.fields as Record<string, unknown>;
+    const title = toStr(fields.Title) || "elemento";
+    let lottoHint = "";
+    if (activeList === "FORGIATI" || activeList === "TUBI") {
+      const identRaw =
+        (fields as any)?.LottoProgressivo ||
+        (item.id
+          ? activeList === "FORGIATI"
+            ? forgiatiProgressiveMap.get(item.id)
+            : tubiProgressiveMap.get(item.id)
+          : undefined);
+      lottoHint = ` (lotto ${formatLottoProg(identRaw || "A")})`;
+    } else if (activeList === "SPARK-GUPS") {
+      const lotto = toStr(fields.field_1);
+      lottoHint = lotto ? ` (lotto ${lotto})` : "";
+    }
+
+    if (!window.confirm(`Eliminare ${getListNoun(activeList)} "${title}"${lottoHint}?`)) {
+      return;
+    }
+
+    setDeleteStatus("deleting");
+    setDeleteMessage(null);
+    setDeletingId(item.id);
+
+    try {
+      await service.deleteItem(activeListId, item.id);
+      let excelError: string | null = null;
+      if (activeList === "TUBI" || activeList === "FORGIATI" || activeList === "SPARK-GUPS") {
+        try {
+          const isForgiati = activeList === "FORGIATI";
+          const isSpark = activeList === "SPARK-GUPS";
+          const resolvedPath = isForgiati
+            ? forgiatiExcelPath || (forgiatiExcelFolder && forgiatiExcelFilename ? `${forgiatiExcelFolder}/${forgiatiExcelFilename}` : "")
+            : isSpark
+            ? sparkExcelPath || (sparkExcelFolder && sparkExcelFilename ? `${sparkExcelFolder}/${sparkExcelFilename}` : "")
+            : tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : "");
+          let resolvedDriveId = isForgiati ? forgiatiExcelDriveId : isSpark ? sparkExcelDriveId : tubiExcelDriveId;
+          const driveNameEnv = isForgiati ? forgiatiExcelDriveNameEnv : isSpark ? sparkExcelDriveNameEnv : tubiExcelDriveNameEnv;
+          if (!resolvedDriveId && driveNameEnv) {
+            resolvedDriveId = await service.getDriveIdByName(driveNameEnv);
+            if (isForgiati) {
+              setForgiatiExcelDriveId(resolvedDriveId);
+            } else if (isSpark) {
+              setSparkExcelDriveId(resolvedDriveId);
+            } else {
+              setTubiExcelDriveId(resolvedDriveId);
+            }
+          }
+          if (!resolvedDriveId && driveNameEnv) {
+            throw new Error(`Libreria "${driveNameEnv}" non trovata`);
+          }
+          const tableName = isForgiati ? forgiatiExcelTable : isSpark ? sparkExcelTable : tubiExcelTable;
+          if (!resolvedPath || !tableName) {
+            throw new Error("Percorso Excel o tabella non configurati");
+          }
+
+          const identRaw =
+            (fields as any)?.LottoProgressivo ||
+            (item.id
+              ? isForgiati
+                ? forgiatiProgressiveMap.get(item.id)
+                : tubiProgressiveMap.get(item.id)
+              : undefined);
+          const identLotto = formatLottoProg(identRaw || "A");
+          const lookupTitle = toStr(fields.Title) || "";
+          const sparkLotto = toStr(fields.field_1);
+
+          const driveItem = await service.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
+          const columns = await service.listWorkbookTableColumnsByItemId(driveItem.id, tableName, resolvedDriveId || undefined);
+          const rows = await service.listWorkbookTableRowsByItemId(driveItem.id, tableName, resolvedDriveId || undefined);
+          const rowIndex = isForgiati
+            ? findForgiatiExcelRowIndex(rows, columns, { codice: lookupTitle, identLotto })
+            : isSpark
+            ? findSparkExcelRowIndex(rows, columns, { codice: lookupTitle, lotto: sparkLotto })
+            : findExcelRowIndex(rows, columns, { codice: lookupTitle, identLotto });
+
+          if (rowIndex === null) {
+            throw new Error(
+              `Riga Excel non trovata per ${lookupTitle || "codice"}${isSpark ? "" : ` (${identLotto})`}`
+            );
+          }
+
+          const dataBodyRange = await service.getWorkbookTableDataBodyRangeByItemId(
+            driveItem.id,
+            tableName,
+            resolvedDriveId || undefined
+          );
+          const rowRange = buildRowRangeAddress(dataBodyRange.address, rowIndex, dataBodyRange.rowCount);
+          if (!rowRange) {
+            throw new Error("Impossibile calcolare la riga Excel da eliminare");
+          }
+
+          const sessionId = await service.createWorkbookSessionByItemId(
+            driveItem.id,
+            { persistChanges: true },
+            resolvedDriveId || undefined
+          );
+          try {
+            try {
+              await service.deleteWorkbookTableRowByIndex(
+                driveItem.id,
+                tableName,
+                rowIndex,
+                { sessionId },
+                resolvedDriveId || undefined
+              );
+            } catch (deleteErr) {
+              await service.deleteWorkbookRangeByAddress(
+                driveItem.id,
+                rowRange.sheetName,
+                rowRange.address,
+                { sessionId, shift: "Up" },
+                resolvedDriveId || undefined
+              );
+            }
+          } finally {
+            try {
+              await service.closeWorkbookSessionByItemId(
+                driveItem.id,
+                sessionId,
+                resolvedDriveId || undefined
+              );
+            } catch (closeErr) {
+              console.warn("Errore chiusura sessione Excel (admin delete)", closeErr);
+            }
+          }
+        } catch (excelErr: any) {
+          console.error("Errore eliminazione Excel (admin)", excelErr);
+          excelError = excelErr?.message || "Errore eliminazione Excel";
+        }
+      }
+
+      setDeleteStatus("success");
+      setDeleteMessage(
+        excelError
+          ? `Elemento eliminato; Excel non aggiornato: ${excelError}`
+          : "Elemento eliminato con successo"
+      );
+      if (selectedId === item.id) {
+        setSelectedId(null);
+      }
+      activeRefresh();
+    } catch (err: any) {
+      setDeleteStatus("error");
+      setDeleteMessage(err?.message || "Errore durante l'eliminazione");
+    } finally {
+      setDeletingId(null);
+    }
+  }, [
+    service,
+    activeListId,
+    activeList,
+    activeRefresh,
+    forgiatiExcelPath,
+    forgiatiExcelFolder,
+    forgiatiExcelFilename,
+    forgiatiExcelTable,
+    forgiatiExcelDriveId,
+    forgiatiExcelDriveNameEnv,
+    tubiExcelPath,
+    tubiExcelFolder,
+    tubiExcelFilename,
+    tubiExcelTable,
+    tubiExcelDriveId,
+    tubiExcelDriveNameEnv,
+    sparkExcelPath,
+    sparkExcelFolder,
+    sparkExcelFilename,
+    sparkExcelTable,
+    sparkExcelDriveId,
+    sparkExcelDriveNameEnv,
+    tubiProgressiveMap,
+    forgiatiProgressiveMap,
+    selectedId,
+  ]);
+
   const handleCreate = useCallback(async () => {
     if (!service) {
       setCreateStatus("error");
@@ -1207,8 +1446,112 @@ export function AdminPanel({
 
     try {
       await service.createItem<Record<string, unknown>>(activeListId, payload);
+      let excelError: string | null = null;
+      if (activeList === "TUBI" || activeList === "FORGIATI" || activeList === "SPARK-GUPS") {
+        try {
+          const isForgiati = activeList === "FORGIATI";
+          const isSpark = activeList === "SPARK-GUPS";
+          const resolvedPath = isForgiati
+            ? forgiatiExcelPath || (forgiatiExcelFolder && forgiatiExcelFilename ? `${forgiatiExcelFolder}/${forgiatiExcelFilename}` : "")
+            : isSpark
+            ? sparkExcelPath || (sparkExcelFolder && sparkExcelFilename ? `${sparkExcelFolder}/${sparkExcelFilename}` : "")
+            : tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : "");
+          let resolvedDriveId = isForgiati ? forgiatiExcelDriveId : isSpark ? sparkExcelDriveId : tubiExcelDriveId;
+          const driveNameEnv = isForgiati ? forgiatiExcelDriveNameEnv : isSpark ? sparkExcelDriveNameEnv : tubiExcelDriveNameEnv;
+          if (!resolvedDriveId && driveNameEnv) {
+            resolvedDriveId = await service.getDriveIdByName(driveNameEnv);
+            if (isForgiati) {
+              setForgiatiExcelDriveId(resolvedDriveId);
+            } else if (isSpark) {
+              setSparkExcelDriveId(resolvedDriveId);
+            } else {
+              setTubiExcelDriveId(resolvedDriveId);
+            }
+          }
+          if (!resolvedDriveId && driveNameEnv) {
+            throw new Error(`Libreria "${driveNameEnv}" non trovata`);
+          }
+          const tableName = isForgiati ? forgiatiExcelTable : isSpark ? sparkExcelTable : tubiExcelTable;
+          if (!resolvedPath || !tableName) {
+            throw new Error("Percorso Excel o tabella non configurati");
+          }
+
+          const titleValue = toStr(payload.Title) || toStr(createForm.Title);
+          const driveItem = await service.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
+          const columns = await service.listWorkbookTableColumnsByItemId(driveItem.id, tableName, resolvedDriveId || undefined);
+          const rows = await service.listWorkbookTableRowsByItemId(driveItem.id, tableName, resolvedDriveId || undefined);
+
+          let rowValues: Array<string | number | boolean | null> = [];
+          let insertIndex: number | undefined = undefined;
+          if (isSpark) {
+            rowValues = buildSparkExcelRow(columns, payload);
+            const insertAfter = findLastRowIndexByCodice(rows, columns, titleValue, getSparkExcelColumnIndex);
+            insertIndex = insertAfter !== null ? insertAfter + 1 : undefined;
+          } else {
+            const baseItems = isForgiati ? forgiatiItems : tubiItems;
+            const map = isForgiati ? forgiatiProgressiveMap : tubiProgressiveMap;
+            const sameTitle = (baseItems || []).filter((item) =>
+              normalizeExcelKey(toStr((item.fields as Record<string, unknown>).Title)) ===
+              normalizeExcelKey(titleValue)
+            );
+            const nextProg = formatLottoProg(getNextLottoProg(sameTitle, map));
+            const excelFields = {
+              ...payload,
+              IdentLotto: nextProg,
+            } as Record<string, unknown>;
+            const identIndex = isForgiati
+              ? getForgiatiExcelColumnIndex(columns, "IdentLotto")
+              : getExcelColumnIndex(columns, "IdentLotto");
+            if (identIndex === null) {
+              throw new Error("Colonna IdentLotto non trovata nella tabella Excel");
+            }
+            rowValues = isForgiati
+              ? buildForgiatiExcelRow(columns, excelFields)
+              : buildTubiExcelRow(columns, excelFields);
+            const insertAfter = findLastRowIndexByCodice(
+              rows,
+              columns,
+              titleValue,
+              isForgiati ? getForgiatiExcelColumnIndex : getExcelColumnIndex
+            );
+            insertIndex = insertAfter !== null ? insertAfter + 1 : undefined;
+          }
+
+          const sessionId = await service.createWorkbookSessionByItemId(
+            driveItem.id,
+            { persistChanges: true },
+            resolvedDriveId || undefined
+          );
+          try {
+            await service.appendWorkbookTableRowByItemId(
+              driveItem.id,
+              tableName,
+              rowValues,
+              { sessionId, index: insertIndex },
+              resolvedDriveId || undefined
+            );
+          } finally {
+            try {
+              await service.closeWorkbookSessionByItemId(
+                driveItem.id,
+                sessionId,
+                resolvedDriveId || undefined
+              );
+            } catch (closeErr) {
+              console.warn("Errore chiusura sessione Excel (admin create)", closeErr);
+            }
+          }
+        } catch (excelErr: any) {
+          console.error("Errore creazione Excel (admin)", excelErr);
+          excelError = excelErr?.message || "Errore creazione Excel";
+        }
+      }
       setCreateStatus("success");
-      setCreateMessage("Nuovo elemento creato");
+      setCreateMessage(
+        excelError
+          ? `Nuovo elemento creato; Excel non aggiornato: ${excelError}`
+          : "Nuovo elemento creato"
+      );
       setCreateForm(buildFormFromItem(null, fields));
       setIsCreateOpen(false);
       activeRefresh();
@@ -1217,7 +1560,35 @@ export function AdminPanel({
       const detail = err?.body?.error?.message || err?.message;
       setCreateMessage(detail || "Errore durante la creazione");
     }
-  }, [service, activeListId, createForm, activeRefresh, activeList]);
+  }, [
+    service,
+    activeListId,
+    createForm,
+    activeRefresh,
+    activeList,
+    forgiatiExcelPath,
+    forgiatiExcelFolder,
+    forgiatiExcelFilename,
+    forgiatiExcelTable,
+    forgiatiExcelDriveId,
+    forgiatiExcelDriveNameEnv,
+    tubiExcelPath,
+    tubiExcelFolder,
+    tubiExcelFilename,
+    tubiExcelTable,
+    tubiExcelDriveId,
+    tubiExcelDriveNameEnv,
+    sparkExcelPath,
+    sparkExcelFolder,
+    sparkExcelFilename,
+    sparkExcelTable,
+    sparkExcelDriveId,
+    sparkExcelDriveNameEnv,
+    forgiatiItems,
+    tubiItems,
+    forgiatiProgressiveMap,
+    tubiProgressiveMap,
+  ]);
 
   const renderField = (field: FieldConfig, form: FormState, onChange: (key: string, val: string) => void) => {
     const isDateField = field.type === "date";
@@ -1379,6 +1750,11 @@ export function AdminPanel({
             </div>
 
             <div className="admin-list">
+              {deleteMessage && (
+                <div className={`alert ${deleteStatus === "success" ? "success" : deleteStatus === "error" ? "error" : "warning"}`}>
+                  {deleteMessage}
+                </div>
+              )}
               {filteredItems.length === 0 && (
                 <div className="muted" style={{ padding: "12px 6px" }}>
                   Nessun elemento trovato. Verifica il filtro o aggiorna.
@@ -1388,13 +1764,35 @@ export function AdminPanel({
                 const summary = activeSummary(item);
                 const isSelected = selectedId === item.id;
                 return (
-                  <button
+                  <div
                     key={item.id}
                     className={`admin-list-item ${isSelected ? "selected" : ""}`}
                     onClick={() => setSelectedId(item.id)}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelectedId(item.id);
+                      }
+                    }}
                   >
-                    <div className="admin-list-item__title">{summary.title}</div>
+                    <div className="admin-list-item__head">
+                      <div className="admin-list-item__title">{summary.title}</div>
+                      <button
+                        className="icon-btn danger"
+                        type="button"
+                        aria-label={`Elimina ${summary.title}`}
+                        title="Elimina"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(item);
+                        }}
+                        disabled={deleteStatus === "deleting" && deletingId === item.id}
+                      >
+                        🗑️
+                      </button>
+                    </div>
                     <div className="admin-list-item__meta">
                       {summary.meta.map((entry) => (
                         <span key={entry.label} className="pill ghost">
@@ -1403,7 +1801,7 @@ export function AdminPanel({
                       ))}
                       {summary.modified && <span className="pill ghost">Mod. {summary.modified}</span>}
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>

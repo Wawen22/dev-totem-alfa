@@ -2577,6 +2577,7 @@ h3 { font-size: 20px; }
   cursor: pointer;
   transition: border-color 0.14s ease, box-shadow 0.16s ease;
 }
+.admin-list-item__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .admin-list-item.selected {
   border-color: var(--accent);
   box-shadow: 0 10px 26px rgba(12, 101, 211, 0.18);

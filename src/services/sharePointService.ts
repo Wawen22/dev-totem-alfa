@@ -74,6 +74,15 @@ export class SharePointService {
       .patch(fields);
   }
 
+  async deleteItem(listId: string, itemId: string): Promise<void> {
+    if (!listId) throw new Error("listId mancante");
+    if (!itemId) throw new Error("itemId mancante");
+    const client = await this.getClient();
+    await client
+      .api(`/sites/${this.siteId}/lists/${listId}/items/${itemId}`)
+      .delete();
+  }
+
   async listColumns(listId: string): Promise<Array<{ name: string; displayName?: string; columnGroup?: string }>> {
     if (!listId) throw new Error("listId mancante");
     const client = await this.getClient();
@@ -322,5 +331,45 @@ export class SharePointService {
       }
       await req.patch({ values: [values] });
     }
+  }
+
+  async deleteWorkbookTableRowByIndex(
+    itemId: string,
+    tableName: string,
+    rowIndex: number,
+    options: { sessionId?: string } = {},
+    driveId?: string
+  ): Promise<void> {
+    if (!itemId) throw new Error("itemId mancante");
+    if (!tableName) throw new Error("tableName mancante");
+    if (!Number.isFinite(rowIndex)) throw new Error("rowIndex non valido");
+    const client = await this.getClient();
+    const encodedTable = encodeURIComponent(tableName);
+    const base = this.buildDriveBase(driveId);
+    let req = client.api(`${base}/items/${itemId}/workbook/tables/${encodedTable}/rows/${rowIndex}`);
+    if (options.sessionId) {
+      req = req.header("workbook-session-id", options.sessionId);
+    }
+    await req.delete();
+  }
+
+  async deleteWorkbookRangeByAddress(
+    itemId: string,
+    sheetName: string,
+    address: string,
+    options: { sessionId?: string; shift?: "Up" | "Left" } = {},
+    driveId?: string
+  ): Promise<void> {
+    if (!itemId) throw new Error("itemId mancante");
+    if (!sheetName) throw new Error("sheetName mancante");
+    if (!address) throw new Error("address mancante");
+    const client = await this.getClient();
+    const base = this.buildDriveBase(driveId);
+    const sheetSegment = encodeURIComponent(sheetName);
+    let req = client.api(`${base}/items/${itemId}/workbook/worksheets/${sheetSegment}/range(address='${address}')/delete`);
+    if (options.sessionId) {
+      req = req.header("workbook-session-id", options.sessionId);
+    }
+    await req.post({ shift: options.shift || "Up" });
   }
 }
