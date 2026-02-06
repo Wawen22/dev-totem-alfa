@@ -772,7 +772,10 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
   );
 
   const rows = useMemo(() => {
-    const sorted = [...rawRows];
+    const sorted = [...rawRows].filter((item) => {
+      const title = toStr((item.fields as Record<string, unknown>).Title).trim();
+      return title.length > 0;
+    });
     sorted.sort((a, b) => {
       const left = toStr((a.fields as Record<string, unknown>).Title);
       const right = toStr((b.fields as Record<string, unknown>).Title);
@@ -2116,7 +2119,10 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
   );
 
   const rows = useMemo(() => {
-    const sorted = [...rawRows];
+    const sorted = [...rawRows].filter((item) => {
+      const title = toStr((item.fields as Record<string, unknown>).Title).trim();
+      return title.length > 0;
+    });
     sorted.sort((a, b) => {
       const left = toStr((a.fields as Record<string, unknown>).Title);
       const right = toStr((b.fields as Record<string, unknown>).Title);

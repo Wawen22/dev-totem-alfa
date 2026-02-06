@@ -978,7 +978,11 @@ export function AdminPanel({
   }, [tubiGroupedRows]);
 
   const sortedItems = useMemo(() => {
-    const items = [...activeItems];
+    const items = [...activeItems].filter((item) => {
+      if (activeList !== "TUBI" && activeList !== "FORGIATI") return true;
+      const title = toStr((item.fields as Record<string, unknown>).Title).trim();
+      return title.length > 0;
+    });
     if (activeList === "TUBI" || activeList === "FORGIATI") {
       items.sort((a, b) => {
         const left = toStr((a.fields as Record<string, unknown>).Title);
