@@ -219,6 +219,7 @@ const tubiExcelColumnFieldMap = (() => {
   map.set(normalizeExcelKey("DN MM"), "field_9");
   map.set(normalizeExcelKey("SP"), "field_10");
   map.set(normalizeExcelKey("GRADO"), "field_11");
+  map.set(normalizeExcelKey("GRADO MATERIALE 2"), "GRADOMATERIALE2");
   map.set(normalizeExcelKey("PSL1PSL2"), "field_12");
   map.set(normalizeExcelKey("PED"), "field_13");
   map.set(normalizeExcelKey("HIC"), "field_14");
@@ -2697,6 +2698,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                       <th scope="col">N° COLATA</th>
                       <th scope="col">N° ORDINE</th>
                       <th scope="col">DATA ORDINE</th>
+                      <th scope="col">Grado materiale 2</th>
                       <th scope="col">Giacenza Non Tagliato</th>
                       <th scope="col" style={{ width: 140 }}></th>
                     </tr>
@@ -2713,6 +2715,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
                           <td>{toStr((item.fields as any).field_18) || "-"}</td>
                           <td>{toStr((item.fields as any).field_2) || "-"}</td>
                           <td>{formatSharePointDate((item.fields as any).field_3)}</td>
+                          <td>{toStr((item.fields as any).GRADOMATERIALE2) || "-"}</td>
                           <td>{toStr((item.fields as any).field_20) || "-"}</td>
                           <td>
                             <button
@@ -3023,6 +3026,7 @@ function StockUpdatePage({
                 { label: "DN mm", value: raw["field_9"] },
                 { label: "SP", value: raw["field_10"] },
                 { label: "Grado", value: raw["field_11"] },
+                { label: "Grado materiale 2", value: raw["GRADOMATERIALE2"] },
                 { label: "N Cert", value: raw["field_17"] },
                 { label: "DATA CONSEGNA", value: formatSharePointDate(raw["field_16"]) },
               ];

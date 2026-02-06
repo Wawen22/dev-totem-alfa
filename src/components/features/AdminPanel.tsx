@@ -76,6 +76,7 @@ const TUBI_FIELDS: FieldConfig[] = [
   { key: "field_9", label: "DN (mm)" },
   { key: "field_10", label: "SP" },
   { key: "field_11", label: "GRADO" },
+  { key: "GRADOMATERIALE2", label: "Grado materiale 2" },
   { key: "field_12", label: "PSL1 / PSL2" },
   { key: "field_13", label: "PED" },
   { key: "field_14", label: "HIC" },
@@ -295,6 +296,7 @@ const buildTubiExcelColumnMap = () => {
   map.set(normalizeExcelKey("DN MM"), "field_9");
   map.set(normalizeExcelKey("SP"), "field_10");
   map.set(normalizeExcelKey("GRADO"), "field_11");
+  map.set(normalizeExcelKey("GRADO MATERIALE 2"), "GRADOMATERIALE2");
   map.set(normalizeExcelKey("PSL1PSL2"), "field_12");
   map.set(normalizeExcelKey("PED"), "field_13");
   map.set(normalizeExcelKey("HIC"), "field_14");
