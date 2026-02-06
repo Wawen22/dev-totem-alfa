@@ -17,6 +17,7 @@ export const forgiatiColumns: ForgiatoColumn[] = [
   { field: "field_7", label: "Classe" },
   { field: "field_8", label: "No. Disegno - Particolare" },
   { field: "field_9", label: "Grado Materiale" },
+  { field: "GRADOMATERIALE2", label: "Grado Materiale 2" },
   { field: "field_10", label: "N° Bolla." },
   { field: "field_11", label: "Data consegna", type: "date" },
   { field: "field_12", label: "N° cert" },

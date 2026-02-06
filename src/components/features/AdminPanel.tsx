@@ -48,6 +48,7 @@ const FORGIATI_FIELDS: FieldConfig[] = [
   { key: "field_7", label: "Classe" },
   { key: "field_8", label: "No. Disegno - Particolare" },
   { key: "field_9", label: "Grado Materiale" },
+  { key: "GRADOMATERIALE2", label: "Grado Materiale 2" },
   { key: "field_11", label: "Data consegna", type: "date" },
   { key: "field_12", label: "N° cert" },
   { key: "field_14", label: "Tipo Certificazione" },
@@ -343,6 +344,7 @@ const buildForgiatiExcelColumnMap = () => {
   map.set(normalizeExcelKey("NO DISEGNO PARTICOLARE"), "field_8");
   map.set(normalizeExcelKey("NO. DISEGNO - PARTICOLARE"), "field_8");
   map.set(normalizeExcelKey("GRADO MATERIALE"), "field_9");
+  map.set(normalizeExcelKey("GRADO MATERIALE 2"), "GRADOMATERIALE2");
   map.set(normalizeExcelKey("N BOLLA"), "field_10");
   map.set(normalizeExcelKey("N BOLLA."), "field_10");
   map.set(normalizeExcelKey("DATA CONSEGNA"), "field_11");

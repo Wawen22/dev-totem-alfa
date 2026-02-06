@@ -304,6 +304,7 @@ const forgiatiExcelColumnFieldMap = (() => {
   map.set(normalizeExcelKey("NO DISEGNO PARTICOLARE"), "field_8");
   map.set(normalizeExcelKey("NO. DISEGNO - PARTICOLARE"), "field_8");
   map.set(normalizeExcelKey("GRADO MATERIALE"), "field_9");
+  map.set(normalizeExcelKey("GRADO MATERIALE 2"), "GRADOMATERIALE2");
   map.set(normalizeExcelKey("N BOLLA"), "field_10");
   map.set(normalizeExcelKey("N BOLLA."), "field_10");
   map.set(normalizeExcelKey("DATA CONSEGNA"), "field_11");
@@ -1362,6 +1363,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                       <th scope="col">N° COLATA</th>
                       <th scope="col">N° ORDINE</th>
                       <th scope="col">Data ordine</th>
+                      <th scope="col">Grado materiale 2</th>
                       <th scope="col">Giacenza Q.tà</th>
                       <th scope="col" style={{ width: 140 }}></th>
                     </tr>
@@ -1378,6 +1380,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                           <td>{toStr((item.fields as any).field_13) || "-"}</td>
                           <td>{toStr((item.fields as any).field_1) || "-"}</td>
                           <td>{formatSharePointDate((item.fields as any).field_2)}</td>
+                          <td>{toStr((item.fields as any).GRADOMATERIALE2) || "-"}</td>
                           <td>{toStr((item.fields as any).field_22) || "-"}</td>
                           <td>
                             <button
@@ -2975,6 +2978,7 @@ function StockUpdatePage({
                 { label: "DN", value: raw["field_6"] },
                 { label: "Classe", value: raw["field_7"] },
                 { label: "Materiale", value: raw["field_9"] },
+                { label: "Grado materiale 2", value: raw["GRADOMATERIALE2"] },
                 { label: "No. Disegno - Particolare", value: raw["field_8"] },
                 { label: "Codice SAM", value: raw["CodiceSAM"] },
               ]
