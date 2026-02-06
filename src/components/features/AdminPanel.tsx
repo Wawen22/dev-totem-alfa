@@ -163,6 +163,26 @@ const toStr = (val: unknown): string => {
   return String(val);
 };
 
+const compareTubiTitle = (a: string, b: string) => {
+  const left = a.trim().toUpperCase();
+  const right = b.trim().toUpperCase();
+  if (!left && !right) return 0;
+  if (!left) return 1;
+  if (!right) return -1;
+  const matchLeft = left.match(/^([A-Z]+)(\d+)$/);
+  const matchRight = right.match(/^([A-Z]+)(\d+)$/);
+  if (matchLeft && matchRight) {
+    const prefixCompare = matchLeft[1].localeCompare(matchRight[1], "it", { numeric: true });
+    if (prefixCompare !== 0) return prefixCompare;
+    const leftNum = Number(matchLeft[2]);
+    const rightNum = Number(matchRight[2]);
+    if (Number.isFinite(leftNum) && Number.isFinite(rightNum)) {
+      return leftNum - rightNum;
+    }
+  }
+  return left.localeCompare(right, "it", { numeric: true });
+};
+
 const getTimeValue = (val: unknown): number => {
   if (val === null || val === undefined) return 0;
   if (typeof val === "number") {
@@ -959,6 +979,14 @@ export function AdminPanel({
 
   const sortedItems = useMemo(() => {
     const items = [...activeItems];
+    if (activeList === "TUBI" || activeList === "FORGIATI") {
+      items.sort((a, b) => {
+        const left = toStr((a.fields as Record<string, unknown>).Title);
+        const right = toStr((b.fields as Record<string, unknown>).Title);
+        return compareTubiTitle(right, left);
+      });
+      return items;
+    }
     const dateKey = getSortDateKey(activeList);
     items.sort(
       (a, b) =>
