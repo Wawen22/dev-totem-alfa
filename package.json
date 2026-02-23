@@ -22,6 +22,10 @@
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "docx": "^9.5.3",
+    "markdown-pdf": "^11.0.0",
+    "marked": "^17.0.3",
+    "md-to-pdf": "^5.2.5",
     "typescript": "~5.9.3",
     "vite": "^7.2.4"
   }
