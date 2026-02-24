@@ -9,6 +9,7 @@ import { tubiColumns } from "./config/tubiColumns";
 import { oringHnbrColumns } from "./config/oringHnbrColumns";
 import { oringNbrColumns } from "./config/oringNbrColumns";
 import { sparkGupsColumns } from "./config/sparkGupsColumns";
+import { tuboMeccanicoColumns } from "./config/tuboMeccanicoColumns";
 import { SharePointListItem } from "./types/sharepoint";
 import { formatSharePointDate } from "./utils/dateUtils";
 import { WebsiteViewer } from "./components/features/WebsiteViewer";
@@ -38,10 +39,11 @@ msalInstance
 
 type ForgiatoItem = SharePointListItem<Record<string, unknown>>;
 type TubiItem = SharePointListItem<Record<string, unknown>>;
+type TuboMeccanicoItem = SharePointListItem<Record<string, unknown>>;
 
 type CartItem = {
   key: string;
-  source: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS";
+  source: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO";
   itemId: string;
   title: string;
   bolla?: unknown;
@@ -75,6 +77,8 @@ type EditableItemState = {
   prezzoUnitario?: string;
   bolla?: string;
   colata?: string;
+  giacenzaAmm?: string;
+  utilizzatoPerCommessa?: string;
   raw?: Record<string, unknown>;
 };
 
@@ -380,6 +384,55 @@ const sparkExcelColumnFieldMap = (() => {
 
 const SPARK_DATE_FIELDS = new Set<string>();
 
+const tuboMeccanicoExcelColumnFieldMap = (() => {
+  const map = buildExcelColumnFieldMap(tuboMeccanicoColumns);
+  map.set(normalizeExcelKey("CODICE"), "Title");
+  map.set(normalizeExcelKey("TITLE"), "Title");
+  map.set(normalizeExcelKey("CODICE SAM"), "field_1");
+  map.set(normalizeExcelKey("NORDINE"), "field_2");
+  map.set(normalizeExcelKey("N ORDINE"), "field_2");
+  map.set(normalizeExcelKey("DATA OD"), "field_3");
+  map.set(normalizeExcelKey("FORNITORE"), "field_4");
+  map.set(normalizeExcelKey("P"), "field_5");
+  map.set(normalizeExcelKey("P."), "field_5");
+  map.set(normalizeExcelKey("QTA"), "field_6");
+  map.set(normalizeExcelKey("QTA."), "field_6");
+  map.set(normalizeExcelKey("LUNGH TUBO MM"), "field_7");
+  map.set(normalizeExcelKey("O EST"), "field_8");
+  map.set(normalizeExcelKey("SP"), "field_9");
+  map.set(normalizeExcelKey("GRADO"), "field_10");
+  map.set(normalizeExcelKey("NBOLLA"), "field_11");
+  map.set(normalizeExcelKey("DATA CONSEGNA"), "field_12");
+  map.set(normalizeExcelKey("N CERT"), "field_13");
+  map.set(normalizeExcelKey("N COLATA"), "field_14");
+  map.set(normalizeExcelKey("PREZZO UNITARIO"), "field_15");
+  map.set(normalizeExcelKey("GIACENZA AMMINISTRAZIONE MM"), "field_16");
+  map.set(normalizeExcelKey("GIACENZA MM"), "field_17");
+  map.set(normalizeExcelKey("DATA PRELIEVO"), "field_18");
+  map.set(normalizeExcelKey("UTILIZZATO PER COMM MM"), "field_19");
+  map.set(normalizeExcelKey("IDENTLOTTO"), "IdentLotto");
+  map.set(normalizeExcelKey("IDENT LOTTO"), "IdentLotto");
+  map.set(normalizeExcelKey("LOTTO PROGRESSIVO"), "LottoProgressivo");
+  return map;
+})();
+
+const TUBO_MECCANICO_DATE_FIELDS = new Set(["field_3", "field_12", "field_18", "Modified", "Created"]);
+
+const buildTuboMeccanicoExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
+  const fieldKeyLookup = new Map<string, string>();
+  Object.keys(fields).forEach((key) => {
+    fieldKeyLookup.set(normalizeExcelKey(key), key);
+  });
+
+  return excelColumns.map((columnName) => {
+    const normalized = normalizeExcelKey(columnName || "");
+    const fieldKey =
+      tuboMeccanicoExcelColumnFieldMap.get(normalized) || fieldKeyLookup.get(normalized) || null;
+    const rawValue = fieldKey ? fields[fieldKey] : null;
+    return toExcelCellValueForDateFields(TUBO_MECCANICO_DATE_FIELDS, fieldKey, rawValue);
+  });
+};
+
 const buildForgiatiExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
   const fieldKeyLookup = new Map<string, string>();
   Object.keys(fields).forEach((key) => {
@@ -434,6 +487,18 @@ const getSparkExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
   return null;
 };
 
+const getTuboMeccanicoExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
+  const target = normalizeExcelKey(fieldKey);
+  for (let i = 0; i < excelColumns.length; i++) {
+    const normalized = normalizeExcelKey(excelColumns[i] || "");
+    const mapped = tuboMeccanicoExcelColumnFieldMap.get(normalized);
+    if (mapped && normalizeExcelKey(mapped) === target) {
+      return i;
+    }
+  }
+  return null;
+};
+
 const findForgiatiExcelRowIndex = (
   rows: Array<{ index: number; values: Array<Array<unknown>> }>,
   excelColumns: string[],
@@ -441,6 +506,34 @@ const findForgiatiExcelRowIndex = (
 ) => {
   const titleIdx = getForgiatiExcelColumnIndex(excelColumns, "Title");
   const identIdx = getForgiatiExcelColumnIndex(excelColumns, "IdentLotto");
+  if (titleIdx === null || identIdx === null) return null;
+
+  const targetCodice = normalizeExcelKey(options.codice || "");
+  const targetIdent = normalizeExcelKey(options.identLotto || "");
+
+  for (const row of rows) {
+    const rowValues = row.values?.[0] || [];
+    const codiceVal = normalizeExcelKey(String(rowValues[titleIdx] ?? ""));
+    const identValRaw = String(rowValues[identIdx] ?? "");
+    const identVal = normalizeExcelKey(identValRaw);
+    const identMatches =
+      identVal === targetIdent ||
+      (!identVal && targetIdent === "a");
+    if (codiceVal === targetCodice && identMatches) {
+      return row.index;
+    }
+  }
+
+  return null;
+};
+
+const findTuboMeccanicoExcelRowIndex = (
+  rows: Array<{ index: number; values: Array<Array<unknown>> }>,
+  excelColumns: string[],
+  options: { codice: string; identLotto: string }
+) => {
+  const titleIdx = getTuboMeccanicoExcelColumnIndex(excelColumns, "Title");
+  const identIdx = getTuboMeccanicoExcelColumnIndex(excelColumns, "IdentLotto");
   if (titleIdx === null || identIdx === null) return null;
 
   const targetCodice = normalizeExcelKey(options.codice || "");
@@ -2851,6 +2944,749 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
   );
 }
 
+function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: SelectionStateProps) {
+  const getClient = useAuthenticatedGraphClient();
+  const siteId = import.meta.env.VITE_SHAREPOINT_SITE_ID;
+  const listId = import.meta.env.VITE_TUBO_MECCANICO_LIST_ID;
+  const excelPath = (import.meta.env.VITE_TUBO_MECCANICO_EXCEL_PATH || "").trim();
+  const excelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
+  const excelFilename = (import.meta.env.VITE_SP_TUBO_MECCANICO_FILENAME || import.meta.env.VITE_TUBO_MECCANICO_EXCEL_FILE || "").trim();
+  const excelTable = (import.meta.env.VITE_TUBO_MECCANICO_EXCEL_TABLE || "tblTuboMeccanico").trim();
+  const excelDriveIdEnv = (import.meta.env.VITE_TUBO_MECCANICO_EXCEL_DRIVE_ID || "").trim();
+  const excelDriveNameEnv = (import.meta.env.VITE_TUBO_MECCANICO_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
+  const excelDriveIdRef = useRef<string | null>(excelDriveIdEnv || null);
+
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+  const [lotSelection, setLotSelection] = useState<{
+    title: string;
+    items: TuboMeccanicoItem[];
+  } | null>(null);
+  const [newLotColata, setNewLotColata] = useState("");
+  const [newLotOrdine, setNewLotOrdine] = useState("");
+  const [newLotDataOrdine, setNewLotDataOrdine] = useState("");
+  const [newLotCodiceSam, setNewLotCodiceSam] = useState("");
+  const [lotSaveStatus, setLotSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [lotSaveMessage, setLotSaveMessage] = useState<string | null>(null);
+  const RESET_VALUE = 0;
+
+  const service = useMemo(() => {
+    if (!siteId) return null;
+    return new SharePointService(getClient, siteId);
+  }, [getClient, siteId]);
+
+  const { data: rawRows, loading, error, refresh } = useCachedList<Record<string, unknown>>(
+    service,
+    listId,
+    "tubo-meccanico"
+  );
+
+  const rows = useMemo(() => {
+    const sorted = [...rawRows].filter((item) => {
+      const title = toStr((item.fields as Record<string, unknown>).Title).trim();
+      return title.length > 0;
+    });
+    sorted.sort((a, b) => {
+      const left = toStr((a.fields as Record<string, unknown>).Title);
+      const right = toStr((b.fields as Record<string, unknown>).Title);
+      return compareTubiTitle(right, left);
+    });
+    return sorted;
+  }, [rawRows]);
+
+  const groupedRows = useMemo(() => {
+    const map = new Map<string, TuboMeccanicoItem[]>();
+    rows.forEach((item) => {
+      const title = toStr((item.fields as Record<string, unknown>).Title) || "(senza codice)";
+      const existing = map.get(title) || [];
+      map.set(title, [...existing, item]);
+    });
+    return Array.from(map.entries()).map(([title, items]) => ({
+      title,
+      items,
+      representative: items[0],
+    }));
+  }, [rows]);
+
+  useEffect(() => {
+    if (!lotSelection) return;
+    const updated = groupedRows.find((group) => group.title === lotSelection.title);
+    if (!updated) return;
+
+    const currentIds = lotSelection.items.map((itm) => itm.id).join(",");
+    const nextIds = updated.items.map((itm) => itm.id).join(",");
+    if (currentIds !== nextIds) {
+      setLotSelection(updated);
+    }
+  }, [groupedRows, lotSelection]);
+
+  const progressiveMap = useMemo(() => {
+    const map = new Map<string, string>();
+
+    const normalizeLetter = (val: string | null | undefined) => {
+      if (!val) return null;
+      const cleaned = String(val).trim().toLowerCase();
+      if (/^[a-z]$/.test(cleaned)) return cleaned;
+      return null;
+    };
+
+    const getCreatedKey = (item: TuboMeccanicoItem) => {
+      const created = getTimeValue((item.fields as any).Created);
+      if (created) return created;
+      const idNum = Number(item.id);
+      return Number.isFinite(idNum) ? idNum : 0;
+    };
+
+    groupedRows.forEach((group) => {
+      const sorted = [...group.items].sort((a, b) => getCreatedKey(a) - getCreatedKey(b));
+      const used = new Set<string>();
+
+      sorted.forEach((item) => {
+        const existing = normalizeLetter((item.fields as any).LottoProgressivo);
+        let letter = existing;
+        if (!letter || used.has(letter)) {
+          let code = "a".charCodeAt(0);
+          while (used.has(String.fromCharCode(code))) {
+            code++;
+          }
+          letter = String.fromCharCode(code);
+        }
+        used.add(letter);
+        map.set(item.id, letter);
+      });
+    });
+
+    return map;
+  }, [groupedRows]);
+
+  const visibleColumns = tuboMeccanicoColumns;
+
+  const normalizedRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return groupedRows;
+    return groupedRows.filter((group) =>
+      group.items.some((item) =>
+        visibleColumns.some((col) => {
+          const v = (item.fields as Record<string, unknown>)[col.field];
+          if (v === null || v === undefined) return false;
+
+          let valStr = String(v);
+          if (col.type === "date") {
+            valStr = formatSharePointDate(v);
+          }
+
+          return valStr.toLowerCase().includes(term);
+        })
+      )
+    );
+  }, [groupedRows, search, visibleColumns]);
+
+  const totalPages = Math.max(1, Math.ceil(normalizedRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageSliceStart = (currentPage - 1) * pageSize;
+  const visibleRows = normalizedRows.slice(pageSliceStart, pageSliceStart + pageSize);
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearch(e.target.value);
+    setPage(1);
+  };
+
+  const handleClearSearch = () => {
+    setSearch("");
+    setPage(1);
+  };
+
+  const handlePrev = () => setPage((p) => Math.max(1, p - 1));
+  const handleNext = () => setPage((p) => Math.min(totalPages, p + 1));
+
+  const toCartItem = (item: TuboMeccanicoItem): CartItem => ({
+    key: `TUBO-MECCANICO-${item.id}`,
+    source: "TUBO-MECCANICO",
+    itemId: item.id,
+    title: toStr((item.fields as Record<string, unknown>).Title) || "-",
+    bolla: (item.fields as Record<string, unknown>).field_11,
+    colata: (item.fields as Record<string, unknown>).field_14,
+    lottoProg: progressiveMap.get(item.id) || "a",
+    fields: item.fields as Record<string, unknown>,
+  });
+
+  const handleSelectLot = (item: TuboMeccanicoItem) => {
+    const cartItem = toCartItem(item);
+    const alreadySelected = Boolean(selectedItems[cartItem.key]);
+    onToggle(cartItem, alreadySelected);
+    setLotSelection(null);
+  };
+
+  const existingColate = useMemo(() => {
+    const set = new Set<string>();
+    if (!lotSelection) return set;
+    lotSelection.items.forEach((itm) => {
+      const val = toStr((itm.fields as any).field_14).trim().toLowerCase();
+      if (val) set.add(val);
+    });
+    return set;
+  }, [lotSelection]);
+
+  useEffect(() => {
+    if (lotSelection) {
+      const baseItem = lotSelection.items[0];
+      const baseFields = (baseItem?.fields || {}) as any;
+      const nextProg = getNextLottoProg(lotSelection.items, progressiveMap);
+      setNewLotColata(buildColataPlaceholder(nextProg));
+      setNewLotOrdine("");
+      setNewLotDataOrdine(toInputDate(baseFields?.field_3));
+      setNewLotCodiceSam(toStr(baseFields?.field_1));
+      setLotSaveStatus("idle");
+      setLotSaveMessage(null);
+    }
+  }, [lotSelection, progressiveMap]);
+
+  const buildLotClonePayload = (
+    item: TuboMeccanicoItem,
+    options: {
+      colata: string;
+      ordine?: string;
+      dataOrdine?: string | null;
+      codiceSam?: string;
+    }
+  ) => {
+    const { colata, ordine, dataOrdine, codiceSam } = options;
+    const sourceFields = (item.fields || {}) as Record<string, unknown>;
+    const payload: Record<string, unknown> = {};
+
+    const normalizeDateValue = (val: unknown): string | null => {
+      const t = getTimeValue(val);
+      if (!t) return null;
+      return new Date(t).toISOString();
+    };
+
+    const normalizeTextValue = (val: unknown): string | null => {
+      if (val === null || val === undefined) return null;
+      const trimmed = String(val).trim();
+      return trimmed ? trimmed : null;
+    };
+
+    const ordineValue = normalizeTextValue(ordine !== undefined ? ordine : (sourceFields as any).field_2);
+    const dataOrdineValue = dataOrdine !== undefined ? dataOrdine : normalizeDateValue((sourceFields as any).field_3);
+    const codiceSamValue = normalizeTextValue(codiceSam !== undefined ? codiceSam : (sourceFields as any).field_1);
+
+    Object.entries(sourceFields).forEach(([key, value]) => {
+      if (
+        key === "id" ||
+        key === "ContentType" ||
+        key === "ContentTypeId" ||
+        key === "Created" ||
+        key === "Modified" ||
+        key === "AuthorLookupId" ||
+        key === "EditorLookupId" ||
+        key === "ComplianceAssetId" ||
+        key === "GUID" ||
+        key === "Attachments" ||
+        key === "AppAuthor" ||
+        key === "AppEditor" ||
+        key === "AppAuthorLookupId" ||
+        key === "AppEditorLookupId" ||
+        key === "Edit" ||
+        key === "ItemChildCount" ||
+        key === "FolderChildCount" ||
+        key === "_UIVersionString" ||
+        key === "UIVersionString" ||
+        key === "_ModerationStatus" ||
+        key === "_ModerationComments" ||
+        key === "_ComplianceFlags" ||
+        key === "_ComplianceTag" ||
+        key === "_ComplianceTagUserId" ||
+        key === "_ComplianceTagWrittenTime" ||
+        key === "_IsRecord" ||
+        key === "_Level" ||
+        key === "_Version" ||
+        key.startsWith("LinkTitle") ||
+        key.startsWith("_Compliance") ||
+        key.startsWith("@") ||
+        key.startsWith("odata")
+      ) {
+        return;
+      }
+
+      if (key === "field_14") {
+        payload[key] = normalizeTextValue(colata);
+        return;
+      }
+
+      if (key === "field_2") {
+        payload[key] = ordineValue;
+        return;
+      }
+
+      if (key === "field_3") {
+        payload[key] = dataOrdineValue;
+        return;
+      }
+
+      if (key === "field_1") {
+        payload[key] = codiceSamValue;
+        return;
+      }
+
+      // Reset specific fields for new lot
+      if (key === "field_16" || key === "field_17" || key === "field_19") {
+        payload[key] = RESET_VALUE;
+        return;
+      }
+      if (key === "field_18") {
+        payload[key] = null;
+        return;
+      }
+
+      if (key === "LottoProgressivo") {
+        payload[key] = null;
+        return;
+      }
+
+      payload[key] = normalizeTextValue(value);
+    });
+
+    if (!("field_14" in payload)) payload.field_14 = normalizeTextValue(colata);
+    if (!("field_2" in payload)) payload.field_2 = ordineValue;
+    if (!("field_3" in payload)) payload.field_3 = dataOrdineValue;
+    if (!("field_1" in payload)) payload.field_1 = codiceSamValue;
+
+    return payload;
+  };
+
+  const handleCreateLot = async () => {
+    if (!service || !listId || !lotSelection) {
+      setLotSaveStatus("error");
+      setLotSaveMessage("Servizio non disponibile per la creazione del lotto.");
+      return;
+    }
+
+    const normalized = newLotColata.trim();
+    if (!normalized) return;
+    const normalizedLower = normalized.toLowerCase();
+    if (existingColate.has(normalizedLower)) {
+      setLotSaveStatus("error");
+      setLotSaveMessage("Inserisci un N° colata diverso dai lotti esistenti.");
+      return;
+    }
+
+    const baseItem = lotSelection.items[0];
+    if (!baseItem) return;
+
+    setLotSaveStatus("saving");
+    setLotSaveMessage(null);
+    try {
+      const ordineOverride = newLotOrdine.trim();
+      const dataOrdineInput = newLotDataOrdine.trim();
+      const newLotProg = formatLottoProg(
+        getNextLottoProg(lotSelection.items, progressiveMap)
+      );
+      const payload = buildLotClonePayload(baseItem, {
+        colata: normalized,
+        ordine: ordineOverride ? ordineOverride : undefined,
+        dataOrdine: dataOrdineInput ? toIsoOrNull(dataOrdineInput) : undefined,
+        codiceSam: newLotCodiceSam.trim() ? newLotCodiceSam : undefined,
+      });
+      await service.createItem<Record<string, unknown>>(listId, payload);
+      let excelError: string | null = null;
+      const resolvedPath = excelPath || (excelFolder && excelFilename ? `${excelFolder}/${excelFilename}` : "");
+      let resolvedDriveId = excelDriveIdRef.current;
+      if (!resolvedDriveId && excelDriveNameEnv) {
+        resolvedDriveId = await service.getDriveIdByName(excelDriveNameEnv);
+        excelDriveIdRef.current = resolvedDriveId;
+      }
+      if (!resolvedDriveId && excelDriveNameEnv) {
+        excelError = `Libreria "${excelDriveNameEnv}" non trovata`;
+      } else if (resolvedPath && excelTable) {
+        try {
+          const driveItem = await service.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
+          const columns = await service.listWorkbookTableColumnsByItemId(driveItem.id, excelTable, resolvedDriveId || undefined);
+          const rows = await service.listWorkbookTableRowsByItemId(driveItem.id, excelTable, resolvedDriveId || undefined);
+          const identIndex = getTuboMeccanicoExcelColumnIndex(columns, "IdentLotto");
+          if (identIndex === null) {
+            throw new Error("Colonna IdentLotto non trovata nella tabella Excel");
+          }
+          const rowValues = buildTuboMeccanicoExcelRow(columns, {
+            ...payload,
+            IdentLotto: newLotProg,
+          });
+          const codiceValue = toStr((baseItem.fields as any).Title) || toStr(payload.Title);
+          const insertAfter = findLastRowIndexByCodice(rows, columns, codiceValue, getTuboMeccanicoExcelColumnIndex);
+          const insertIndex = insertAfter !== null ? insertAfter + 1 : undefined;
+          const sessionId = await service.createWorkbookSessionByItemId(
+            driveItem.id,
+            { persistChanges: true },
+            resolvedDriveId || undefined
+          );
+          try {
+            try {
+              await service.appendWorkbookTableRowByItemId(
+                driveItem.id,
+                excelTable,
+                rowValues,
+                { sessionId, index: insertIndex },
+                resolvedDriveId || undefined
+              );
+            } catch (appendErr) {
+              if (insertIndex !== undefined) {
+                console.warn("Inserimento Excel TUBO-MECCANICO in posizione fallito, riprovo in coda", appendErr);
+                await service.appendWorkbookTableRowByItemId(
+                  driveItem.id,
+                  excelTable,
+                  rowValues,
+                  { sessionId },
+                  resolvedDriveId || undefined
+                );
+              } else {
+                throw appendErr;
+              }
+            }
+          } finally {
+            try {
+              await service.closeWorkbookSessionByItemId(
+                driveItem.id,
+                sessionId,
+                resolvedDriveId || undefined
+              );
+            } catch (closeErr) {
+              console.warn("Errore chiusura sessione Excel TUBO-MECCANICO", closeErr);
+            }
+          }
+        } catch (err: any) {
+          console.error("Errore aggiornamento Excel TUBO-MECCANICO", {
+            error: err,
+            filePath: resolvedPath,
+            driveId: resolvedDriveId,
+            tableName: excelTable,
+            payload,
+          });
+          excelError = err?.message || "Errore aggiornamento Excel";
+        }
+      } else {
+        excelError = "Percorso Excel o tabella non configurati";
+      }
+      setLotSaveStatus("success");
+      setLotSaveMessage(
+        excelError
+          ? `Nuovo lotto creato su SharePoint. Excel non aggiornato: ${excelError}`
+          : "Nuovo lotto creato e registrato su Excel. Aggiorno la lista..."
+      );
+      const fallbackProg = getNextLottoProg(lotSelection.items, progressiveMap);
+      setNewLotColata(buildColataPlaceholder(fallbackProg));
+      setNewLotOrdine("");
+      setNewLotCodiceSam("");
+      await refresh();
+    } catch (err: any) {
+      setLotSaveStatus("error");
+      setLotSaveMessage(err?.message || "Errore durante la creazione del lotto.");
+    }
+  };
+
+  const normalizedNewLot = newLotColata.trim();
+  const normalizedNewLotLower = normalizedNewLot.toLowerCase();
+  const isDuplicateLot = normalizedNewLot.length > 0 && existingColate.has(normalizedNewLotLower);
+  const canCreateLot = Boolean(normalizedNewLot) && !isDuplicateLot && lotSaveStatus !== "saving";
+
+  return (
+    <div className="panel inventory-panel">
+      <div className="panel-content">
+        {error && <div className="alert error">{error}</div>}
+        {!listId && (
+          <div className="alert warning">Inserisci il GUID della lista TUBO-MECCANICO in .env.local (VITE_TUBO_MECCANICO_LIST_ID).</div>
+        )}
+
+        <div className="toolbar">
+          <div className="search-box">
+            <input
+              type="search"
+              placeholder="Cerca in tutte le colonne..."
+              value={search}
+              onChange={handleSearchChange}
+            />
+            {search && <button className="icon-btn" onClick={handleClearSearch} aria-label="Clear search">✕</button>}
+          </div>
+          
+          <div className="pager-info">
+             <button className="btn secondary" onClick={() => refresh()} disabled={loading} style={{ padding: '8px 12px', fontSize: '13px' }}>
+              {loading ? "..." : "Aggiorna"}
+            </button>
+            <span className="pill">{normalizedRows.length} risultati</span>
+            <label className="page-size">
+              <span>Per pagina</span>
+              <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
+                {[100, 200].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </label>
+            <div className="pager">
+              <button className="icon-btn" onClick={handlePrev} disabled={currentPage === 1}>←</button>
+              <span>{currentPage} / {totalPages}</span>
+              <button className="icon-btn" onClick={handleNext} disabled={currentPage === totalPages}>→</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="table-scroll">
+          <table className="inventory-table">
+            <thead>
+              <tr>
+                <th scope="col" className="selection-col" aria-label="Seleziona">
+                  <span className="selection-col__icon" aria-hidden="true"></span>
+                </th>
+                {visibleColumns.map((col) => (
+                  <th
+                    scope="col"
+                    key={col.field}
+                    className={col.field === "Title" ? "sticky-col" : undefined}
+                    style={col.width ? { width: col.width } : undefined}
+                  >
+                    <span>{col.label}</span>
+                    <small>{col.field}</small>
+                  </th>
+                ))}
+                <th scope="col" style={{ width: 160 }}>Colate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.length === 0 && (
+                <tr>
+                  <td colSpan={visibleColumns.length + 2} className="muted" style={{ textAlign: "center" }}>
+                    {loading ? "Carico dati..." : "Nessun elemento trovato"}
+                  </td>
+                </tr>
+              )}
+              {visibleRows.map((group) => {
+                const representative = group.representative;
+                const selectedCount = group.items.filter((itm) => selectedItems[`TUBO-MECCANICO-${itm.id}`]).length;
+
+                const handleGroupCheck = () => {
+                  if (group.items.length === 1) {
+                    const cartItem = toCartItem(group.items[0]);
+                    onToggle(cartItem, Boolean(selectedItems[cartItem.key]));
+                    return;
+                  }
+                  setLotSelection(group);
+                };
+
+                return (
+                  <tr key={group.title}>
+                    <td className="selection-col">
+                      <input
+                        type="checkbox"
+                        aria-label="Seleziona riga"
+                        checked={selectedCount > 0}
+                        disabled={selectionLimitReached && selectedCount === 0 && group.items.length === 1}
+                        onChange={handleGroupCheck}
+                      />
+                    </td>
+                    {visibleColumns.map((col) => {
+                      const isTitle = col.field === "Title";
+                      const className = isTitle ? "sticky-col" : undefined;
+                      const content = formatCellValue((representative.fields as Record<string, unknown>)[col.field], col.type);
+
+                      if (isTitle) {
+                        return (
+                          <th scope="row" key={col.field} className={className}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
+                              <span>{content}</span>
+                              <button
+                                className="icon-btn"
+                                aria-label="Gestisci lotti"
+                                title="Gestisci lotti"
+                                onClick={() => setLotSelection(group)}
+                                type="button"
+                              >
+                                📦
+                              </button>
+                            </div>
+                          </th>
+                        );
+                      }
+
+                      return (
+                        <td key={col.field} className={className}>
+                          {content}
+                        </td>
+                      );
+                    })}
+                    <td>
+                      <div className="colata-badges" style={{ alignItems: "center" }}>
+                        {(() => {
+                          const sortedLots = [...group.items].sort(
+                            (a, b) => getTimeValue((b.fields as any).field_18) - getTimeValue((a.fields as any).field_18)
+                          );
+                          const latest = sortedLots[0];
+                          const moreCount = Math.max(0, sortedLots.length - 1);
+                          const latestProg = latest ? progressiveMap.get(latest.id) || "a" : "a";
+                          const latestColata = latest ? toStr((latest.fields as any).field_14) || "-" : "-";
+                          return (
+                            <>
+                              <span className="pill ghost" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                <span>{latestColata}</span>
+                                <span className="lotto-chip">{formatLottoProg(latestProg)}</span>
+                              </span>
+                              {moreCount > 0 && (
+                                <span className="pill ghost" style={{ fontSize: 11, padding: "2px 6px" }}>+{moreCount}</span>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {lotSelection && (
+        <div className="modal-backdrop blur" role="dialog" aria-modal="true">
+          <div className="modal">
+            <div className="modal__header">
+              <div>
+                <p className="eyebrow" style={{ marginBottom: 4 }}>Seleziona lotto</p>
+                <h3 style={{ margin: 0 }}>{lotSelection.title}</h3>
+              </div>
+              <button className="icon-btn" aria-label="Chiudi" onClick={() => setLotSelection(null)} type="button">✕</button>
+            </div>
+            <div className="modal__body">
+              <div className="table-scroll modal-table">
+                <table className="inventory-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Ident. Lotto</th>
+                      <th scope="col">N° COLATA</th>
+                      <th scope="col">N° ORDINE</th>
+                      <th scope="col">DATA OD</th>
+                      <th scope="col">Giacenza (mm)</th>
+                      <th scope="col" style={{ width: 140 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lotSelection.items.map((item) => {
+                      const cartItem = toCartItem(item);
+                      const alreadySelected = Boolean(selectedItems[cartItem.key]);
+                      const disableAdd = selectionLimitReached && !alreadySelected;
+                      const lotProg = progressiveMap.get(item.id) || "a";
+                      return (
+                        <tr key={item.id}>
+                          <td><span className="lotto-chip">{formatLottoProg(lotProg)}</span></td>
+                          <td>{toStr((item.fields as any).field_14) || "-"}</td>
+                          <td>{toStr((item.fields as any).field_2) || "-"}</td>
+                          <td>{formatSharePointDate((item.fields as any).field_3)}</td>
+                          <td>{toStr((item.fields as any).field_17) || "-"}</td>
+                          <td>
+                            <button
+                              className={alreadySelected ? "btn secondary" : "btn primary"}
+                              style={{ width: "100%", padding: "8px 10px", fontSize: 13 }}
+                              onClick={() => {
+                                onToggle(cartItem, alreadySelected);
+                                setLotSelection(null);
+                              }}
+                              disabled={disableAdd}
+                              type="button"
+                            >
+                              {alreadySelected ? "Rimuovi" : "Aggiungi"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="section-heading" style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <span className="pill ghost">Nuovo lotto</span>
+                  <p className="muted" style={{ margin: "6px 0 0" }}>Duplico l&apos;articolo</p>
+                </div>
+              </div>
+              <div className="field-grid" style={{ marginTop: 8, alignItems: "flex-end" }}>
+                <label className="field" style={{ flex: 1 }}>
+                  <span>Nuovo N° COLATA</span>
+                  <input
+                    type="text"
+                    value={newLotColata}
+                    onChange={(e) => {
+                      setNewLotColata(e.target.value);
+                      setLotSaveStatus("idle");
+                      setLotSaveMessage(null);
+                    }}
+                    placeholder="Inserisci un valore diverso dai lotti esistenti"
+                  />
+                </label>
+                <label className="field">
+                  <span>Nuovo N° ORDINE</span>
+                  <input
+                    type="text"
+                    value={newLotOrdine}
+                    onChange={(e) => {
+                      setNewLotOrdine(e.target.value);
+                      setLotSaveStatus("idle");
+                      setLotSaveMessage(null);
+                    }}
+                    placeholder="Facoltativo"
+                  />
+                </label>
+                <label className="field">
+                  <span>Codice SAM</span>
+                  <input
+                    type="text"
+                    value={newLotCodiceSam}
+                    onChange={(e) => {
+                      setNewLotCodiceSam(e.target.value);
+                      setLotSaveStatus("idle");
+                      setLotSaveMessage(null);
+                    }}
+                    placeholder="Facoltativo"
+                  />
+                </label>
+                <label className="field">
+                  <span>Data ordine</span>
+                  <input
+                    type="date"
+                    value={newLotDataOrdine}
+                    onChange={(e) => {
+                      setNewLotDataOrdine(e.target.value);
+                      setLotSaveStatus("idle");
+                      setLotSaveMessage(null);
+                    }}
+                  />
+                </label>
+                <button
+                  className="btn primary"
+                  style={{ minWidth: 160, height: 44 }}
+                  onClick={handleCreateLot}
+                  disabled={!canCreateLot}
+                  type="button"
+                >
+                  {lotSaveStatus === "saving" ? "Creo..." : "Crea lotto"}
+                </button>
+              </div>
+              {newLotColata && isDuplicateLot && (
+                <p className="muted" style={{ marginTop: 6 }}>Valore già presente tra le colate esistenti.</p>
+              )}
+              {lotSaveMessage && (
+                <div className={`alert ${lotSaveStatus === "success" ? "success" : lotSaveStatus === "error" ? "error" : "warning"}`} style={{ marginTop: 10 }}>
+                  {lotSaveMessage}
+                </div>
+              )}
+              {selectionLimitReached && <p className="muted" style={{ marginTop: 10 }}>Limite massimo di 10 articoli in carrello.</p>}
+            </div>
+            <div className="modal__footer">
+              <button className="btn secondary" onClick={() => setLotSelection(null)} type="button">Chiudi</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function buildEditableState(item: CartItem): EditableItemState {
   const fields = item.fields || {};
 
@@ -2914,6 +3750,20 @@ function buildEditableState(item: CartItem): EditableItemState {
       dataUltimoPrelievo: toStr((fields as any).field_11),
       prezzoUnitario: toStr((fields as any).field_12),
       commessa: toStr((fields as any).field_13),
+      raw: fields,
+    };
+  }
+
+  if (item.source === "TUBO-MECCANICO") {
+    return {
+      type: "TUBO-MECCANICO",
+      title: item.title || "-",
+      dataPrelievo: toInputDate((fields as any).field_18),
+      giacenza: toStr((fields as any).field_17),
+      giacenzaAmm: toStr((fields as any).field_16),
+      utilizzatoPerCommessa: toStr((fields as any).field_19),
+      bolla: item.bolla ? String(item.bolla) : "",
+      colata: item.colata ? String(item.colata) : "",
       raw: fields,
     };
   }
@@ -2994,6 +3844,7 @@ function StockUpdatePage({
           const isOring = item.source === "ORING-HNBR";
           const isOringNbr = item.source === "ORING-NBR";
           const isSpark = item.source === "SPARK-GUPS";
+          const isTuboMeccanico = item.source === "TUBO-MECCANICO";
           const raw = (cardValues.raw || {}) as Record<string, unknown>;
 
           const infoItems = isForgiati
@@ -3045,6 +3896,21 @@ function StockUpdatePage({
                 { label: "N° Bolla", value: raw["field_8"] },
                 { label: "Prezzo unitario", value: raw["field_12"] },
               ]
+            : isTuboMeccanico
+            ? [
+                { label: "CODICE SAM", value: raw["field_1"] },
+                { label: "N° ORDINE", value: raw["field_2"] },
+                { label: "DATA OD", value: formatSharePointDate(raw["field_3"]) },
+                { label: "FORNITORE", value: raw["field_4"] },
+                { label: "P.", value: raw["field_5"] },
+                { label: "Q.tà.", value: raw["field_6"] },
+                { label: "Lungh. Tubo (mm)", value: raw["field_7"] },
+                { label: "Ø Est.", value: raw["field_8"] },
+                { label: "SP", value: raw["field_9"] },
+                { label: "GRADO", value: raw["field_10"] },
+                { label: "DATA CONSEGNA", value: formatSharePointDate(raw["field_12"]) },
+                { label: "N° CERT.", value: raw["field_13"] },
+              ]
             : [
                 { label: "N° Ordine", value: raw["field_2"] },
                 { label: "Codice SAM", value: raw["CodiceSAM"] },
@@ -3073,6 +3939,8 @@ function StockUpdatePage({
                   ? "stock-card--oring-nbr"
                   : isSpark
                   ? "stock-card--spark"
+                  : isTuboMeccanico
+                  ? "stock-card--tubo-meccanico"
                   : "stock-card--tubi"
               }`}
             >
@@ -3379,6 +4247,44 @@ function StockUpdatePage({
                       />
                     </label>
                   </div>
+                ) : isTuboMeccanico ? (
+                  <div className="field-grid">
+                    <label className="field">
+                      <span>Giacenza (mm)</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={cardValues.giacenza || ""}
+                        onChange={(e) => onChange(item.key, "giacenza", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Data prelievo</span>
+                      <input
+                        type="date"
+                        value={cardValues.dataPrelievo || ""}
+                        onChange={(e) => onChange(item.key, "dataPrelievo", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Giacenza Amministrazione (mm)</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={cardValues.giacenzaAmm || ""}
+                        onChange={(e) => onChange(item.key, "giacenzaAmm", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Utilizzato per comm. mm</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={cardValues.utilizzatoPerCommessa || ""}
+                        onChange={(e) => onChange(item.key, "utilizzatoPerCommessa", e.target.value)}
+                      />
+                    </label>
+                  </div>
                 ) : (
                   <div className="field-grid">
                     <label className="field">
@@ -3432,14 +4338,15 @@ function NavigationTabs({
   activeTab,
   onTabChange,
 }: {
-  activeTab: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups";
-  onTabChange: (id: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups") => void;
+  activeTab: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico";
+  onTabChange: (id: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico") => void;
 }) {
   const tabs = [
     { id: "forgiati", label: "1_FORGIATI", enabled: true },
     { id: "oring-hnbr", label: "2_ORING-HNBR", enabled: true },
     { id: "oring-nbr", label: "2_ORING-NBR", enabled: true },
     { id: "tubi", label: "3_TUBI", enabled: true },
+    { id: "tubo-meccanico", label: "4_TUBO-MECCANICO", enabled: true },
     { id: "spark-gups", label: "6_SPARK GUPS", enabled: true },
   ] as const;
 
@@ -3467,6 +4374,7 @@ function AuthenticatedShell() {
   const oringHnbrListId = import.meta.env.VITE_ORING_HNBR_LIST_ID;
   const oringNbrListId = import.meta.env.VITE_ORING_NBR_LIST_ID;
   const tubiListId = import.meta.env.VITE_TUBI_LIST_ID;
+  const tuboMeccanicoListId = import.meta.env.VITE_TUBO_MECCANICO_LIST_ID;
   const sparkGupsListId = import.meta.env.VITE_SPARK_GUPS_LIST_ID;
   const forgiatiExcelPath = (import.meta.env.VITE_FORGIATI_EXCEL_PATH || "").trim();
   const forgiatiExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
@@ -3482,6 +4390,13 @@ function AuthenticatedShell() {
   const tubiExcelDriveIdEnv = (import.meta.env.VITE_TUBI_EXCEL_DRIVE_ID || "").trim();
   const tubiExcelDriveNameEnv = (import.meta.env.VITE_TUBI_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
   const tubiExcelDriveIdRef = useRef<string | null>(tubiExcelDriveIdEnv || null);
+  const tuboMeccanicoExcelPath = (import.meta.env.VITE_TUBO_MECCANICO_EXCEL_PATH || "").trim();
+  const tuboMeccanicoExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
+  const tuboMeccanicoExcelFilename = (import.meta.env.VITE_SP_TUBO_MECCANICO_FILENAME || import.meta.env.VITE_TUBO_MECCANICO_EXCEL_FILE || "").trim();
+  const tuboMeccanicoExcelTable = (import.meta.env.VITE_TUBO_MECCANICO_EXCEL_TABLE || "tblTuboMeccanico").trim();
+  const tuboMeccanicoExcelDriveIdEnv = (import.meta.env.VITE_TUBO_MECCANICO_EXCEL_DRIVE_ID || "").trim();
+  const tuboMeccanicoExcelDriveNameEnv = (import.meta.env.VITE_TUBO_MECCANICO_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
+  const tuboMeccanicoExcelDriveIdRef = useRef<string | null>(tuboMeccanicoExcelDriveIdEnv || null);
   const sparkGupsExcelPath = (import.meta.env.VITE_SPARK_GUPS_EXCEL_PATH || "").trim();
   const sparkGupsExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
   const sparkGupsExcelFilename = (import.meta.env.VITE_SP_SPARK_GUPS_FILENAME || import.meta.env.VITE_SPARK_GUPS_EXCEL_FILE || "").trim();
@@ -3495,7 +4410,7 @@ function AuthenticatedShell() {
   }, [getClient, siteId]);
   const flowService = useMemo(() => new PowerAutomateService(), []);
   const [view, setView] = useState<'dashboard' | 'inventory' | 'update-stock' | 'website' | 'docs' | 'admin'>('dashboard');
-  const [activeTab, setActiveTab] = useState<"forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups">("forgiati");
+  const [activeTab, setActiveTab] = useState<"forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico">("forgiati");
   const [cartItems, setCartItems] = useState<Record<string, CartItem>>({});
   const [selectionMessage, setSelectionMessage] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, EditableItemState>>({});
@@ -3573,6 +4488,7 @@ function AuthenticatedShell() {
     const raw = (item.fields || {}) as Record<string, unknown>;
     if (item.source === "FORGIATI") return toStr((raw as any).field_1);
     if (item.source === "TUBI") return toStr((raw as any).field_2);
+    if (item.source === "TUBO-MECCANICO") return toStr((raw as any).field_2);
     if (item.source === "ORING-HNBR") return toStr((raw as any).field_18);
     if (item.source === "SPARK-GUPS") return toStr((raw as any).field_4);
     return "";
@@ -3647,6 +4563,7 @@ function AuthenticatedShell() {
         const isOring = item.source === "ORING-HNBR";
         const isOringNbr = item.source === "ORING-NBR";
         const isSpark = item.source === "SPARK-GUPS";
+        const isTuboMeccanico = item.source === "TUBO-MECCANICO";
         const listId = isForgiati
           ? forgiatiListId
           : isOring
@@ -3655,6 +4572,8 @@ function AuthenticatedShell() {
           ? oringNbrListId
           : isSpark
           ? sparkGupsListId
+          : isTuboMeccanico
+          ? tuboMeccanicoListId
           : tubiListId;
         if (!listId) {
           throw new Error(`List ID non configurato per ${item.source}.`);
@@ -3702,6 +4621,13 @@ function AuthenticatedShell() {
               field_11: values.dataUltimoPrelievo ?? null,
               field_12: values.prezzoUnitario ?? null,
               field_13: values.commessa ?? null,
+            }
+          : isTuboMeccanico
+          ? {
+              field_17: toNumberOrNull(values.giacenza),
+              field_18: toIsoOrNull(values.dataPrelievo),
+              field_16: toNumberOrNull(values.giacenzaAmm),
+              field_19: toNumberOrNull(values.utilizzatoPerCommessa),
             }
           : {
               field_21: toIsoOrNull(values.dataUltimoPrelievo),
@@ -4010,6 +4936,101 @@ function AuthenticatedShell() {
         }
       }
 
+      const tuboMeccanicoUpdates = updates.filter((update) => update.item.source === "TUBO-MECCANICO");
+      if (tuboMeccanicoUpdates.length > 0) {
+        try {
+          const resolvedPath = tuboMeccanicoExcelPath || (tuboMeccanicoExcelFolder && tuboMeccanicoExcelFilename ? `${tuboMeccanicoExcelFolder}/${tuboMeccanicoExcelFilename}` : "");
+          let resolvedDriveId = tuboMeccanicoExcelDriveIdRef.current;
+          if (!resolvedDriveId && tuboMeccanicoExcelDriveNameEnv) {
+            resolvedDriveId = await sharepointService.getDriveIdByName(tuboMeccanicoExcelDriveNameEnv);
+            tuboMeccanicoExcelDriveIdRef.current = resolvedDriveId;
+          }
+          if (!resolvedDriveId && tuboMeccanicoExcelDriveNameEnv) {
+            throw new Error(`Libreria "${tuboMeccanicoExcelDriveNameEnv}" non trovata`);
+          }
+          if (!resolvedPath || !tuboMeccanicoExcelTable) {
+            throw new Error("Percorso Excel o tabella non configurati");
+          }
+
+          const driveItem = await sharepointService.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
+          const columns = await sharepointService.listWorkbookTableColumnsByItemId(driveItem.id, tuboMeccanicoExcelTable, resolvedDriveId || undefined);
+          const codiceIndex = getTuboMeccanicoExcelColumnIndex(columns, "Title");
+          const identIndex = getTuboMeccanicoExcelColumnIndex(columns, "IdentLotto");
+          if (codiceIndex === null || identIndex === null) {
+            throw new Error("Colonne CODICE/IdentLotto non trovate nella tabella Excel");
+          }
+          const rows = await sharepointService.listWorkbookTableRowsByItemId(driveItem.id, tuboMeccanicoExcelTable, resolvedDriveId || undefined);
+          const sessionId = await sharepointService.createWorkbookSessionByItemId(
+            driveItem.id,
+            { persistChanges: true },
+            resolvedDriveId || undefined
+          );
+          const missing: string[] = [];
+          const targetCodici = new Set(tuboMeccanicoUpdates.map((update) => normalizeExcelKey(update.item.title)));
+          try {
+            for (const row of rows) {
+              const rowValues = row.values?.[0] || [];
+              const codiceVal = normalizeExcelKey(String(rowValues[codiceIndex] ?? ""));
+              if (!targetCodici.has(codiceVal)) continue;
+              const identVal = normalizeExcelKey(String(rowValues[identIndex] ?? ""));
+              if (identVal) continue;
+              const nextValues = [...rowValues];
+              nextValues[identIndex] = "A";
+              await sharepointService.updateWorkbookTableRowByIndex(
+                driveItem.id,
+                tuboMeccanicoExcelTable,
+                row.index,
+                nextValues as Array<string | number | boolean | null>,
+                { sessionId },
+                resolvedDriveId || undefined
+              );
+            }
+            for (const update of tuboMeccanicoUpdates) {
+              const identLotto = formatLottoProg(update.item.lottoProg);
+              const rowIndex = findTuboMeccanicoExcelRowIndex(rows, columns, {
+                codice: update.item.title,
+                identLotto,
+              });
+              if (rowIndex === null) {
+                missing.push(`${update.item.title} (${identLotto})`);
+                continue;
+              }
+              const excelFields = {
+                ...(update.item.fields || {}),
+                ...update.payload,
+                IdentLotto: identLotto,
+              } as Record<string, unknown>;
+              const rowValues = buildTuboMeccanicoExcelRow(columns, excelFields);
+              await sharepointService.updateWorkbookTableRowByIndex(
+                driveItem.id,
+                tuboMeccanicoExcelTable,
+                rowIndex,
+                rowValues,
+                { sessionId },
+                resolvedDriveId || undefined
+              );
+            }
+          } finally {
+            try {
+              await sharepointService.closeWorkbookSessionByItemId(
+                driveItem.id,
+                sessionId,
+                resolvedDriveId || undefined
+              );
+            } catch (closeErr) {
+              console.warn("Errore chiusura sessione Excel TUBO-MECCANICO", closeErr);
+            }
+          }
+
+          if (missing.length > 0) {
+            throw new Error(`Righe non trovate: ${missing.join(", ")}`);
+          }
+        } catch (excelErr: any) {
+          console.error("Errore aggiornamento Excel TUBO-MECCANICO", excelErr);
+          excelErrors.push(`TUBO-MECCANICO: ${excelErr?.message || "Errore aggiornamento Excel"}`);
+        }
+      }
+
       const account = accounts[0];
       const sources = Array.from(new Set(cartList.map((i) => i.source)));
       const flowPayload = {
@@ -4023,10 +5044,12 @@ function AuthenticatedShell() {
         hasOringHnbr: sources.includes("ORING-HNBR"),
         hasOringNbr: sources.includes("ORING-NBR"),
         hasSparkGups: sources.includes("SPARK-GUPS"),
+        hasTuboMeccanico: sources.includes("TUBO-MECCANICO"),
         items: cartList.map((item) => {
           const values = editValues[item.key] || buildEditableState(item);
           const isTubi = item.source === "TUBI";
           const isForgiati = item.source === "FORGIATI";
+          const isTuboMeccanico = item.source === "TUBO-MECCANICO";
           return {
             key: item.key,
             itemId: item.itemId,
@@ -4039,9 +5062,11 @@ function AuthenticatedShell() {
             dataUltimoPrelievo: isTubi ? values.dataUltimoPrelievo ?? null : null,
             giacenzaTuboIntero: isTubi ? values.giacenzaBib ?? null : null,
             giacenzaContabMm: isTubi ? values.giacenzaContab ?? null : null,
-            dataPrelievo: isForgiati ? values.dataPrelievo ?? null : null,
+            dataPrelievo: (isForgiati || isTuboMeccanico) ? values.dataPrelievo ?? null : null,
             giacenzaQt: isForgiati ? values.giacenzaQt ?? null : null,
             giacenzaBarra: isForgiati ? values.giacenzaBarra ?? null : null,
+            giacenzaAmm: isTuboMeccanico ? values.giacenzaAmm ?? null : null,
+            utilizzatoPerCommessa: isTuboMeccanico ? values.utilizzatoPerCommessa ?? null : null,
             lotto: values.lotto ?? null,
             codiceSam: values.codiceSam ?? null,
             tipologiaArticolo: values.tipologiaArticolo ?? null,
@@ -4116,6 +5141,8 @@ function AuthenticatedShell() {
         return <OringNbrPanel {...selectionProps} />;
       case "tubi":
         return <TubiPanel {...selectionProps} />;
+      case "tubo-meccanico":
+        return <TuboMeccanicoPanel {...selectionProps} />;
       case "spark-gups":
         return <SparkGupsPanel {...selectionProps} />;
       default:
@@ -4215,6 +5242,7 @@ function AuthenticatedShell() {
               oringHnbrListId={oringHnbrListId}
               oringNbrListId={oringNbrListId}
               sparkGupsListId={sparkGupsListId}
+              tuboMeccanicoListId={tuboMeccanicoListId}
             />
           </main>
         </div>
@@ -4306,6 +5334,8 @@ function AuthenticatedShell() {
                             ? "cart-row-forgiati"
                             : item.source === "TUBI"
                             ? "cart-row-tubi"
+                            : item.source === "TUBO-MECCANICO"
+                            ? "cart-row-tubo-meccanico"
                             : item.source === "ORING-HNBR"
                             ? "cart-row-oring"
                             : item.source === "SPARK-GUPS"

@@ -1,0 +1,25 @@
+import { ForgiatoColumn } from "./forgiatiColumns";
+
+export const tuboMeccanicoColumns: ForgiatoColumn[] = [
+  { field: "Title", label: "Codice / Title", width: "200px" },
+  { field: "field_1", label: "CODICE SAM" },
+  { field: "field_2", label: "N° ORDINE" },
+  { field: "field_3", label: "DATA OD", type: "date" },
+  { field: "field_4", label: "FORNITORE" },
+  { field: "field_5", label: "P." },
+  { field: "field_6", label: "Q.tà." },
+  { field: "field_7", label: "Lungh. Tubo (mm)" },
+  { field: "field_8", label: "Ø Est." },
+  { field: "field_9", label: "SP" },
+  { field: "field_10", label: "GRADO" },
+  { field: "field_11", label: "N° Bolla" },
+  { field: "field_12", label: "DATA CONSEGNA", type: "date" },
+  { field: "field_13", label: "N° CERT." },
+  { field: "field_14", label: "N° COLATA" },
+  { field: "field_15", label: "Prezzo unitario" },
+  { field: "field_16", label: "Giacenza Amm. (mm)" },
+  { field: "field_17", label: "Giacenza (mm)" },
+  { field: "field_18", label: "Data Prelievo", type: "date" },
+  { field: "field_19", label: "Utilizzato per comm. mm" },
+  { field: "Modified", label: "Data/ora modifica", type: "date" },
+];

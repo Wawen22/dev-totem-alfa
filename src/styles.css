@@ -1989,6 +1989,7 @@ h3 { font-size: 20px; }
 .stock-card--oring { border-left: 8px solid #f59e0b; }
 .stock-card--oring-nbr { border-left: 8px solid #a855f7; }
 .stock-card--spark { border-left: 8px solid #0ea5e9; }
+.stock-card--tubo-meccanico { border-left: 8px solid #6366f1; }
 
 .stock-card__head {
   display: flex;
@@ -2124,6 +2125,7 @@ h3 { font-size: 20px; }
 .stock-card__body.is-oring { border-color: rgba(245, 158, 11, 0.45); background: linear-gradient(180deg, rgba(245,158,11,0.09), #fffdf5); }
 .stock-card__body.is-oring-nbr { border-color: rgba(168, 85, 247, 0.45); background: linear-gradient(180deg, rgba(168,85,247,0.1), #fbf7ff); }
 .stock-card__body.is-spark { border-color: rgba(14, 165, 233, 0.4); background: linear-gradient(180deg, rgba(14,165,233,0.08), #f4fbff); }
+.stock-card__body.is-tubo-meccanico { border-color: rgba(99, 102, 241, 0.4); background: linear-gradient(180deg, rgba(99, 102, 241, 0.08), #f5f5ff); }
 
 .section-heading {
   display: flex;
@@ -2361,6 +2363,7 @@ h3 { font-size: 20px; }
 .cart-row { transition: background 0.2s ease, box-shadow 0.2s ease; }
 .cart-row-forgiati { background: rgba(29, 78, 216, 0.06); border-left: 6px solid rgba(29, 78, 216, 0.5); }
 .cart-row-tubi { background: rgba(22, 163, 74, 0.08); border-left: 6px solid rgba(22, 163, 74, 0.5); }
+.cart-row-tubo-meccanico { background: rgba(99, 102, 241, 0.08); border-left: 6px solid rgba(99, 102, 241, 0.5); }
 .cart-row-oring { background: rgba(245, 158, 11, 0.12); border-left: 6px solid rgba(245, 158, 11, 0.6); }
 .cart-row-oring-nbr { background: rgba(168, 85, 247, 0.10); border-left: 6px solid rgba(168, 85, 247, 0.55); }
 .cart-row-spark { background: rgba(14, 165, 233, 0.1); border-left: 6px solid rgba(14, 165, 233, 0.55); }

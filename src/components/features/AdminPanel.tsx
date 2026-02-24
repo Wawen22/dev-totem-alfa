@@ -5,7 +5,7 @@ import { useCachedList } from "../../hooks/useCachedList";
 import { formatSharePointDate } from "../../utils/dateUtils";
 import { SharePointListItem } from "../../types/sharepoint";
 
-type ListKind = "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS";
+type ListKind = "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO";
 
 type FieldType = "text" | "number" | "date" | "textarea";
 
@@ -28,6 +28,7 @@ type AdminPanelProps = {
   oringHnbrListId?: string;
   oringNbrListId?: string;
   sparkGupsListId?: string;
+  tuboMeccanicoListId?: string;
 };
 
 const FORGIATI_FIELDS: FieldConfig[] = [
@@ -158,6 +159,30 @@ const SPARK_GUPS_FIELDS: FieldConfig[] = [
   { key: "field_13", label: "Commessa" },
 ];
 
+const TUBO_MECCANICO_FIELDS: FieldConfig[] = [
+  { key: "Title", label: "Codice / Title", required: true, placeholder: "Es. TME-001" },
+  { key: "field_1", label: "CODICE SAM" },
+  { key: "field_2", label: "N° ORDINE" },
+  { key: "field_3", label: "DATA OD", type: "date" },
+  { key: "field_4", label: "FORNITORE" },
+  { key: "field_5", label: "P." },
+  { key: "field_6", label: "Q.tà." },
+  { key: "field_7", label: "Lungh. Tubo (mm)" },
+  { key: "field_8", label: "Ø Est." },
+  { key: "field_9", label: "SP" },
+  { key: "field_10", label: "GRADO" },
+  { key: "field_11", label: "N° Bolla" },
+  { key: "field_12", label: "DATA CONSEGNA", type: "date" },
+  { key: "field_13", label: "N° CERT." },
+  { key: "field_14", label: "N° COLATA" },
+  { key: "field_15", label: "Prezzo unitario" },
+  { key: "field_16", label: "Giacenza Amministrazione (mm)" },
+  { key: "field_17", label: "Giacenza (mm)" },
+  { key: "field_18", label: "Data Prelievo", type: "date" },
+  { key: "field_19", label: "Utilizzato per comm. mm" },
+  { key: "LottoProgressivo", label: "Lotto Progressivo", writable: false },
+];
+
 const toStr = (val: unknown): string => {
   if (val === null || val === undefined) return "";
   return String(val);
@@ -265,6 +290,7 @@ const normalizeExcelKey = (value: string) =>
 
 const TUBI_DATE_FIELDS = new Set(["field_3", "field_16", "field_21", "Modified", "Created"]);
 const FORGIATI_DATE_FIELDS = new Set(["field_2", "field_11", "field_23", "Modified", "Created"]);
+const TUBO_MECCANICO_DATE_FIELDS = new Set(["field_3", "field_12", "field_18", "Modified", "Created"]);
 const SPARK_DATE_FIELDS = new Set<string>();
 
 const toExcelDateSerial = (val: unknown): number | "" => {
@@ -420,6 +446,39 @@ const buildSparkExcelColumnMap = () => {
 
 const SPARK_EXCEL_COLUMN_MAP = buildSparkExcelColumnMap();
 
+const buildTuboMeccanicoExcelColumnMap = () => {
+  const map = new Map<string, string>();
+  map.set(normalizeExcelKey("CODICE"), "Title");
+  map.set(normalizeExcelKey("TITLE"), "Title");
+  map.set(normalizeExcelKey("CODICE SAM"), "field_1");
+  map.set(normalizeExcelKey("NORDINE"), "field_2");
+  map.set(normalizeExcelKey("N ORDINE"), "field_2");
+  map.set(normalizeExcelKey("DATA OD"), "field_3");
+  map.set(normalizeExcelKey("FORNITORE"), "field_4");
+  map.set(normalizeExcelKey("P"), "field_5");
+  map.set(normalizeExcelKey("P."), "field_5");
+  map.set(normalizeExcelKey("QTA"), "field_6");
+  map.set(normalizeExcelKey("QTA."), "field_6");
+  map.set(normalizeExcelKey("LUNGH TUBO MM"), "field_7");
+  map.set(normalizeExcelKey("O EST"), "field_8");
+  map.set(normalizeExcelKey("SP"), "field_9");
+  map.set(normalizeExcelKey("GRADO"), "field_10");
+  map.set(normalizeExcelKey("NBOLLA"), "field_11");
+  map.set(normalizeExcelKey("DATA CONSEGNA"), "field_12");
+  map.set(normalizeExcelKey("N CERT"), "field_13");
+  map.set(normalizeExcelKey("N COLATA"), "field_14");
+  map.set(normalizeExcelKey("PREZZO UNITARIO"), "field_15");
+  map.set(normalizeExcelKey("GIACENZA AMMINISTRAZIONE MM"), "field_16");
+  map.set(normalizeExcelKey("GIACENZA MM"), "field_17");
+  map.set(normalizeExcelKey("DATA PRELIEVO"), "field_18");
+  map.set(normalizeExcelKey("UTILIZZATO PER COMM MM"), "field_19");
+  map.set(normalizeExcelKey("IDENTLOTTO"), "IdentLotto");
+  map.set(normalizeExcelKey("IDENT LOTTO"), "IdentLotto");
+  return map;
+};
+
+const TUBO_MECCANICO_EXCEL_COLUMN_MAP = buildTuboMeccanicoExcelColumnMap();
+
 const buildTubiExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
   const fieldKeyLookup = new Map<string, string>();
   Object.keys(fields).forEach((key) => {
@@ -464,11 +523,39 @@ const buildSparkExcelRow = (excelColumns: string[], fields: Record<string, unkno
     return toExcelCellValueForDateFields(SPARK_DATE_FIELDS, fieldKey, rawValue);
   });
 };
+
+const buildTuboMeccanicoExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
+  const fieldKeyLookup = new Map<string, string>();
+  Object.keys(fields).forEach((key) => {
+    fieldKeyLookup.set(normalizeExcelKey(key), key);
+  });
+
+  return excelColumns.map((columnName) => {
+    const normalized = normalizeExcelKey(columnName || "");
+    const fieldKey =
+      TUBO_MECCANICO_EXCEL_COLUMN_MAP.get(normalized) || fieldKeyLookup.get(normalized) || null;
+    const rawValue = fieldKey ? fields[fieldKey] : null;
+    return toExcelCellValueForDateFields(TUBO_MECCANICO_DATE_FIELDS, fieldKey, rawValue);
+  });
+};
+
 const getExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
   const target = normalizeExcelKey(fieldKey);
   for (let i = 0; i < excelColumns.length; i++) {
     const normalized = normalizeExcelKey(excelColumns[i] || "");
     const mapped = TUBI_EXCEL_COLUMN_MAP.get(normalized);
+    if (mapped && normalizeExcelKey(mapped) === target) {
+      return i;
+    }
+  }
+  return null;
+};
+
+const getTuboMeccanicoExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
+  const target = normalizeExcelKey(fieldKey);
+  for (let i = 0; i < excelColumns.length; i++) {
+    const normalized = normalizeExcelKey(excelColumns[i] || "");
+    const mapped = TUBO_MECCANICO_EXCEL_COLUMN_MAP.get(normalized);
     if (mapped && normalizeExcelKey(mapped) === target) {
       return i;
     }
@@ -535,6 +622,34 @@ const findForgiatiExcelRowIndex = (
 ) => {
   const titleIdx = getForgiatiExcelColumnIndex(excelColumns, "Title");
   const identIdx = getForgiatiExcelColumnIndex(excelColumns, "IdentLotto");
+  if (titleIdx === null || identIdx === null) return null;
+
+  const targetCodice = normalizeExcelKey(options.codice || "");
+  const targetIdent = normalizeExcelKey(options.identLotto || "");
+
+  for (const row of rows) {
+    const rowValues = row.values?.[0] || [];
+    const codiceVal = normalizeExcelKey(String(rowValues[titleIdx] ?? ""));
+    const identValRaw = String(rowValues[identIdx] ?? "");
+    const identVal = normalizeExcelKey(identValRaw);
+    const identMatches =
+      identVal === targetIdent ||
+      (!identVal && targetIdent === "a");
+    if (codiceVal === targetCodice && identMatches) {
+      return row.index;
+    }
+  }
+
+  return null;
+};
+
+const findTuboMeccanicoExcelRowIndex = (
+  rows: Array<{ index: number; values: Array<Array<unknown>> }>,
+  excelColumns: string[],
+  options: { codice: string; identLotto: string }
+) => {
+  const titleIdx = getTuboMeccanicoExcelColumnIndex(excelColumns, "Title");
+  const identIdx = getTuboMeccanicoExcelColumnIndex(excelColumns, "IdentLotto");
   if (titleIdx === null || identIdx === null) return null;
 
   const targetCodice = normalizeExcelKey(options.codice || "");
@@ -715,12 +830,14 @@ const LIST_OPTIONS: { kind: ListKind; label: string }[] = [
   { kind: "ORING-HNBR", label: "2_ORING-HNBR" },
   { kind: "ORING-NBR", label: "2_ORING-NBR" },
   { kind: "TUBI", label: "3_TUBI" },
+  { kind: "TUBO-MECCANICO", label: "4_TUBO-MECCANICO" },
   { kind: "SPARK-GUPS", label: "6_SPARK GUPS" },
 ];
 
 const getFieldSet = (kind: ListKind) => {
   if (kind === "FORGIATI") return FORGIATI_FIELDS;
   if (kind === "TUBI") return TUBI_FIELDS;
+  if (kind === "TUBO-MECCANICO") return TUBO_MECCANICO_FIELDS;
   if (kind === "ORING-HNBR") return ORING_HNBR_FIELDS;
   if (kind === "SPARK-GUPS") return SPARK_GUPS_FIELDS;
   return ORING_NBR_FIELDS;
@@ -729,6 +846,7 @@ const getFieldSet = (kind: ListKind) => {
 const getListNoun = (kind: ListKind) => {
   if (kind === "FORGIATI") return "forgiato";
   if (kind === "TUBI") return "tubo";
+  if (kind === "TUBO-MECCANICO") return "tubo meccanico";
   if (kind === "ORING-HNBR") return "oring HNBR";
   if (kind === "SPARK-GUPS") return "spark gups";
   return "oring NBR";
@@ -737,6 +855,7 @@ const getListNoun = (kind: ListKind) => {
 const getSortDateKey = (kind: ListKind) => {
   if (kind === "FORGIATI") return "field_2";
   if (kind === "TUBI") return "field_3";
+  if (kind === "TUBO-MECCANICO") return "field_3";
   if (kind === "ORING-HNBR") return "field_19";
   if (kind === "SPARK-GUPS") return "field_5";
   return "field_17";
@@ -745,6 +864,7 @@ const getSortDateKey = (kind: ListKind) => {
 const getSearchKeys = (kind: ListKind) => {
   if (kind === "FORGIATI") return ["Title", "field_10", "field_13"];
   if (kind === "TUBI") return ["Title", "field_15", "field_18"];
+  if (kind === "TUBO-MECCANICO") return ["Title", "field_11", "field_14"];
   if (kind === "ORING-HNBR") return ["Title", "field_18", "field_12", "field_2"];
   if (kind === "SPARK-GUPS") return ["Title", "field_1", "field_4", "field_8"];
   return ["Title", "field_11", "field_1"];
@@ -768,6 +888,14 @@ const getSummaryMeta = (
       { label: "Bolla", value: toStr(fields.field_15) || "-" },
       { label: "Colata", value: toStr(fields.field_18) || "-" },
       { label: "Giacenza", value: toStr(fields.field_19) || "-" },
+      { label: "Lotto", value: formatLottoProg(options.lottoProg || toStr(fields.LottoProgressivo) || "A") },
+    ];
+  }
+  if (kind === "TUBO-MECCANICO") {
+    return [
+      { label: "Bolla", value: toStr(fields.field_11) || "-" },
+      { label: "Colata", value: toStr(fields.field_14) || "-" },
+      { label: "Giacenza", value: toStr(fields.field_17) || "-" },
       { label: "Lotto", value: formatLottoProg(options.lottoProg || toStr(fields.LottoProgressivo) || "A") },
     ];
   }
@@ -800,6 +928,7 @@ export function AdminPanel({
   oringHnbrListId,
   oringNbrListId,
   sparkGupsListId,
+  tuboMeccanicoListId,
 }: AdminPanelProps) {
   const getClient = useAuthenticatedGraphClient();
   const forgiatiExcelPath = (import.meta.env.VITE_FORGIATI_EXCEL_PATH || "").trim();
@@ -816,6 +945,13 @@ export function AdminPanel({
   const tubiExcelDriveIdEnv = (import.meta.env.VITE_TUBI_EXCEL_DRIVE_ID || "").trim();
   const tubiExcelDriveNameEnv = (import.meta.env.VITE_TUBI_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
   const [tubiExcelDriveId, setTubiExcelDriveId] = useState<string | null>(tubiExcelDriveIdEnv || null);
+  const tuboMeccanicoExcelPath = (import.meta.env.VITE_TUBO_MECCANICO_EXCEL_PATH || "").trim();
+  const tuboMeccanicoExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
+  const tuboMeccanicoExcelFilename = (import.meta.env.VITE_SP_TUBO_MECCANICO_FILENAME || import.meta.env.VITE_TUBO_MECCANICO_EXCEL_FILE || "").trim();
+  const tuboMeccanicoExcelTable = (import.meta.env.VITE_TUBO_MECCANICO_EXCEL_TABLE || "tblTuboMeccanico").trim();
+  const tuboMeccanicoExcelDriveIdEnv = (import.meta.env.VITE_TUBO_MECCANICO_EXCEL_DRIVE_ID || "").trim();
+  const tuboMeccanicoExcelDriveNameEnv = (import.meta.env.VITE_TUBO_MECCANICO_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
+  const [tuboMeccanicoExcelDriveId, setTuboMeccanicoExcelDriveId] = useState<string | null>(tuboMeccanicoExcelDriveIdEnv || null);
   const sparkExcelPath = (import.meta.env.VITE_SPARK_GUPS_EXCEL_PATH || "").trim();
   const sparkExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
   const sparkExcelFilename = (import.meta.env.VITE_SP_SPARK_GUPS_FILENAME || import.meta.env.VITE_SPARK_GUPS_EXCEL_FILE || "").trim();
@@ -863,6 +999,13 @@ export function AdminPanel({
     refresh: refreshSparkGups,
   } = useCachedList<Record<string, unknown>>(service, sparkGupsListId, "admin-spark-gups");
 
+  const {
+    data: tuboMeccanicoItems,
+    loading: tuboMeccanicoLoading,
+    error: tuboMeccanicoError,
+    refresh: refreshTuboMeccanico,
+  } = useCachedList<Record<string, unknown>>(service, tuboMeccanicoListId, "admin-tubo-meccanico");
+
   const [activeList, setActiveList] = useState<ListKind>("FORGIATI");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -884,6 +1027,8 @@ export function AdminPanel({
       ? forgiatiItems
       : activeList === "TUBI"
       ? tubiItems
+      : activeList === "TUBO-MECCANICO"
+      ? tuboMeccanicoItems
       : activeList === "ORING-HNBR"
       ? oringHnbrItems
       : activeList === "SPARK-GUPS"
@@ -894,6 +1039,8 @@ export function AdminPanel({
       ? forgiatiLoading
       : activeList === "TUBI"
       ? tubiLoading
+      : activeList === "TUBO-MECCANICO"
+      ? tuboMeccanicoLoading
       : activeList === "ORING-HNBR"
       ? oringHnbrLoading
       : activeList === "SPARK-GUPS"
@@ -904,6 +1051,8 @@ export function AdminPanel({
       ? forgiatiError
       : activeList === "TUBI"
       ? tubiError
+      : activeList === "TUBO-MECCANICO"
+      ? tuboMeccanicoError
       : activeList === "ORING-HNBR"
       ? oringHnbrError
       : activeList === "SPARK-GUPS"
@@ -914,6 +1063,8 @@ export function AdminPanel({
       ? forgiatiListId
       : activeList === "TUBI"
       ? tubiListId
+      : activeList === "TUBO-MECCANICO"
+      ? tuboMeccanicoListId
       : activeList === "ORING-HNBR"
       ? oringHnbrListId
       : activeList === "SPARK-GUPS"
@@ -924,6 +1075,8 @@ export function AdminPanel({
       ? refreshForgiati
       : activeList === "TUBI"
       ? refreshTubi
+      : activeList === "TUBO-MECCANICO"
+      ? refreshTuboMeccanico
       : activeList === "ORING-HNBR"
       ? refreshOringHnbr
       : activeList === "SPARK-GUPS"
@@ -1046,6 +1199,52 @@ export function AdminPanel({
     return map;
   }, [forgiatiGroupedRows]);
 
+  const tuboMeccanicoGroupedRows = useMemo(() => {
+    const map = new Map<string, SharePointListItem<Record<string, unknown>>[]>();
+    (tuboMeccanicoItems || []).forEach((item) => {
+      const title = toStr((item.fields as Record<string, unknown>).Title) || "(senza codice)";
+      const existing = map.get(title) || [];
+      map.set(title, [...existing, item]);
+    });
+    return Array.from(map.entries()).map(([title, items]) => ({ title, items }));
+  }, [tuboMeccanicoItems]);
+
+  const tuboMeccanicoProgressiveMap = useMemo(() => {
+    const map = new Map<string, string>();
+    const normalizeLetter = (val: string | null | undefined) => {
+      if (!val) return null;
+      const cleaned = String(val).trim().toLowerCase();
+      if (/^[a-z]$/.test(cleaned)) return cleaned;
+      return null;
+    };
+    const getCreatedKey = (item: SharePointListItem<Record<string, unknown>>) => {
+      const created = getTimeValue((item.fields as Record<string, unknown>).Created);
+      if (created) return created;
+      const idNum = Number(item.id);
+      return Number.isFinite(idNum) ? idNum : 0;
+    };
+
+    tuboMeccanicoGroupedRows.forEach((group) => {
+      const sorted = [...group.items].sort((a, b) => getCreatedKey(a) - getCreatedKey(b));
+      const used = new Set<string>();
+      sorted.forEach((item) => {
+        const existing = normalizeLetter((item.fields as Record<string, unknown>).LottoProgressivo as string | undefined);
+        let letter = existing;
+        if (!letter || used.has(letter)) {
+          let code = "a".charCodeAt(0);
+          while (used.has(String.fromCharCode(code))) {
+            code++;
+          }
+          letter = String.fromCharCode(code);
+        }
+        used.add(letter);
+        map.set(item.id, letter);
+      });
+    });
+
+    return map;
+  }, [tuboMeccanicoGroupedRows]);
+
   const filteredItems = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return sortedItems;
@@ -1127,23 +1326,28 @@ export function AdminPanel({
     try {
       await service.updateItem<Record<string, unknown>>(activeListId, selectedId, payload);
       let excelError: string | null = null;
-      if (activeList === "TUBI" || activeList === "FORGIATI" || activeList === "SPARK-GUPS") {
+      if (activeList === "TUBI" || activeList === "FORGIATI" || activeList === "SPARK-GUPS" || activeList === "TUBO-MECCANICO") {
         try {
           const isForgiati = activeList === "FORGIATI";
           const isSpark = activeList === "SPARK-GUPS";
+          const isTuboMeccanico = activeList === "TUBO-MECCANICO";
           const resolvedPath = isForgiati
             ? forgiatiExcelPath || (forgiatiExcelFolder && forgiatiExcelFilename ? `${forgiatiExcelFolder}/${forgiatiExcelFilename}` : "")
             : isSpark
             ? sparkExcelPath || (sparkExcelFolder && sparkExcelFilename ? `${sparkExcelFolder}/${sparkExcelFilename}` : "")
+            : isTuboMeccanico
+            ? tuboMeccanicoExcelPath || (tuboMeccanicoExcelFolder && tuboMeccanicoExcelFilename ? `${tuboMeccanicoExcelFolder}/${tuboMeccanicoExcelFilename}` : "")
             : tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : "");
-          let resolvedDriveId = isForgiati ? forgiatiExcelDriveId : isSpark ? sparkExcelDriveId : tubiExcelDriveId;
-          const driveNameEnv = isForgiati ? forgiatiExcelDriveNameEnv : isSpark ? sparkExcelDriveNameEnv : tubiExcelDriveNameEnv;
+          let resolvedDriveId = isForgiati ? forgiatiExcelDriveId : isSpark ? sparkExcelDriveId : isTuboMeccanico ? tuboMeccanicoExcelDriveId : tubiExcelDriveId;
+          const driveNameEnv = isForgiati ? forgiatiExcelDriveNameEnv : isSpark ? sparkExcelDriveNameEnv : isTuboMeccanico ? tuboMeccanicoExcelDriveNameEnv : tubiExcelDriveNameEnv;
           if (!resolvedDriveId && driveNameEnv) {
             resolvedDriveId = await service.getDriveIdByName(driveNameEnv);
             if (isForgiati) {
               setForgiatiExcelDriveId(resolvedDriveId);
             } else if (isSpark) {
               setSparkExcelDriveId(resolvedDriveId);
+            } else if (isTuboMeccanico) {
+              setTuboMeccanicoExcelDriveId(resolvedDriveId);
             } else {
               setTubiExcelDriveId(resolvedDriveId);
             }
@@ -1151,7 +1355,7 @@ export function AdminPanel({
           if (!resolvedDriveId && driveNameEnv) {
             throw new Error(`Libreria "${driveNameEnv}" non trovata`);
           }
-          const tableName = isForgiati ? forgiatiExcelTable : isSpark ? sparkExcelTable : tubiExcelTable;
+          const tableName = isForgiati ? forgiatiExcelTable : isSpark ? sparkExcelTable : isTuboMeccanico ? tuboMeccanicoExcelTable : tubiExcelTable;
           if (!resolvedPath || !tableName) {
             throw new Error("Percorso Excel o tabella non configurati");
           }
@@ -1162,6 +1366,8 @@ export function AdminPanel({
             (currentItem?.id
               ? isForgiati
                 ? forgiatiProgressiveMap.get(currentItem.id)
+                : isTuboMeccanico
+                ? tuboMeccanicoProgressiveMap.get(currentItem.id)
                 : tubiProgressiveMap.get(currentItem.id)
               : undefined);
           const identLotto = formatLottoProg(identRaw || "A");
@@ -1174,6 +1380,8 @@ export function AdminPanel({
             ? findForgiatiExcelRowIndex(rows, columns, { codice: lookupTitle, identLotto })
             : isSpark
             ? findSparkExcelRowIndex(rows, columns, { codice: lookupTitle, lotto: toStr(editForm.field_1) })
+            : isTuboMeccanico
+            ? findTuboMeccanicoExcelRowIndex(rows, columns, { codice: lookupTitle, identLotto })
             : findExcelRowIndex(rows, columns, { codice: lookupTitle, identLotto });
 
           if (rowIndex === null) {
@@ -1201,6 +1409,8 @@ export function AdminPanel({
             ? buildForgiatiExcelRow(columns, excelFields)
             : isSpark
             ? buildSparkExcelRow(columns, excelFields)
+            : isTuboMeccanico
+            ? buildTuboMeccanicoExcelRow(columns, excelFields)
             : buildTubiExcelRow(columns, excelFields);
           const sessionId = await service.createWorkbookSessionByItemId(
             driveItem.id,
@@ -1281,12 +1491,14 @@ export function AdminPanel({
     const fields = item.fields as Record<string, unknown>;
     const title = toStr(fields.Title) || "elemento";
     let lottoHint = "";
-    if (activeList === "FORGIATI" || activeList === "TUBI") {
+    if (activeList === "FORGIATI" || activeList === "TUBI" || activeList === "TUBO-MECCANICO") {
       const identRaw =
         (fields as any)?.LottoProgressivo ||
         (item.id
           ? activeList === "FORGIATI"
             ? forgiatiProgressiveMap.get(item.id)
+            : activeList === "TUBO-MECCANICO"
+            ? tuboMeccanicoProgressiveMap.get(item.id)
             : tubiProgressiveMap.get(item.id)
           : undefined);
       lottoHint = ` (lotto ${formatLottoProg(identRaw || "A")})`;
@@ -1306,23 +1518,28 @@ export function AdminPanel({
     try {
       await service.deleteItem(activeListId, item.id);
       let excelError: string | null = null;
-      if (activeList === "TUBI" || activeList === "FORGIATI" || activeList === "SPARK-GUPS") {
+      if (activeList === "TUBI" || activeList === "FORGIATI" || activeList === "SPARK-GUPS" || activeList === "TUBO-MECCANICO") {
         try {
           const isForgiati = activeList === "FORGIATI";
           const isSpark = activeList === "SPARK-GUPS";
+          const isTuboMeccanico = activeList === "TUBO-MECCANICO";
           const resolvedPath = isForgiati
             ? forgiatiExcelPath || (forgiatiExcelFolder && forgiatiExcelFilename ? `${forgiatiExcelFolder}/${forgiatiExcelFilename}` : "")
             : isSpark
             ? sparkExcelPath || (sparkExcelFolder && sparkExcelFilename ? `${sparkExcelFolder}/${sparkExcelFilename}` : "")
+            : isTuboMeccanico
+            ? tuboMeccanicoExcelPath || (tuboMeccanicoExcelFolder && tuboMeccanicoExcelFilename ? `${tuboMeccanicoExcelFolder}/${tuboMeccanicoExcelFilename}` : "")
             : tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : "");
-          let resolvedDriveId = isForgiati ? forgiatiExcelDriveId : isSpark ? sparkExcelDriveId : tubiExcelDriveId;
-          const driveNameEnv = isForgiati ? forgiatiExcelDriveNameEnv : isSpark ? sparkExcelDriveNameEnv : tubiExcelDriveNameEnv;
+          let resolvedDriveId = isForgiati ? forgiatiExcelDriveId : isSpark ? sparkExcelDriveId : isTuboMeccanico ? tuboMeccanicoExcelDriveId : tubiExcelDriveId;
+          const driveNameEnv = isForgiati ? forgiatiExcelDriveNameEnv : isSpark ? sparkExcelDriveNameEnv : isTuboMeccanico ? tuboMeccanicoExcelDriveNameEnv : tubiExcelDriveNameEnv;
           if (!resolvedDriveId && driveNameEnv) {
             resolvedDriveId = await service.getDriveIdByName(driveNameEnv);
             if (isForgiati) {
               setForgiatiExcelDriveId(resolvedDriveId);
             } else if (isSpark) {
               setSparkExcelDriveId(resolvedDriveId);
+            } else if (isTuboMeccanico) {
+              setTuboMeccanicoExcelDriveId(resolvedDriveId);
             } else {
               setTubiExcelDriveId(resolvedDriveId);
             }
@@ -1330,7 +1547,7 @@ export function AdminPanel({
           if (!resolvedDriveId && driveNameEnv) {
             throw new Error(`Libreria "${driveNameEnv}" non trovata`);
           }
-          const tableName = isForgiati ? forgiatiExcelTable : isSpark ? sparkExcelTable : tubiExcelTable;
+          const tableName = isForgiati ? forgiatiExcelTable : isSpark ? sparkExcelTable : isTuboMeccanico ? tuboMeccanicoExcelTable : tubiExcelTable;
           if (!resolvedPath || !tableName) {
             throw new Error("Percorso Excel o tabella non configurati");
           }
@@ -1340,6 +1557,8 @@ export function AdminPanel({
             (item.id
               ? isForgiati
                 ? forgiatiProgressiveMap.get(item.id)
+                : isTuboMeccanico
+                ? tuboMeccanicoProgressiveMap.get(item.id)
                 : tubiProgressiveMap.get(item.id)
               : undefined);
           const identLotto = formatLottoProg(identRaw || "A");
@@ -1353,6 +1572,8 @@ export function AdminPanel({
             ? findForgiatiExcelRowIndex(rows, columns, { codice: lookupTitle, identLotto })
             : isSpark
             ? findSparkExcelRowIndex(rows, columns, { codice: lookupTitle, lotto: sparkLotto })
+            : isTuboMeccanico
+            ? findTuboMeccanicoExcelRowIndex(rows, columns, { codice: lookupTitle, identLotto })
             : findExcelRowIndex(rows, columns, { codice: lookupTitle, identLotto });
 
           if (rowIndex === null) {
@@ -1481,23 +1702,28 @@ export function AdminPanel({
     try {
       await service.createItem<Record<string, unknown>>(activeListId, payload);
       let excelError: string | null = null;
-      if (activeList === "TUBI" || activeList === "FORGIATI" || activeList === "SPARK-GUPS") {
+      if (activeList === "TUBI" || activeList === "FORGIATI" || activeList === "SPARK-GUPS" || activeList === "TUBO-MECCANICO") {
         try {
           const isForgiati = activeList === "FORGIATI";
           const isSpark = activeList === "SPARK-GUPS";
+          const isTuboMeccanico = activeList === "TUBO-MECCANICO";
           const resolvedPath = isForgiati
             ? forgiatiExcelPath || (forgiatiExcelFolder && forgiatiExcelFilename ? `${forgiatiExcelFolder}/${forgiatiExcelFilename}` : "")
             : isSpark
             ? sparkExcelPath || (sparkExcelFolder && sparkExcelFilename ? `${sparkExcelFolder}/${sparkExcelFilename}` : "")
+            : isTuboMeccanico
+            ? tuboMeccanicoExcelPath || (tuboMeccanicoExcelFolder && tuboMeccanicoExcelFilename ? `${tuboMeccanicoExcelFolder}/${tuboMeccanicoExcelFilename}` : "")
             : tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : "");
-          let resolvedDriveId = isForgiati ? forgiatiExcelDriveId : isSpark ? sparkExcelDriveId : tubiExcelDriveId;
-          const driveNameEnv = isForgiati ? forgiatiExcelDriveNameEnv : isSpark ? sparkExcelDriveNameEnv : tubiExcelDriveNameEnv;
+          let resolvedDriveId = isForgiati ? forgiatiExcelDriveId : isSpark ? sparkExcelDriveId : isTuboMeccanico ? tuboMeccanicoExcelDriveId : tubiExcelDriveId;
+          const driveNameEnv = isForgiati ? forgiatiExcelDriveNameEnv : isSpark ? sparkExcelDriveNameEnv : isTuboMeccanico ? tuboMeccanicoExcelDriveNameEnv : tubiExcelDriveNameEnv;
           if (!resolvedDriveId && driveNameEnv) {
             resolvedDriveId = await service.getDriveIdByName(driveNameEnv);
             if (isForgiati) {
               setForgiatiExcelDriveId(resolvedDriveId);
             } else if (isSpark) {
               setSparkExcelDriveId(resolvedDriveId);
+            } else if (isTuboMeccanico) {
+              setTuboMeccanicoExcelDriveId(resolvedDriveId);
             } else {
               setTubiExcelDriveId(resolvedDriveId);
             }
@@ -1505,7 +1731,7 @@ export function AdminPanel({
           if (!resolvedDriveId && driveNameEnv) {
             throw new Error(`Libreria "${driveNameEnv}" non trovata`);
           }
-          const tableName = isForgiati ? forgiatiExcelTable : isSpark ? sparkExcelTable : tubiExcelTable;
+          const tableName = isForgiati ? forgiatiExcelTable : isSpark ? sparkExcelTable : isTuboMeccanico ? tuboMeccanicoExcelTable : tubiExcelTable;
           if (!resolvedPath || !tableName) {
             throw new Error("Percorso Excel o tabella non configurati");
           }
@@ -1522,8 +1748,8 @@ export function AdminPanel({
             const insertAfter = findLastRowIndexByCodice(rows, columns, titleValue, getSparkExcelColumnIndex);
             insertIndex = insertAfter !== null ? insertAfter + 1 : undefined;
           } else {
-            const baseItems = isForgiati ? forgiatiItems : tubiItems;
-            const map = isForgiati ? forgiatiProgressiveMap : tubiProgressiveMap;
+            const baseItems = isForgiati ? forgiatiItems : isTuboMeccanico ? tuboMeccanicoItems : tubiItems;
+            const map = isForgiati ? forgiatiProgressiveMap : isTuboMeccanico ? tuboMeccanicoProgressiveMap : tubiProgressiveMap;
             const sameTitle = (baseItems || []).filter((item) =>
               normalizeExcelKey(toStr((item.fields as Record<string, unknown>).Title)) ===
               normalizeExcelKey(titleValue)
@@ -1535,18 +1761,22 @@ export function AdminPanel({
             } as Record<string, unknown>;
             const identIndex = isForgiati
               ? getForgiatiExcelColumnIndex(columns, "IdentLotto")
+              : isTuboMeccanico
+              ? getTuboMeccanicoExcelColumnIndex(columns, "IdentLotto")
               : getExcelColumnIndex(columns, "IdentLotto");
             if (identIndex === null) {
               throw new Error("Colonna IdentLotto non trovata nella tabella Excel");
             }
             rowValues = isForgiati
               ? buildForgiatiExcelRow(columns, excelFields)
+              : isTuboMeccanico
+              ? buildTuboMeccanicoExcelRow(columns, excelFields)
               : buildTubiExcelRow(columns, excelFields);
             const insertAfter = findLastRowIndexByCodice(
               rows,
               columns,
               titleValue,
-              isForgiati ? getForgiatiExcelColumnIndex : getExcelColumnIndex
+              isForgiati ? getForgiatiExcelColumnIndex : isTuboMeccanico ? getTuboMeccanicoExcelColumnIndex : getExcelColumnIndex
             );
             insertIndex = insertAfter !== null ? insertAfter + 1 : undefined;
           }
@@ -1685,6 +1915,10 @@ export function AdminPanel({
         : activeList === "FORGIATI"
         ? item.id
           ? forgiatiProgressiveMap.get(item.id)
+          : undefined
+        : activeList === "TUBO-MECCANICO"
+        ? item.id
+          ? tuboMeccanicoProgressiveMap.get(item.id)
           : undefined
         : undefined;
     return {
