@@ -1989,6 +1989,7 @@ h3 { font-size: 20px; }
 .stock-card--oring { border-left: 8px solid #f59e0b; }
 .stock-card--oring-nbr { border-left: 8px solid #a855f7; }
 .stock-card--spark { border-left: 8px solid #0ea5e9; }
+.stock-card--filo-flusso { border-left: 8px solid #ec4899; }
 .stock-card--tubo-meccanico { border-left: 8px solid #6366f1; }
 
 .stock-card__head {
@@ -2251,6 +2252,9 @@ h3 { font-size: 20px; }
   z-index: 5;
   box-shadow: 2px 0 5px rgba(15, 23, 42, 0.05);
   border-right: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sticky-col.secondary {
@@ -2260,8 +2264,11 @@ h3 { font-size: 20px; }
 
 /* Ensure the first data column (Title) has fixed width */
 .inventory-table th:nth-child(2), .inventory-table td:nth-child(2) {
-  min-width: 200px;
-  max-width: 200px;
+  min-width: 250px;
+  max-width: 350px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 /* Account for the added selection column offset on sticky cells */
@@ -2367,6 +2374,7 @@ h3 { font-size: 20px; }
 .cart-row-oring { background: rgba(245, 158, 11, 0.12); border-left: 6px solid rgba(245, 158, 11, 0.6); }
 .cart-row-oring-nbr { background: rgba(168, 85, 247, 0.10); border-left: 6px solid rgba(168, 85, 247, 0.55); }
 .cart-row-spark { background: rgba(14, 165, 233, 0.1); border-left: 6px solid rgba(14, 165, 233, 0.55); }
+.cart-row-filo-flusso { background: rgba(236, 72, 153, 0.1); border-left: 6px solid rgba(236, 72, 153, 0.55); }
 .cart-row:hover { box-shadow: inset 0 1px 0 rgba(255,255,255,0.8); }
 
 .icon-btn.danger {

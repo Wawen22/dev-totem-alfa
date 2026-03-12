@@ -9,6 +9,7 @@ import { tubiColumns } from "./config/tubiColumns";
 import { oringHnbrColumns } from "./config/oringHnbrColumns";
 import { oringNbrColumns } from "./config/oringNbrColumns";
 import { sparkGupsColumns } from "./config/sparkGupsColumns";
+import { filoFlussoColumns } from "./config/filoFlussoColumns";
 import { tuboMeccanicoColumns } from "./config/tuboMeccanicoColumns";
 import { SharePointListItem } from "./types/sharepoint";
 import { formatSharePointDate } from "./utils/dateUtils";
@@ -40,10 +41,11 @@ msalInstance
 type ForgiatoItem = SharePointListItem<Record<string, unknown>>;
 type TubiItem = SharePointListItem<Record<string, unknown>>;
 type TuboMeccanicoItem = SharePointListItem<Record<string, unknown>>;
+type FiloFlussoItem = SharePointListItem<Record<string, unknown>>;
 
 type CartItem = {
   key: string;
-  source: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO";
+  source: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO";
   itemId: string;
   title: string;
   bolla?: unknown;
@@ -79,6 +81,12 @@ type EditableItemState = {
   colata?: string;
   giacenzaAmm?: string;
   utilizzatoPerCommessa?: string;
+  codEsab?: string;
+  confezioneKg?: string;
+  prezzoKg2025?: string;
+  prezzoKg2026?: string;
+  qtaAcq2025?: string;
+  qtaAcq2026?: string;
   raw?: Record<string, unknown>;
 };
 
@@ -382,7 +390,23 @@ const sparkExcelColumnFieldMap = (() => {
   return map;
 })();
 
+const filoFlussoExcelColumnFieldMap = (() => {
+  const map = buildExcelColumnFieldMap(filoFlussoColumns);
+  map.set(normalizeExcelKey("DESCRIZIONE"), "Title");
+  map.set(normalizeExcelKey("COD.SAM"), "field_1");
+  map.set(normalizeExcelKey("COD.ESAB"), "field_2");
+  map.set(normalizeExcelKey("LOTTO"), "field_3");
+  map.set(normalizeExcelKey("CONFEZ. DA KG"), "field_4");
+  map.set(normalizeExcelKey("PREZZO AL KG 2025"), "field_5");
+  map.set(normalizeExcelKey("PREZZO AL KG 2026"), "field_6");
+  map.set(normalizeExcelKey("Q.TA' ACQ. 2025"), "field_7");
+  map.set(normalizeExcelKey("Q.TA' ACQ. 2026"), "field_8");
+  map.set(normalizeExcelKey("GIACENZA"), "field_9");
+  return map;
+})();
+
 const SPARK_DATE_FIELDS = new Set<string>();
+const FILO_FLUSSO_DATE_FIELDS = new Set<string>([]);
 
 const tuboMeccanicoExcelColumnFieldMap = (() => {
   const map = buildExcelColumnFieldMap(tuboMeccanicoColumns);
@@ -463,6 +487,21 @@ const buildSparkExcelRow = (excelColumns: string[], fields: Record<string, unkno
   });
 };
 
+const buildFiloFlussoExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
+  const fieldKeyLookup = new Map<string, string>();
+  Object.keys(fields).forEach((key) => {
+    fieldKeyLookup.set(normalizeExcelKey(key), key);
+  });
+
+  return excelColumns.map((columnName) => {
+    const normalized = normalizeExcelKey(columnName || "");
+    const fieldKey =
+      filoFlussoExcelColumnFieldMap.get(normalized) || fieldKeyLookup.get(normalized) || null;
+    const rawValue = fieldKey ? fields[fieldKey] : null;
+    return toExcelCellValueForDateFields(FILO_FLUSSO_DATE_FIELDS, fieldKey, rawValue);
+  });
+};
+
 const getForgiatiExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
   const target = normalizeExcelKey(fieldKey);
   for (let i = 0; i < excelColumns.length; i++) {
@@ -480,6 +519,18 @@ const getSparkExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
   for (let i = 0; i < excelColumns.length; i++) {
     const normalized = normalizeExcelKey(excelColumns[i] || "");
     const mapped = sparkExcelColumnFieldMap.get(normalized);
+    if (mapped && normalizeExcelKey(mapped) === target) {
+      return i;
+    }
+  }
+  return null;
+};
+
+const getFiloFlussoExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
+  const target = normalizeExcelKey(fieldKey);
+  for (let i = 0; i < excelColumns.length; i++) {
+    const normalized = normalizeExcelKey(excelColumns[i] || "");
+    const mapped = filoFlussoExcelColumnFieldMap.get(normalized);
     if (mapped && normalizeExcelKey(mapped) === target) {
       return i;
     }
@@ -563,6 +614,32 @@ const findSparkExcelRowIndex = (
   const titleIdx = getSparkExcelColumnIndex(excelColumns, "Title");
   if (titleIdx === null) return null;
   const lottoIdx = getSparkExcelColumnIndex(excelColumns, "field_1");
+
+  const targetCodice = normalizeExcelKey(options.codice || "");
+  const targetLotto = normalizeExcelKey(options.lotto || "");
+
+  for (const row of rows) {
+    const rowValues = row.values?.[0] || [];
+    const codiceVal = normalizeExcelKey(String(rowValues[titleIdx] ?? ""));
+    if (codiceVal !== targetCodice) continue;
+    if (lottoIdx === null) return row.index;
+    const lottoVal = normalizeExcelKey(String(rowValues[lottoIdx] ?? ""));
+    if (lottoVal === targetLotto || (!lottoVal && !targetLotto)) {
+      return row.index;
+    }
+  }
+
+  return null;
+};
+
+const findFiloFlussoExcelRowIndex = (
+  rows: Array<{ index: number; values: Array<Array<unknown>> }>,
+  excelColumns: string[],
+  options: { codice: string; lotto?: string }
+) => {
+  const titleIdx = getFiloFlussoExcelColumnIndex(excelColumns, "Title");
+  if (titleIdx === null) return null;
+  const lottoIdx = getFiloFlussoExcelColumnIndex(excelColumns, "field_3");
 
   const targetCodice = normalizeExcelKey(options.codice || "");
   const targetLotto = normalizeExcelKey(options.lotto || "");
@@ -1368,7 +1445,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
             </thead>
             <tbody>
               {visibleRows.length === 0 && (
-                <tr>
+                <tr key="status-row">
                   <td colSpan={visibleColumns.length + 2} className="muted" style={{ textAlign: "center" }}>
                     {loading ? "Carico dati..." : "Nessun elemento trovato"}
                   </td>
@@ -1405,7 +1482,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
 
                       if (isTitle) {
                         return (
-                          <th scope="row" key={col.field} className={className}>
+                          <th scope="row" key={col.field} className={className} title={String((representative.fields as Record<string, unknown>)[col.field] || "")}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
                               <span>{content}</span>
                               <button
@@ -1736,7 +1813,7 @@ function OringHnbrPanel({ selectedItems, onToggle, selectionLimitReached }: Sele
             </thead>
             <tbody>
               {rows.length === 0 && (
-                <tr>
+                <tr key="status-row">
                   <td colSpan={visibleColumns.length + 1} className="muted" style={{ textAlign: "center" }}>
                     {loading ? "Carico dati..." : "Nessun elemento trovato"}
                   </td>
@@ -1770,7 +1847,7 @@ function OringHnbrPanel({ selectedItems, onToggle, selectionLimitReached }: Sele
 
                       if (isTitle) {
                         return (
-                          <th scope="row" key={col.field} className={className}>
+                          <th scope="row" key={col.field} className={className} title={String((item.fields as Record<string, unknown>)[col.field] || "")}>
                             {content}
                           </th>
                         );
@@ -1923,7 +2000,7 @@ function OringNbrPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
             </thead>
             <tbody>
               {rows.length === 0 && (
-                <tr>
+                <tr key="status-row">
                   <td colSpan={visibleColumns.length + 1} className="muted" style={{ textAlign: "center" }}>
                     {loading ? "Carico dati..." : "Nessun elemento trovato"}
                   </td>
@@ -1957,7 +2034,7 @@ function OringNbrPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
 
                       if (isTitle) {
                         return (
-                          <th scope="row" key={col.field} className={className}>
+                          <th scope="row" key={col.field} className={className} title={String((item.fields as Record<string, unknown>)[col.field] || "")}>
                             {content}
                           </th>
                         );
@@ -2112,7 +2189,7 @@ function SparkGupsPanel({ selectedItems, onToggle, selectionLimitReached }: Sele
             </thead>
             <tbody>
               {rows.length === 0 && (
-                <tr>
+                <tr key="status-row">
                   <td colSpan={visibleColumns.length + 1} className="muted" style={{ textAlign: "center" }}>
                     {loading ? "Carico dati..." : "Nessun elemento trovato"}
                   </td>
@@ -2150,7 +2227,7 @@ function SparkGupsPanel({ selectedItems, onToggle, selectionLimitReached }: Sele
 
                       if (isTitle) {
                         return (
-                          <th scope="row" key={col.field} className={className}>
+                          <th scope="row" key={col.field} className={className} title={String(fields[col.field] || "")}>
                             {content}
                           </th>
                         );
@@ -2173,7 +2250,201 @@ function SparkGupsPanel({ selectedItems, onToggle, selectionLimitReached }: Sele
   );
 }
 
-function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: SelectionStateProps) {
+function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: SelectionStateProps) {
+  const getClient = useAuthenticatedGraphClient();
+  const siteId = import.meta.env.VITE_SHAREPOINT_SITE_ID;
+  const listId = import.meta.env.VITE_FILO_FLUSSO_LIST_ID;
+
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+
+  const service = useMemo(() => {
+    if (!siteId) return null;
+    return new SharePointService(getClient, siteId);
+  }, [getClient, siteId]);
+
+  const { data: rawRows, loading, error, refresh } = useCachedList<Record<string, unknown>>(
+    service,
+    listId,
+    "filo-flusso"
+  );
+
+  const rows = useMemo(() => {
+    const sorted = [...rawRows];
+    sorted.sort((a, b) => {
+      const valA = toStr((a.fields as any).Title);
+      const valB = toStr((b.fields as any).Title);
+      return valA.localeCompare(valB);
+    });
+    return sorted;
+  }, [rawRows]);
+
+  const visibleColumns = filoFlussoColumns;
+
+  const normalizedRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter((item) =>
+      visibleColumns.some((col) => {
+        const v = (item.fields as Record<string, unknown>)[col.field];
+        if (v === null || v === undefined) return false;
+
+        let valStr = String(v);
+        if (col.type === "date") {
+          valStr = formatSharePointDate(v);
+        }
+
+        return valStr.toLowerCase().includes(term);
+      })
+    );
+  }, [rows, search, visibleColumns]);
+
+  const totalPages = Math.max(1, Math.ceil(normalizedRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageSliceStart = (currentPage - 1) * pageSize;
+  const visibleRows = normalizedRows.slice(pageSliceStart, pageSliceStart + pageSize);
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearch(e.target.value);
+    setPage(1);
+  };
+
+  const handleClearSearch = () => {
+    setSearch("");
+    setPage(1);
+  };
+
+  const handlePrev = () => setPage((p) => Math.max(1, p - 1));
+  const handleNext = () => setPage((p) => Math.min(totalPages, p + 1));
+
+  return (
+    <div className="panel inventory-panel">
+      <div className="panel-content">
+        {error && <div className="alert error">{error}</div>}
+        {!listId && (
+          <div className="alert warning">
+            Inserisci il GUID della lista 9_FILO&FLUSSO in .env.local (VITE_FILO_FLUSSO_LIST_ID).
+          </div>
+        )}
+
+        <div className="toolbar">
+          <div className="search-box">
+            <input
+              type="search"
+              placeholder="Cerca in tutte le colonne..."
+              value={search}
+              onChange={handleSearchChange}
+            />
+            {search && <button className="icon-btn" onClick={handleClearSearch} aria-label="Clear search">✕</button>}
+          </div>
+
+          <div className="pager-info">
+            <button className="btn secondary" onClick={() => refresh()} disabled={loading} style={{ padding: "8px 12px", fontSize: "13px" }}>
+              {loading ? "..." : "Aggiorna"}
+            </button>
+            <span className="pill">{normalizedRows.length} risultati</span>
+            <label className="page-size">
+              <span>Per pagina</span>
+              <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
+                {[100, 200].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </label>
+            <div className="pager">
+              <button className="icon-btn" onClick={handlePrev} disabled={currentPage === 1}>←</button>
+              <span>{currentPage} / {totalPages}</span>
+              <button className="icon-btn" onClick={handleNext} disabled={currentPage === totalPages}>→</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="table-scroll">
+          <table className="inventory-table">
+            <thead>
+              <tr>
+                <th scope="col" className="selection-col" aria-label="Seleziona">
+                  <span className="selection-col__icon" aria-hidden="true"></span>
+                </th>
+                {visibleColumns.map((col) => (
+                  <th
+                    scope="col"
+                    key={col.field}
+                    className={col.field === "Title" ? "sticky-col" : undefined}
+                    style={col.width ? { width: col.width } : undefined}
+                  >
+                    <span>{col.label}</span>
+                    <small>{col.field}</small>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && (
+                <tr key="status-row">
+                  <td colSpan={visibleColumns.length + 1} className="muted" style={{ textAlign: "center" }}>
+                    {loading ? "Carico dati..." : "Nessun elemento trovato"}
+                  </td>
+                </tr>
+              )}
+              {visibleRows.map((item) => {
+                const fields = item.fields as Record<string, unknown>;
+                const cartItem: CartItem = {
+                  key: `FILO-FLUSSO-${item.id}`,
+                  source: "FILO-FLUSSO",
+                  itemId: item.id,
+                  title: (fields.Title as string) || "-",
+                  bolla: "",
+                  colata: "",
+                  lottoProg: toStr(fields.field_3),
+                  fields,
+                  };
+                  const checked = Boolean(selectedItems[cartItem.key]);
+
+                  return (
+                  <tr key={item.id}>
+                    <td className="selection-col">
+                      <input
+                        type="checkbox"
+                        aria-label="Seleziona riga"
+                        checked={checked}
+                        disabled={!checked && selectionLimitReached}
+                        onChange={() => onToggle(cartItem, checked)}
+                      />
+                    </td>
+                    {visibleColumns.map((col) => {
+                      const isTitle = col.field === "Title";
+                      const className = isTitle ? "sticky-col" : undefined;
+                      const content = formatCellValue(fields[col.field], col.type);
+
+                      if (isTitle) {
+                        return (
+                          <th scope="row" key={col.field} className={className} title={String(fields[col.field] || "")}>
+                            {content}
+                          </th>
+                        );
+                      }
+
+                      return (
+                        <td key={col.field} className={className}>
+                          {content}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                  );
+                  })}
+                  </tbody>
+                  </table>
+                  </div>
+                  </div>
+                  </div>
+                  );
+                  }
+
+                  function TubiPanel
+({ selectedItems, onToggle, selectionLimitReached }: SelectionStateProps) {
   const getClient = useAuthenticatedGraphClient();
   const siteId = import.meta.env.VITE_SHAREPOINT_SITE_ID;
   const listId = import.meta.env.VITE_TUBI_LIST_ID;
@@ -2708,7 +2979,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
             </thead>
             <tbody>
               {visibleRows.length === 0 && (
-                <tr>
+                <tr key="status-row">
                   <td colSpan={visibleColumns.length + 2} className="muted" style={{ textAlign: "center" }}>
                     {loading ? "Carico dati..." : "Nessun elemento trovato"}
                   </td>
@@ -2746,7 +3017,7 @@ function TubiPanel({ selectedItems, onToggle, selectionLimitReached }: Selection
 
                       if (isTitle) {
                         return (
-                          <th scope="row" key={col.field} className={className}>
+                          <th scope="row" key={col.field} className={className} title={String((representative.fields as Record<string, unknown>)[col.field] || "")}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
                               <span>{content}</span>
                               <button
@@ -3451,7 +3722,7 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
             </thead>
             <tbody>
               {visibleRows.length === 0 && (
-                <tr>
+                <tr key="status-row">
                   <td colSpan={visibleColumns.length + 2} className="muted" style={{ textAlign: "center" }}>
                     {loading ? "Carico dati..." : "Nessun elemento trovato"}
                   </td>
@@ -3488,7 +3759,7 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
 
                       if (isTitle) {
                         return (
-                          <th scope="row" key={col.field} className={className}>
+                          <th scope="row" key={col.field} className={className} title={String((representative.fields as Record<string, unknown>)[col.field] || "")}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
                               <span>{content}</span>
                               <button
@@ -3705,6 +3976,23 @@ function buildEditableState(item: CartItem): EditableItemState {
     };
   }
 
+  if (item.source === "FILO-FLUSSO") {
+    return {
+      type: "FILO-FLUSSO",
+      title: item.title || "-",
+      codiceSam: toStr((fields as any).field_1),
+      codEsab: toStr((fields as any).field_2),
+      lotto: toStr((fields as any).field_3),
+      confezioneKg: toStr((fields as any).field_4),
+      prezzoKg2025: toStr((fields as any).field_5),
+      prezzoKg2026: toStr((fields as any).field_6),
+      qtaAcq2025: toStr((fields as any).field_7),
+      qtaAcq2026: toStr((fields as any).field_8),
+      giacenza: toStr((fields as any).field_9),
+      raw: fields,
+    };
+  }
+
   if (item.source === "ORING-HNBR") {
     return {
       type: "ORING-HNBR",
@@ -3844,6 +4132,7 @@ function StockUpdatePage({
           const isOring = item.source === "ORING-HNBR";
           const isOringNbr = item.source === "ORING-NBR";
           const isSpark = item.source === "SPARK-GUPS";
+          const isFiloFlusso = item.source === "FILO-FLUSSO";
           const isTuboMeccanico = item.source === "TUBO-MECCANICO";
           const raw = (cardValues.raw || {}) as Record<string, unknown>;
 
@@ -3911,6 +4200,18 @@ function StockUpdatePage({
                 { label: "DATA CONSEGNA", value: formatSharePointDate(raw["field_12"]) },
                 { label: "N° CERT.", value: raw["field_13"] },
               ]
+            : isFiloFlusso
+            ? [
+                { label: "COD.SAM", value: raw["field_1"] },
+                { label: "COD.ESAB", value: raw["field_2"] },
+                { label: "LOTTO", value: raw["field_3"] },
+                { label: "CONFEZ. DA KG", value: raw["field_4"] },
+                { label: "PREZZO KG 2025", value: raw["field_5"] },
+                { label: "PREZZO KG 2026", value: raw["field_6"] },
+                { label: "Q.TA ACQ. 2025", value: raw["field_7"] },
+                { label: "Q.TA ACQ. 2026", value: raw["field_8"] },
+                { label: "GIACENZA", value: raw["field_9"] },
+              ]
             : [
                 { label: "N° Ordine", value: raw["field_2"] },
                 { label: "Codice SAM", value: raw["CodiceSAM"] },
@@ -3939,6 +4240,8 @@ function StockUpdatePage({
                   ? "stock-card--oring-nbr"
                   : isSpark
                   ? "stock-card--spark"
+                  : isFiloFlusso
+                  ? "stock-card--filo-flusso"
                   : isTuboMeccanico
                   ? "stock-card--tubo-meccanico"
                   : "stock-card--tubi"
@@ -4247,6 +4550,87 @@ function StockUpdatePage({
                       />
                     </label>
                   </div>
+                ) : isFiloFlusso ? (
+                  <div className="field-grid">
+                    <label className="field">
+                      <span>COD.SAM</span>
+                      <input
+                        type="text"
+                        value={cardValues.codiceSam || ""}
+                        onChange={(e) => onChange(item.key, "codiceSam", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>COD.ESAB</span>
+                      <input
+                        type="text"
+                        value={cardValues.codEsab || ""}
+                        onChange={(e) => onChange(item.key, "codEsab", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>LOTTO</span>
+                      <input
+                        type="text"
+                        value={cardValues.lotto || ""}
+                        onChange={(e) => onChange(item.key, "lotto", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>CONFEZ. DA KG</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={cardValues.confezioneKg || ""}
+                        onChange={(e) => onChange(item.key, "confezioneKg", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>PREZZO AL KG 2025</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={cardValues.prezzoKg2025 || ""}
+                        onChange={(e) => onChange(item.key, "prezzoKg2025", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>PREZZO AL KG 2026</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={cardValues.prezzoKg2026 || ""}
+                        onChange={(e) => onChange(item.key, "prezzoKg2026", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Q.TA' ACQ. 2025</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={cardValues.qtaAcq2025 || ""}
+                        onChange={(e) => onChange(item.key, "qtaAcq2025", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Q.TA' ACQ. 2026</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={cardValues.qtaAcq2026 || ""}
+                        onChange={(e) => onChange(item.key, "qtaAcq2026", e.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>GIACENZA</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={cardValues.giacenza || ""}
+                        onChange={(e) => onChange(item.key, "giacenza", e.target.value)}
+                      />
+                    </label>
+                  </div>
                 ) : isTuboMeccanico ? (
                   <div className="field-grid">
                     <label className="field">
@@ -4338,8 +4722,8 @@ function NavigationTabs({
   activeTab,
   onTabChange,
 }: {
-  activeTab: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico";
-  onTabChange: (id: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico") => void;
+  activeTab: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso";
+  onTabChange: (id: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso") => void;
 }) {
   const tabs = [
     { id: "forgiati", label: "1_FORGIATI", enabled: true },
@@ -4348,6 +4732,7 @@ function NavigationTabs({
     { id: "tubi", label: "3_TUBI", enabled: true },
     { id: "tubo-meccanico", label: "4_TUBO-MECCANICO", enabled: true },
     { id: "spark-gups", label: "6_SPARK GUPS", enabled: true },
+    { id: "filo-flusso", label: "9_FILO&FLUSSO", enabled: true },
   ] as const;
 
   return (
@@ -4404,13 +4789,22 @@ function AuthenticatedShell() {
   const sparkGupsExcelDriveIdEnv = (import.meta.env.VITE_SPARK_GUPS_EXCEL_DRIVE_ID || "").trim();
   const sparkGupsExcelDriveNameEnv = (import.meta.env.VITE_SPARK_GUPS_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
   const sparkGupsExcelDriveIdRef = useRef<string | null>(sparkGupsExcelDriveIdEnv || null);
+  const filoFlussoListId = import.meta.env.VITE_FILO_FLUSSO_LIST_ID;
+  const filoFlussoExcelPath = (import.meta.env.VITE_FILO_FLUSSO_EXCEL_PATH || "").trim();
+  const filoFlussoExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
+  const filoFlussoExcelFilename = (import.meta.env.VITE_SP_FILO_FLUSSO_FILENAME || import.meta.env.VITE_FILO_FLUSSO_EXCEL_FILE || "").trim();
+  const filoFlussoExcelTable = (import.meta.env.VITE_FILO_FLUSSO_EXCEL_TABLE || "tblFiloFlusso").trim();
+  const filoFlussoExcelDriveIdEnv = (import.meta.env.VITE_FILO_FLUSSO_EXCEL_DRIVE_ID || "").trim();
+  const filoFlussoExcelDriveNameEnv = (import.meta.env.VITE_FILO_FLUSSO_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
+  const filoFlussoExcelDriveIdRef = useRef<string | null>(filoFlussoExcelDriveIdEnv || null);
+
   const sharepointService = useMemo(() => {
     if (!siteId) return null;
     return new SharePointService(getClient, siteId);
   }, [getClient, siteId]);
   const flowService = useMemo(() => new PowerAutomateService(), []);
   const [view, setView] = useState<'dashboard' | 'inventory' | 'update-stock' | 'website' | 'docs' | 'admin'>('dashboard');
-  const [activeTab, setActiveTab] = useState<"forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico">("forgiati");
+  const [activeTab, setActiveTab] = useState<"forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso">("forgiati");
   const [cartItems, setCartItems] = useState<Record<string, CartItem>>({});
   const [selectionMessage, setSelectionMessage] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, EditableItemState>>({});
@@ -4491,6 +4885,7 @@ function AuthenticatedShell() {
     if (item.source === "TUBO-MECCANICO") return toStr((raw as any).field_2);
     if (item.source === "ORING-HNBR") return toStr((raw as any).field_18);
     if (item.source === "SPARK-GUPS") return toStr((raw as any).field_4);
+    if (item.source === "FILO-FLUSSO") return toStr((raw as any).field_1);
     return "";
   };
 
@@ -4563,6 +4958,7 @@ function AuthenticatedShell() {
         const isOring = item.source === "ORING-HNBR";
         const isOringNbr = item.source === "ORING-NBR";
         const isSpark = item.source === "SPARK-GUPS";
+        const isFiloFlusso = item.source === "FILO-FLUSSO";
         const isTuboMeccanico = item.source === "TUBO-MECCANICO";
         const listId = isForgiati
           ? forgiatiListId
@@ -4572,6 +4968,8 @@ function AuthenticatedShell() {
           ? oringNbrListId
           : isSpark
           ? sparkGupsListId
+          : isFiloFlusso
+          ? filoFlussoListId
           : isTuboMeccanico
           ? tuboMeccanicoListId
           : tubiListId;
@@ -4621,6 +5019,18 @@ function AuthenticatedShell() {
               field_11: values.dataUltimoPrelievo ?? null,
               field_12: values.prezzoUnitario ?? null,
               field_13: values.commessa ?? null,
+            }
+          : isFiloFlusso
+          ? {
+              field_1: values.codiceSam ?? null,
+              field_2: values.codEsab ?? null,
+              field_3: values.lotto ?? null,
+              field_4: values.confezioneKg ?? null,
+              field_5: values.prezzoKg2025 ?? null,
+              field_6: values.prezzoKg2026 ?? null,
+              field_7: values.qtaAcq2025 ?? null,
+              field_8: values.qtaAcq2026 ?? null,
+              field_9: values.giacenza ?? null,
             }
           : isTuboMeccanico
           ? {
@@ -4936,6 +5346,92 @@ function AuthenticatedShell() {
         }
       }
 
+      const filoFlussoUpdates = updates.filter((update) => update.item.source === "FILO-FLUSSO");
+      if (filoFlussoUpdates.length > 0) {
+        try {
+          const resolvedPath =
+            filoFlussoExcelPath || (filoFlussoExcelFolder && filoFlussoExcelFilename ? `${filoFlussoExcelFolder}/${filoFlussoExcelFilename}` : "");
+          let resolvedDriveId = filoFlussoExcelDriveIdRef.current;
+          if (!resolvedDriveId && filoFlussoExcelDriveNameEnv) {
+            resolvedDriveId = await sharepointService.getDriveIdByName(filoFlussoExcelDriveNameEnv);
+            filoFlussoExcelDriveIdRef.current = resolvedDriveId;
+          }
+          if (!resolvedDriveId && filoFlussoExcelDriveNameEnv) {
+            throw new Error(`Libreria "${filoFlussoExcelDriveNameEnv}" non trovata`);
+          }
+          if (!resolvedPath || !filoFlussoExcelTable) {
+            throw new Error("Percorso Excel o tabella non configurati");
+          }
+
+          const driveItem = await sharepointService.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
+          const columns = await sharepointService.listWorkbookTableColumnsByItemId(driveItem.id, filoFlussoExcelTable, resolvedDriveId || undefined);
+          const rows = await sharepointService.listWorkbookTableRowsByItemId(driveItem.id, filoFlussoExcelTable, resolvedDriveId || undefined);
+          const dataBodyRange = await sharepointService.getWorkbookTableDataBodyRangeByItemId(
+            driveItem.id,
+            filoFlussoExcelTable,
+            resolvedDriveId || undefined
+          );
+          const titleIndex = getFiloFlussoExcelColumnIndex(columns, "Title");
+          if (titleIndex === null) {
+            throw new Error("Colonna Descrizione non trovata nella tabella Excel");
+          }
+          const sessionId = await sharepointService.createWorkbookSessionByItemId(
+            driveItem.id,
+            { persistChanges: true },
+            resolvedDriveId || undefined
+          );
+          const missing: string[] = [];
+          try {
+            for (const update of filoFlussoUpdates) {
+              const lottoValue = toStr((update.payload as any)?.field_3 ?? (update.item.fields as any)?.field_3);
+              const rowIndex = findFiloFlussoExcelRowIndex(rows, columns, {
+                codice: update.item.title,
+                lotto: lottoValue,
+              });
+              if (rowIndex === null) {
+                missing.push(`${update.item.title}${lottoValue ? ` (${lottoValue})` : ""}`);
+                continue;
+              }
+              const rowRange = buildRowRangeAddress(dataBodyRange.address, rowIndex, dataBodyRange.rowCount);
+              if (!rowRange) {
+                missing.push(`${update.item.title}${lottoValue ? ` (${lottoValue})` : ""}`);
+                continue;
+              }
+              const excelFields = {
+                ...(update.item.fields || {}),
+                ...update.payload,
+              } as Record<string, unknown>;
+              const rowValues = buildFiloFlussoExcelRow(columns, excelFields);
+              await sharepointService.updateWorkbookRangeByAddress(
+                driveItem.id,
+                rowRange.sheetName,
+                rowRange.address,
+                [rowValues],
+                { sessionId },
+                resolvedDriveId || undefined
+              );
+            }
+          } finally {
+            try {
+              await sharepointService.closeWorkbookSessionByItemId(
+                driveItem.id,
+                sessionId,
+                resolvedDriveId || undefined
+              );
+            } catch (closeErr) {
+              console.warn("Errore chiusura sessione Excel FILO & FLUSSO", closeErr);
+            }
+          }
+
+          if (missing.length > 0) {
+            throw new Error(`Righe non trovate: ${missing.join(", ")}`);
+          }
+        } catch (excelErr: any) {
+          console.error("Errore aggiornamento Excel FILO & FLUSSO", excelErr);
+          excelErrors.push(`FILO & FLUSSO: ${excelErr?.message || "Errore aggiornamento Excel"}`);
+        }
+      }
+
       const tuboMeccanicoUpdates = updates.filter((update) => update.item.source === "TUBO-MECCANICO");
       if (tuboMeccanicoUpdates.length > 0) {
         try {
@@ -5044,12 +5540,14 @@ function AuthenticatedShell() {
         hasOringHnbr: sources.includes("ORING-HNBR"),
         hasOringNbr: sources.includes("ORING-NBR"),
         hasSparkGups: sources.includes("SPARK-GUPS"),
+        hasFiloFlusso: sources.includes("FILO-FLUSSO"),
         hasTuboMeccanico: sources.includes("TUBO-MECCANICO"),
         items: cartList.map((item) => {
           const values = editValues[item.key] || buildEditableState(item);
           const isTubi = item.source === "TUBI";
           const isForgiati = item.source === "FORGIATI";
           const isTuboMeccanico = item.source === "TUBO-MECCANICO";
+          const isFiloFlusso = item.source === "FILO-FLUSSO";
           return {
             key: item.key,
             itemId: item.itemId,
@@ -5077,6 +5575,12 @@ function AuthenticatedShell() {
             bolla: values.bolla ?? null,
             dataConsegna: values.dataConsegna ?? null,
             prezzoUnitario: values.prezzoUnitario ?? null,
+            codEsab: isFiloFlusso ? values.codEsab ?? null : null,
+            confezioneKg: isFiloFlusso ? values.confezioneKg ?? null : null,
+            prezzoKg2025: isFiloFlusso ? values.prezzoKg2025 ?? null : null,
+            prezzoKg2026: isFiloFlusso ? values.prezzoKg2026 ?? null : null,
+            qtaAcq2025: isFiloFlusso ? values.qtaAcq2025 ?? null : null,
+            qtaAcq2026: isFiloFlusso ? values.qtaAcq2026 ?? null : null,
           };
         }),
         timestamp: new Date().toISOString(),
@@ -5125,6 +5629,12 @@ function AuthenticatedShell() {
     sparkGupsExcelFilename,
     sparkGupsExcelTable,
     sparkGupsExcelDriveNameEnv,
+    filoFlussoListId,
+    filoFlussoExcelPath,
+    filoFlussoExcelFolder,
+    filoFlussoExcelFilename,
+    filoFlussoExcelTable,
+    filoFlussoExcelDriveNameEnv,
   ]);
 
   const renderActivePanel = () => {
@@ -5145,6 +5655,8 @@ function AuthenticatedShell() {
         return <TuboMeccanicoPanel {...selectionProps} />;
       case "spark-gups":
         return <SparkGupsPanel {...selectionProps} />;
+      case "filo-flusso":
+        return <FiloFlussoPanel {...selectionProps} />;
       default:
         return <ForgiatiPanel {...selectionProps} />;
     }
@@ -5243,6 +5755,7 @@ function AuthenticatedShell() {
               oringNbrListId={oringNbrListId}
               sparkGupsListId={sparkGupsListId}
               tuboMeccanicoListId={tuboMeccanicoListId}
+              filoFlussoListId={filoFlussoListId}
             />
           </main>
         </div>
@@ -5338,9 +5851,13 @@ function AuthenticatedShell() {
                             ? "cart-row-tubo-meccanico"
                             : item.source === "ORING-HNBR"
                             ? "cart-row-oring"
+                            : item.source === "ORING-NBR"
+                            ? "cart-row-oring-nbr"
                             : item.source === "SPARK-GUPS"
                             ? "cart-row-spark"
-                            : "cart-row-oring-nbr"
+                            : item.source === "FILO-FLUSSO"
+                            ? "cart-row-filo-flusso"
+                            : "cart-row-tubi"
                         }`}
                       >
                         <td>{item.source}</td>
