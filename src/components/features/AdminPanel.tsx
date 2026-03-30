@@ -475,6 +475,7 @@ const buildTuboMeccanicoExcelColumnMap = () => {
   map.set(normalizeExcelKey("QTA."), "field_6");
   map.set(normalizeExcelKey("LUNGH TUBO MM"), "field_7");
   map.set(normalizeExcelKey("O EST"), "field_8");
+  map.set(normalizeExcelKey("EST"), "field_8"); // per "Ø Est." (Ø viene rimosso dalla normalizzazione)
   map.set(normalizeExcelKey("SP"), "field_9");
   map.set(normalizeExcelKey("GRADO"), "field_10");
   map.set(normalizeExcelKey("NBOLLA"), "field_11");
@@ -483,9 +484,12 @@ const buildTuboMeccanicoExcelColumnMap = () => {
   map.set(normalizeExcelKey("N COLATA"), "field_14");
   map.set(normalizeExcelKey("PREZZO UNITARIO"), "field_15");
   map.set(normalizeExcelKey("GIACENZA AMMINISTRAZIONE MM"), "field_16");
+  map.set(normalizeExcelKey("GIACENZA TOTALE MM"), "field_16"); // alias Excel "Giacenza Totale (mm)"
   map.set(normalizeExcelKey("GIACENZA MM"), "field_17");
+  map.set(normalizeExcelKey("GIACENZA X TAGLIATI MM"), "field_17"); // alias Excel "Giacenza x Tagliati (mm)"
   map.set(normalizeExcelKey("DATA PRELIEVO"), "field_18");
   map.set(normalizeExcelKey("UTILIZZATO PER COMM MM"), "field_19");
+  map.set(normalizeExcelKey("LOTTO"), "IdentLotto"); // colonna Excel si chiama "LOTTO"
   map.set(normalizeExcelKey("IDENTLOTTO"), "IdentLotto");
   map.set(normalizeExcelKey("IDENT LOTTO"), "IdentLotto");
   return map;
