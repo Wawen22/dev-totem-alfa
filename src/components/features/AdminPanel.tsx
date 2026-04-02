@@ -30,6 +30,10 @@ type AdminPanelProps = {
   sparkGupsListId?: string;
   tuboMeccanicoListId?: string;
   filoFlussoListId?: string;
+  onSyncExcel?: (
+    listKind: ListKind,
+    onProgress?: (msg: string) => void
+  ) => Promise<{ success: boolean; message: string }>;
 };
 
 const FORGIATI_FIELDS: FieldConfig[] = [
@@ -1028,6 +1032,7 @@ export function AdminPanel({
   sparkGupsListId,
   tuboMeccanicoListId,
   filoFlussoListId,
+  onSyncExcel,
 }: AdminPanelProps) {
   const getClient = useAuthenticatedGraphClient();
   const forgiatiExcelPath = (import.meta.env.VITE_FORGIATI_EXCEL_PATH || "").trim();
@@ -1132,6 +1137,8 @@ export function AdminPanel({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [createStatus, setCreateStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [createMessage, setCreateMessage] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "success" | "error">("idle");
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -2040,6 +2047,18 @@ export function AdminPanel({
     tuboMeccanicoProgressiveMap,
   ]);
 
+  const EXCEL_LISTS: ListKind[] = ["FORGIATI", "TUBI", "TUBO-MECCANICO", "SPARK-GUPS", "FILO-FLUSSO"];
+  const hasExcel = EXCEL_LISTS.includes(activeList);
+
+  const handleSyncExcel = useCallback(async () => {
+    if (!onSyncExcel) return;
+    setSyncStatus("syncing");
+    setSyncMessage("Avvio sincronizzazione...");
+    const result = await onSyncExcel(activeList, (msg) => setSyncMessage(msg));
+    setSyncStatus(result.success ? "success" : "error");
+    setSyncMessage(result.message);
+  }, [onSyncExcel, activeList]);
+
   const renderField = (field: FieldConfig, form: FormState, onChange: (key: string, val: string) => void) => {
     const isDateField = field.type === "date";
     const commonProps = {
@@ -2118,6 +2137,17 @@ export function AdminPanel({
           <span className="pill ghost" style={{ alignSelf: "flex-start", marginTop: 6 }}>
             Ruolo Totem.Admin attivo
           </span>
+          {hasExcel && onSyncExcel && (
+            <button
+              className="btn secondary"
+              type="button"
+              onClick={handleSyncExcel}
+              disabled
+              title="Funzionalità disponibile — verrà attivata dopo il ripristino dei dati SharePoint"
+            >
+              Sincronizza Excel ({activeList})
+            </button>
+          )}
           <button className="btn primary" type="button" onClick={() => setIsCreateOpen(true)}>
             + Nuovo articolo
           </button>
@@ -2136,6 +2166,15 @@ export function AdminPanel({
           </button>
         ))}
       </div>
+
+      {syncMessage && (
+        <div
+          className={`alert ${syncStatus === "success" ? "success" : syncStatus === "error" ? "error" : "warning"}`}
+          style={{ margin: "12px 0 0" }}
+        >
+          {syncMessage}
+        </div>
+      )}
 
       <div className="panel">
         <div className="panel-content admin-grid">

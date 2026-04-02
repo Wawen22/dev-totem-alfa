@@ -4940,6 +4940,197 @@ function AuthenticatedShell() {
     setSaveMessage(null);
   }, [view]);
 
+  const handleSyncExcel = useCallback(async (
+    listKind: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO",
+    onProgress?: (msg: string) => void
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!sharepointService) {
+      return { success: false, message: "Configurazione SharePoint mancante." };
+    }
+
+    const excelConfigs: Record<string, {
+      listId: string | undefined;
+      path: string;
+      folder: string;
+      filename: string;
+      table: string;
+      driveNameEnv: string;
+      driveIdRef: React.MutableRefObject<string | null>;
+      buildRow: (cols: string[], fields: Record<string, unknown>) => Array<string | number | boolean | null>;
+      findRow: (
+        rows: Array<{ index: number; values: Array<Array<unknown>> }>,
+        cols: string[],
+        opts: any
+      ) => number | null;
+      getColIndex: (cols: string[], key: string) => number | null;
+      matchKey: "identLotto" | "lotto";
+      matchLottoField?: string;
+    }> = {
+      FORGIATI: {
+        listId: forgiatiListId,
+        path: forgiatiExcelPath || (forgiatiExcelFolder && forgiatiExcelFilename ? `${forgiatiExcelFolder}/${forgiatiExcelFilename}` : ""),
+        folder: forgiatiExcelFolder, filename: forgiatiExcelFilename,
+        table: forgiatiExcelTable,
+        driveNameEnv: forgiatiExcelDriveNameEnv,
+        driveIdRef: forgiatiExcelDriveIdRef,
+        buildRow: buildForgiatiExcelRow,
+        findRow: findForgiatiExcelRowIndex,
+        getColIndex: getForgiatiExcelColumnIndex,
+        matchKey: "identLotto",
+      },
+      TUBI: {
+        listId: tubiListId,
+        path: tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : ""),
+        folder: tubiExcelFolder, filename: tubiExcelFilename,
+        table: tubiExcelTable,
+        driveNameEnv: tubiExcelDriveNameEnv,
+        driveIdRef: tubiExcelDriveIdRef,
+        buildRow: buildTubiExcelRow,
+        findRow: findExcelRowIndex,
+        getColIndex: getExcelColumnIndex,
+        matchKey: "identLotto",
+      },
+      "TUBO-MECCANICO": {
+        listId: tuboMeccanicoListId,
+        path: tuboMeccanicoExcelPath || (tuboMeccanicoExcelFolder && tuboMeccanicoExcelFilename ? `${tuboMeccanicoExcelFolder}/${tuboMeccanicoExcelFilename}` : ""),
+        folder: tuboMeccanicoExcelFolder, filename: tuboMeccanicoExcelFilename,
+        table: tuboMeccanicoExcelTable,
+        driveNameEnv: tuboMeccanicoExcelDriveNameEnv,
+        driveIdRef: tuboMeccanicoExcelDriveIdRef,
+        buildRow: buildTuboMeccanicoExcelRow,
+        findRow: findTuboMeccanicoExcelRowIndex,
+        getColIndex: getTuboMeccanicoExcelColumnIndex,
+        matchKey: "identLotto",
+      },
+      "SPARK-GUPS": {
+        listId: sparkGupsListId,
+        path: sparkGupsExcelPath || (sparkGupsExcelFolder && sparkGupsExcelFilename ? `${sparkGupsExcelFolder}/${sparkGupsExcelFilename}` : ""),
+        folder: sparkGupsExcelFolder, filename: sparkGupsExcelFilename,
+        table: sparkGupsExcelTable,
+        driveNameEnv: sparkGupsExcelDriveNameEnv,
+        driveIdRef: sparkGupsExcelDriveIdRef,
+        buildRow: buildSparkExcelRow,
+        findRow: findSparkExcelRowIndex,
+        getColIndex: getSparkExcelColumnIndex,
+        matchKey: "lotto",
+        matchLottoField: "field_1",
+      },
+      "FILO-FLUSSO": {
+        listId: filoFlussoListId,
+        path: filoFlussoExcelPath || (filoFlussoExcelFolder && filoFlussoExcelFilename ? `${filoFlussoExcelFolder}/${filoFlussoExcelFilename}` : ""),
+        folder: filoFlussoExcelFolder, filename: filoFlussoExcelFilename,
+        table: filoFlussoExcelTable,
+        driveNameEnv: filoFlussoExcelDriveNameEnv,
+        driveIdRef: filoFlussoExcelDriveIdRef,
+        buildRow: buildFiloFlussoExcelRow,
+        findRow: findFiloFlussoExcelRowIndex,
+        getColIndex: getFiloFlussoExcelColumnIndex,
+        matchKey: "lotto",
+        matchLottoField: "field_3",
+      },
+    };
+
+    const cfg = excelConfigs[listKind];
+    if (!cfg) {
+      return { success: false, message: `Tipo "${listKind}" non ha un file Excel associato.` };
+    }
+    if (!cfg.listId) {
+      return { success: false, message: `List ID non configurato per ${listKind}.` };
+    }
+    if (!cfg.path || !cfg.table) {
+      return { success: false, message: `Percorso Excel o tabella non configurati per ${listKind}.` };
+    }
+
+    try {
+      onProgress?.("Caricamento articoli da SharePoint...");
+      const spItems = await sharepointService.listItems<Record<string, unknown>>(cfg.listId);
+      if (spItems.length === 0) {
+        return { success: true, message: `Nessun articolo trovato su SharePoint per ${listKind}.` };
+      }
+
+      onProgress?.(`${spItems.length} articoli trovati. Apertura file Excel...`);
+      let driveId = cfg.driveIdRef.current;
+      if (!driveId && cfg.driveNameEnv) {
+        driveId = await sharepointService.getDriveIdByName(cfg.driveNameEnv);
+        cfg.driveIdRef.current = driveId;
+      }
+
+      const driveItem = await sharepointService.getDriveItemByPath(cfg.path, driveId || undefined);
+      const columns = await sharepointService.listWorkbookTableColumnsByItemId(driveItem.id, cfg.table, driveId || undefined);
+      const rows = await sharepointService.listWorkbookTableRowsByItemId(driveItem.id, cfg.table, driveId || undefined);
+      const dataBodyRange = await sharepointService.getWorkbookTableDataBodyRangeByItemId(driveItem.id, cfg.table, driveId || undefined);
+
+      onProgress?.(`Excel aperto: ${rows.length} righe, ${columns.length} colonne. Creazione sessione...`);
+      const sessionId = await sharepointService.createWorkbookSessionByItemId(
+        driveItem.id,
+        { persistChanges: true },
+        driveId || undefined
+      );
+
+      let updated = 0;
+      let skipped = 0;
+      try {
+        for (let i = 0; i < spItems.length; i++) {
+          const item = spItems[i];
+          const fields = (item.fields || {}) as Record<string, unknown>;
+          const title = String(fields.Title || "").trim();
+          if (!title) { skipped++; continue; }
+
+          let matchOpts: any;
+          if (cfg.matchKey === "identLotto") {
+            const identLotto = formatLottoProg(fields.LottoProgressivo as string | undefined);
+            matchOpts = { codice: title, identLotto };
+          } else {
+            const lotto = String(fields[cfg.matchLottoField!] || "");
+            matchOpts = { codice: title, lotto };
+          }
+
+          const rowIndex = cfg.findRow(rows, columns, matchOpts);
+          if (rowIndex === null) { skipped++; continue; }
+
+          const rowRange = buildRowRangeAddress(dataBodyRange.address, rowIndex, dataBodyRange.rowCount);
+          if (!rowRange) { skipped++; continue; }
+
+          const rowValues = cfg.buildRow(columns, fields);
+          await sharepointService.updateWorkbookRangeByAddress(
+            driveItem.id,
+            rowRange.sheetName,
+            rowRange.address,
+            [rowValues],
+            { sessionId },
+            driveId || undefined
+          );
+          updated++;
+
+          if ((i + 1) % 10 === 0) {
+            onProgress?.(`Aggiornamento in corso: ${updated} righe scritte, ${skipped} saltate (${i + 1}/${spItems.length})...`);
+          }
+        }
+      } finally {
+        try {
+          await sharepointService.closeWorkbookSessionByItemId(driveItem.id, sessionId, driveId || undefined);
+        } catch (closeErr) {
+          console.warn("Errore chiusura sessione Excel sync", closeErr);
+        }
+      }
+
+      return {
+        success: true,
+        message: `Sincronizzazione ${listKind} completata: ${updated} righe aggiornate, ${skipped} saltate (non trovate in Excel o senza codice).`,
+      };
+    } catch (err: any) {
+      console.error(`Errore sync Excel ${listKind}`, err);
+      return { success: false, message: `Errore: ${err?.message || "Errore sync Excel"}` };
+    }
+  }, [
+    sharepointService,
+    forgiatiListId, forgiatiExcelPath, forgiatiExcelFolder, forgiatiExcelFilename, forgiatiExcelTable, forgiatiExcelDriveNameEnv,
+    tubiListId, tubiExcelPath, tubiExcelFolder, tubiExcelFilename, tubiExcelTable, tubiExcelDriveNameEnv,
+    tuboMeccanicoListId, tuboMeccanicoExcelPath, tuboMeccanicoExcelFolder, tuboMeccanicoExcelFilename, tuboMeccanicoExcelTable, tuboMeccanicoExcelDriveNameEnv,
+    sparkGupsListId, sparkGupsExcelPath, sparkGupsExcelFolder, sparkGupsExcelFilename, sparkGupsExcelTable, sparkGupsExcelDriveNameEnv,
+    filoFlussoListId, filoFlussoExcelPath, filoFlussoExcelFolder, filoFlussoExcelFilename, filoFlussoExcelTable, filoFlussoExcelDriveNameEnv,
+  ]);
+
   const handleSave = useCallback(async () => {
     if (!sharepointService) {
       setSaveStatus("error");
@@ -5808,6 +5999,7 @@ function AuthenticatedShell() {
               sparkGupsListId={sparkGupsListId}
               tuboMeccanicoListId={tuboMeccanicoListId}
               filoFlussoListId={filoFlussoListId}
+              onSyncExcel={handleSyncExcel}
             />
           </main>
         </div>
