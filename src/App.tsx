@@ -4092,7 +4092,12 @@ function StockUpdatePage({
     return (
       <div className="panel">
         <div className="panel-content">
-          <p className="muted">Non hai ancora selezionato articoli.</p>
+          {message && (
+            <div className={`alert ${status === "success" ? "success" : status === "error" ? "error" : "warning"}`}>
+              {message}
+            </div>
+          )}
+          {!message && <p className="muted">Non hai ancora selezionato articoli.</p>}
           <button className="btn primary" onClick={onBackToInventory} type="button">
             ← Torna alla selezione
           </button>
@@ -5189,6 +5194,11 @@ function AuthenticatedShell() {
             throw new Error("Colonne CODICE/IdentLotto non trovate nella tabella Excel");
           }
           const rows = await sharepointService.listWorkbookTableRowsByItemId(driveItem.id, tubiExcelTable, resolvedDriveId || undefined);
+          const dataBodyRange = await sharepointService.getWorkbookTableDataBodyRangeByItemId(
+            driveItem.id,
+            tubiExcelTable,
+            resolvedDriveId || undefined
+          );
           const sessionId = await sharepointService.createWorkbookSessionByItemId(
             driveItem.id,
             { persistChanges: true },
@@ -5203,13 +5213,15 @@ function AuthenticatedShell() {
               if (!targetCodici.has(codiceVal)) continue;
               const identVal = normalizeExcelKey(String(rowValues[identIndex] ?? ""));
               if (identVal) continue;
+              const rowRange = buildRowRangeAddress(dataBodyRange.address, row.index, dataBodyRange.rowCount);
+              if (!rowRange) continue;
               const nextValues = [...rowValues];
               nextValues[identIndex] = "A";
-              await sharepointService.updateWorkbookTableRowByIndex(
+              await sharepointService.updateWorkbookRangeByAddress(
                 driveItem.id,
-                tubiExcelTable,
-                row.index,
-                nextValues as Array<string | number | boolean | null>,
+                rowRange.sheetName,
+                rowRange.address,
+                [nextValues as Array<string | number | boolean | null>],
                 { sessionId },
                 resolvedDriveId || undefined
               );
@@ -5224,17 +5236,22 @@ function AuthenticatedShell() {
                 missing.push(`${update.item.title} (${identLotto})`);
                 continue;
               }
+              const rowRange = buildRowRangeAddress(dataBodyRange.address, rowIndex, dataBodyRange.rowCount);
+              if (!rowRange) {
+                missing.push(`${update.item.title} (${identLotto})`);
+                continue;
+              }
               const excelFields = {
                 ...(update.item.fields || {}),
                 ...update.payload,
                 IdentLotto: identLotto,
               } as Record<string, unknown>;
               const rowValues = buildTubiExcelRow(columns, excelFields);
-              await sharepointService.updateWorkbookTableRowByIndex(
+              await sharepointService.updateWorkbookRangeByAddress(
                 driveItem.id,
-                tubiExcelTable,
-                rowIndex,
-                rowValues,
+                rowRange.sheetName,
+                rowRange.address,
+                [rowValues],
                 { sessionId },
                 resolvedDriveId || undefined
               );
@@ -5456,6 +5473,11 @@ function AuthenticatedShell() {
             throw new Error("Colonne CODICE/IdentLotto non trovate nella tabella Excel");
           }
           const rows = await sharepointService.listWorkbookTableRowsByItemId(driveItem.id, tuboMeccanicoExcelTable, resolvedDriveId || undefined);
+          const dataBodyRange = await sharepointService.getWorkbookTableDataBodyRangeByItemId(
+            driveItem.id,
+            tuboMeccanicoExcelTable,
+            resolvedDriveId || undefined
+          );
           const sessionId = await sharepointService.createWorkbookSessionByItemId(
             driveItem.id,
             { persistChanges: true },
@@ -5470,13 +5492,15 @@ function AuthenticatedShell() {
               if (!targetCodici.has(codiceVal)) continue;
               const identVal = normalizeExcelKey(String(rowValues[identIndex] ?? ""));
               if (identVal) continue;
+              const rowRange = buildRowRangeAddress(dataBodyRange.address, row.index, dataBodyRange.rowCount);
+              if (!rowRange) continue;
               const nextValues = [...rowValues];
               nextValues[identIndex] = "A";
-              await sharepointService.updateWorkbookTableRowByIndex(
+              await sharepointService.updateWorkbookRangeByAddress(
                 driveItem.id,
-                tuboMeccanicoExcelTable,
-                row.index,
-                nextValues as Array<string | number | boolean | null>,
+                rowRange.sheetName,
+                rowRange.address,
+                [nextValues as Array<string | number | boolean | null>],
                 { sessionId },
                 resolvedDriveId || undefined
               );
@@ -5491,17 +5515,22 @@ function AuthenticatedShell() {
                 missing.push(`${update.item.title} (${identLotto})`);
                 continue;
               }
+              const rowRange = buildRowRangeAddress(dataBodyRange.address, rowIndex, dataBodyRange.rowCount);
+              if (!rowRange) {
+                missing.push(`${update.item.title} (${identLotto})`);
+                continue;
+              }
               const excelFields = {
                 ...(update.item.fields || {}),
                 ...update.payload,
                 IdentLotto: identLotto,
               } as Record<string, unknown>;
               const rowValues = buildTuboMeccanicoExcelRow(columns, excelFields);
-              await sharepointService.updateWorkbookTableRowByIndex(
+              await sharepointService.updateWorkbookRangeByAddress(
                 driveItem.id,
-                tuboMeccanicoExcelTable,
-                rowIndex,
-                rowValues,
+                rowRange.sheetName,
+                rowRange.address,
+                [rowValues],
                 { sessionId },
                 resolvedDriveId || undefined
               );
