@@ -6,6 +6,12 @@ import { SharePointListItem } from "../types/sharepoint";
 const globalCache: Record<string, { data: any[]; timestamp: number }> = {};
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minuti di validità cache default
 
+export function clearCacheKeys(keys: string[]): void {
+  keys.forEach((key) => {
+    delete globalCache[key];
+  });
+}
+
 export function useCachedList<T = any>(
   service: SharePointService | null,
   listId: string | undefined,

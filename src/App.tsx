@@ -889,7 +889,7 @@ function Dashboard({ onNavigate }: { onNavigate: (view: 'dashboard' | 'inventory
   );
 }
 
-import { useCachedList } from "./hooks/useCachedList";
+import { useCachedList, clearCacheKeys } from "./hooks/useCachedList";
 
 // ... (imports remain)
 
@@ -5586,17 +5586,40 @@ function AuthenticatedShell() {
         timestamp: new Date().toISOString(),
       };
 
-      const baseMessage = excelErrors.length > 0
-        ? `Giacenza aggiornata; Excel non aggiornato: ${excelErrors.join(" | ")}`
-        : "Giacenza aggiornata con successo.";
+      if (excelErrors.length > 0) {
+        // Excel non aggiornato: NON notificare Power Automate per evitare
+        // che legga dati obsoleti da Excel e sovrascriva SharePoint.
+        setSaveStatus("error");
+        setSaveMessage(`Giacenza aggiornata su SharePoint, ma Excel non aggiornato: ${excelErrors.join(" | ")} — Power Automate NON notificato per evitare sovrascrittura dati.`);
+        return;
+      }
+
+      // Salvataggio completamente riuscito: invalidare cache e pulire carrello
+      const updatedSources = Array.from(new Set(cartList.map((i) => i.source)));
+      const cacheKeysToInvalidate = updatedSources.map((source) => {
+        switch (source) {
+          case "FORGIATI": return "forgiati";
+          case "TUBI": return "tubi";
+          case "ORING-HNBR": return "oring-hnbr";
+          case "ORING-NBR": return "oring-nbr";
+          case "SPARK-GUPS": return "spark-gups";
+          case "FILO-FLUSSO": return "filo-flusso";
+          case "TUBO-MECCANICO": return "tubo-meccanico";
+          default: return null;
+        }
+      }).filter((k) => k !== null) as string[];
+      clearCacheKeys(cacheKeysToInvalidate);
+      setCartItems({});
+      setEditValues({});
+
       setSaveStatus("success");
-      setSaveMessage(baseMessage);
+      setSaveMessage("Giacenza aggiornata con successo.");
 
       try {
         await flowService.invoke(flowPayload);
       } catch (flowErr: any) {
         console.error("Errore Power Automate", flowErr);
-        setSaveMessage(`${baseMessage}; notifica Teams non inviata: ${flowErr?.message || "errore flow"}`);
+        setSaveMessage(`Giacenza aggiornata con successo; notifica Teams non inviata: ${flowErr?.message || "errore flow"}`);
       }
     } catch (err: any) {
       console.error("Errore aggiornamento", err);
