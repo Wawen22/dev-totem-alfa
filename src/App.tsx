@@ -5814,7 +5814,7 @@ function AuthenticatedShell() {
         return;
       }
 
-      // Salvataggio completamente riuscito: invalidare cache e pulire carrello
+      // Salvataggio completamente riuscito: invalidare cache e mantenere selezione carrello
       const updatedSources = Array.from(new Set(cartList.map((i) => i.source)));
       const cacheKeysToInvalidate = updatedSources.map((source) => {
         switch (source) {
@@ -5829,7 +5829,6 @@ function AuthenticatedShell() {
         }
       }).filter((k) => k !== null) as string[];
       clearCacheKeys(cacheKeysToInvalidate);
-      setCartItems({});
       setEditValues({});
 
       setSaveStatus("success");
