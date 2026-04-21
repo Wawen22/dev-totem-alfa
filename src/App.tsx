@@ -2463,6 +2463,11 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
     title: string;
     items: TubiItem[];
   } | null>(null);
+  const [detailGroup, setDetailGroup] = useState<{
+    title: string;
+    items: TubiItem[];
+    representative: TubiItem;
+  } | null>(null);
   const [newLotColata, setNewLotColata] = useState("");
   const [newLotOrdine, setNewLotOrdine] = useState("");
   const [newLotDataOrdine, setNewLotDataOrdine] = useState("");
@@ -2560,7 +2565,7 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
     return map;
   }, [groupedRows]);
 
-  const visibleColumns = tubiColumns;
+  const visibleColumns = tubiColumns.filter(col => !col.hidden);
 
   const normalizedRows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -2974,7 +2979,7 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
                     <small>{col.field}</small>
                   </th>
                 ))}
-                <th scope="col" style={{ width: 160 }}>Colate</th>
+                <th scope="col" style={{ width: 160 }}>COLATE (Lotto)</th>
               </tr>
             </thead>
             <tbody>
@@ -3013,6 +3018,19 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
                     {visibleColumns.map((col) => {
                       const isTitle = col.field === "Title";
                       const className = isTitle ? "sticky-col" : undefined;
+
+                      if (col.computed && col.field === "_giacenzaComplessivaLotti") {
+                        const giacenzaStr = group.items
+                          .map((itm) => toStr((itm.fields as Record<string, unknown>).field_20))
+                          .filter(Boolean)
+                          .join("+") || "-";
+                        return (
+                          <td key={col.field}>
+                            <span style={{ fontVariantNumeric: "tabular-nums" }}>{giacenzaStr}</span>
+                          </td>
+                        );
+                      }
+
                       const content = formatCellValue((representative.fields as Record<string, unknown>)[col.field], col.type);
 
                       if (isTitle) {
@@ -3020,15 +3038,26 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
                           <th scope="row" key={col.field} className={className} title={String((representative.fields as Record<string, unknown>)[col.field] || "")}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
                               <span>{content}</span>
-                              <button
-                                className="icon-btn"
-                                aria-label="Gestisci lotti"
-                                title="Gestisci lotti"
-                                onClick={() => setLotSelection(group)}
-                                type="button"
-                              >
-                                📦
-                              </button>
+                              <div style={{ display: "flex", gap: 4 }}>
+                                <button
+                                  className="icon-btn"
+                                  aria-label="Dettaglio articolo"
+                                  title="Visualizza tutti i campi"
+                                  onClick={() => setDetailGroup(group)}
+                                  type="button"
+                                >
+                                  ℹ
+                                </button>
+                                <button
+                                  className="icon-btn"
+                                  aria-label="Gestisci lotti"
+                                  title="Gestisci lotti"
+                                  onClick={() => setLotSelection(group)}
+                                  type="button"
+                                >
+                                  📦
+                                </button>
+                              </div>
                             </div>
                           </th>
                         );
@@ -3207,6 +3236,37 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
             </div>
             <div className="modal__footer">
               <button className="btn secondary" onClick={() => setLotSelection(null)} type="button">Chiudi</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detailGroup && (
+        <div className="modal-backdrop blur" role="dialog" aria-modal="true" onClick={() => setDetailGroup(null)}>
+          <div className="modal" style={{ maxWidth: 560, maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal__header">
+              <div>
+                <p className="eyebrow" style={{ marginBottom: 4 }}>Dettaglio articolo</p>
+                <h3 style={{ margin: 0 }}>{detailGroup.title}</h3>
+              </div>
+              <button className="icon-btn" aria-label="Chiudi" onClick={() => setDetailGroup(null)} type="button">✕</button>
+            </div>
+            <div className="modal__body">
+              <dl style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 16px", margin: 0 }}>
+                {tubiColumns.filter(col => !col.computed).map((col) => {
+                  const val = (detailGroup.representative.fields as Record<string, unknown>)[col.field];
+                  const display = col.type === "date" ? formatSharePointDate(val) : (val !== null && val !== undefined && val !== "" ? String(val) : "—");
+                  return (
+                    <React.Fragment key={col.field}>
+                      <dt style={{ fontWeight: 600, fontSize: 12, color: "var(--color-muted, #888)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{col.label}</dt>
+                      <dd style={{ margin: 0, fontSize: 13 }}>{display}</dd>
+                    </React.Fragment>
+                  );
+                })}
+              </dl>
+            </div>
+            <div className="modal__footer">
+              <button className="btn secondary" onClick={() => setDetailGroup(null)} type="button">Chiudi</button>
             </div>
           </div>
         </div>

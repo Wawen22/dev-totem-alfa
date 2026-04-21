@@ -3,6 +3,8 @@ export interface ForgiatoColumn {
   label: string;
   width?: string;
   type?: 'text' | 'date' | 'number';
+  hidden?: boolean;
+  computed?: boolean;
 }
 
 // Aggiorna i valori `field` con gli internal name reali della lista SharePoint.
