@@ -15,6 +15,7 @@ import { SharePointListItem } from "./types/sharepoint";
 import { formatSharePointDate } from "./utils/dateUtils";
 import { WebsiteViewer } from "./components/features/WebsiteViewer";
 import { DocumentBrowser } from "./components/features/DocumentBrowser";
+import { VideoBrowser } from "./components/features/VideoBrowser";
 import { useIsAdmin } from "./hooks/useIsAdmin";
 import { AdminPanel } from "./components/features/AdminPanel";
 import { PowerAutomateService } from "./services/powerAutomateService";
@@ -875,7 +876,7 @@ function Hero({ title, subtitle, onBack }: HeroProps) {
   );
 }
 
-function Dashboard({ onNavigate }: { onNavigate: (view: 'dashboard' | 'inventory' | 'update-stock' | 'website' | 'docs') => void }) {
+function Dashboard({ onNavigate }: { onNavigate: (view: 'dashboard' | 'inventory' | 'update-stock' | 'website' | 'docs' | 'videos') => void }) {
   return (
     <div className="dashboard-container">
       <button 
@@ -907,6 +908,17 @@ function Dashboard({ onNavigate }: { onNavigate: (view: 'dashboard' | 'inventory
         <div className="card-content">
           <h3>Visualizza Sito Web</h3>
           <p>Accesso rapido al portale aziendale</p>
+        </div>
+        <span className="arrow">→</span>
+      </button>
+
+      <button
+        className="dashboard-card primary"
+        onClick={() => onNavigate('videos')}
+      >
+        <div className="card-content">
+          <h3>Raccolta Video</h3>
+          <p>Riproduzione video fullscreen dal totem</p>
         </div>
         <span className="arrow">→</span>
       </button>
@@ -5145,7 +5157,7 @@ function AuthenticatedShell() {
     return new SharePointService(getClient, siteId);
   }, [getClient, siteId]);
   const flowService = useMemo(() => new PowerAutomateService(), []);
-  const [view, setView] = useState<'dashboard' | 'inventory' | 'update-stock' | 'website' | 'docs' | 'admin'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'inventory' | 'update-stock' | 'website' | 'docs' | 'videos' | 'admin'>('dashboard');
   const [activeTab, setActiveTab] = useState<"forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso">("forgiati");
   const [cartItems, setCartItems] = useState<Record<string, CartItem>>({});
   const [selectionMessage, setSelectionMessage] = useState<string | null>(null);
@@ -6279,9 +6291,9 @@ function AuthenticatedShell() {
     );
   }
 
-  if (view === 'docs') {
-    return (
-      <>
+    if (view === 'docs') {
+      return (
+        <>
         <div className={shellClass}>
           <Hero 
             title="Consulta Documentazione" 
@@ -6302,6 +6314,38 @@ function AuthenticatedShell() {
               siteId={siteId}
               driveId={import.meta.env.VITE_SHAREPOINT_DRIVE_ID}
               initialPath={import.meta.env.VITE_DOCS_ROOT_PATH || ""}
+            />
+          </main>
+        </div>
+        {adminCta}
+      </>
+    );
+  }
+
+  if (view === 'videos') {
+    return (
+      <>
+        <div className={shellClass}>
+          <Hero
+            title="Raccolta Video"
+            subtitle="Categorie e video aziendali letti in automatico da SharePoint"
+            onBack={() => setView('dashboard')}
+          />
+          <main className="dashboard-main" style={{
+            padding: '0 2rem 2rem',
+            maxWidth: '1440px',
+            margin: '0 auto',
+            width: '100%',
+            overflowY: 'auto',
+            alignItems: 'flex-start',
+            display: 'block',
+            height: '100%'
+          }}>
+            <VideoBrowser
+              siteId={siteId}
+              driveId={import.meta.env.VITE_VIDEO_DRIVE_ID || import.meta.env.VITE_SHAREPOINT_DRIVE_ID}
+              initialPath={import.meta.env.VITE_VIDEO_ROOT_PATH || "VIDEO"}
+              onExitToHome={() => setView('dashboard')}
             />
           </main>
         </div>
