@@ -90,6 +90,8 @@ type EditableItemState = {
   raw?: Record<string, unknown>;
 };
 
+const CART_SELECTION_LIMIT = 10;
+
 const getTimeValue = (val: unknown): number => {
   if (val === null || val === undefined) return 0;
   if (typeof val === "number") {
@@ -193,6 +195,29 @@ const formatCellValue = (value: unknown, type?: "text" | "date" | "number") => {
 const formatLottoProg = (val: string | undefined | null) => {
   const str = val ? String(val) : "";
   return str ? str.toUpperCase() : "A";
+};
+
+const areStringListsEqual = (left: string[], right: string[]) =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
+
+const getSelectedLotKeys = <T,>(
+  items: T[],
+  selectedItems: Record<string, CartItem>,
+  toCartItem: (item: T) => CartItem
+) =>
+  items.reduce<string[]>((keys, item) => {
+    const { key } = toCartItem(item);
+    if (selectedItems[key]) {
+      keys.push(key);
+    }
+    return keys;
+  }, []);
+
+const toggleLotDraftKey = (current: string[], key: string, nextChecked: boolean) => {
+  if (nextChecked) {
+    return current.includes(key) ? current : [...current, key];
+  }
+  return current.filter((value) => value !== key);
 };
 
 const compareTubiTitle = (a: string, b: string) => {
@@ -920,6 +945,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
     title: string;
     items: ForgiatoItem[];
   } | null>(null);
+  const [lotDraftSelection, setLotDraftSelection] = useState<string[]>([]);
   const [newLotColata, setNewLotColata] = useState("");
   const [newLotOrdine, setNewLotOrdine] = useState("");
   const [newLotDataOrdine, setNewLotDataOrdine] = useState("");
@@ -1088,6 +1114,30 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
     });
     return set;
   }, [lotSelection]);
+
+  const selectedItemsCount = Object.keys(selectedItems).length;
+
+  useEffect(() => {
+    if (!lotSelection) {
+      setLotDraftSelection([]);
+      return;
+    }
+
+    const nextSelection = getSelectedLotKeys(lotSelection.items, selectedItems, toCartItemForgiati);
+    setLotDraftSelection((current) => (areStringListsEqual(current, nextSelection) ? current : nextSelection));
+  }, [lotSelection, selectedItems, toCartItemForgiati]);
+
+  const currentLotSelectedCount = lotSelection
+    ? getSelectedLotKeys(lotSelection.items, selectedItems, toCartItemForgiati).length
+    : 0;
+  const outsideLotSelectedCount = selectedItemsCount - currentLotSelectedCount;
+  const lotDraftSelectionSet = useMemo(() => new Set(lotDraftSelection), [lotDraftSelection]);
+  const hasLotDraftChanges = lotSelection
+    ? lotSelection.items.some((item) => {
+        const cartItem = toCartItemForgiati(item);
+        return lotDraftSelectionSet.has(cartItem.key) !== Boolean(selectedItems[cartItem.key]);
+      })
+    : false;
 
   useEffect(() => {
     if (lotSelection) {
@@ -1382,6 +1432,32 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
   const normalizedNewLotLower = normalizedNewLot.toLowerCase();
   const isDuplicateLot = normalizedNewLot.length > 0 && existingColate.has(normalizedNewLotLower);
   const canCreateLot = Boolean(normalizedNewLot) && !isDuplicateLot && lotSaveStatus !== "saving";
+  const isMultiLotSelection = Boolean(lotSelection && lotSelection.items.length > 1);
+
+  const handleApplyLotSelection = () => {
+    if (!lotSelection) return;
+
+    const removals: CartItem[] = [];
+    const additions: CartItem[] = [];
+
+    lotSelection.items.forEach((item) => {
+      const cartItem = toCartItemForgiati(item);
+      const alreadySelected = Boolean(selectedItems[cartItem.key]);
+      const shouldBeSelected = lotDraftSelectionSet.has(cartItem.key);
+
+      if (shouldBeSelected !== alreadySelected) {
+        if (alreadySelected) {
+          removals.push(cartItem);
+        } else {
+          additions.push(cartItem);
+        }
+      }
+    });
+
+    removals.forEach((item) => onToggle(item, true));
+    additions.forEach((item) => onToggle(item, false));
+    setLotSelection(null);
+  };
 
   return (
     <div className="panel inventory-panel">
@@ -1552,23 +1628,42 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                 <table className="inventory-table">
                   <thead>
                     <tr>
+                      {isMultiLotSelection && (
+                        <th scope="col" className="selection-col" aria-label="Seleziona lotto">
+                          <span className="selection-col__icon" aria-hidden="true"></span>
+                        </th>
+                      )}
                       <th scope="col">Ident. Lotto</th>
                       <th scope="col">N° COLATA</th>
                       <th scope="col">N° ORDINE</th>
                       <th scope="col">Data ordine</th>
                       <th scope="col">Grado materiale 2</th>
                       <th scope="col">Giacenza Q.tà</th>
-                      <th scope="col" style={{ width: 140 }}></th>
+                      <th scope="col" style={{ width: 140 }}>{isMultiLotSelection ? "Stato" : ""}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {lotSelection.items.map((item) => {
                       const cartItem = toCartItemForgiati(item);
                       const alreadySelected = Boolean(selectedItems[cartItem.key]);
-                      const disableAdd = selectionLimitReached && !alreadySelected;
+                      const isChecked = lotDraftSelectionSet.has(cartItem.key);
+                      const disableCheck = !isChecked && outsideLotSelectedCount + lotDraftSelection.length >= CART_SELECTION_LIMIT;
                       const lotProg = forgiatiProgressiveMap.get(item.id) || "a";
                       return (
                         <tr key={item.id}>
+                          {isMultiLotSelection && (
+                            <td className="selection-col">
+                              <input
+                                type="checkbox"
+                                aria-label={`Seleziona lotto ${formatLottoProg(lotProg)}`}
+                                checked={isChecked}
+                                disabled={disableCheck}
+                                onChange={(e) => {
+                                  setLotDraftSelection((current) => toggleLotDraftKey(current, cartItem.key, e.target.checked));
+                                }}
+                              />
+                            </td>
+                          )}
                           <td><span className="lotto-chip">{formatLottoProg(lotProg)}</span></td>
                           <td>{toStr((item.fields as any).field_13) || "-"}</td>
                           <td>{toStr((item.fields as any).field_1) || "-"}</td>
@@ -1576,18 +1671,24 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                           <td>{toStr((item.fields as any).GRADOMATERIALE2) || "-"}</td>
                           <td>{toStr((item.fields as any).field_22) || "-"}</td>
                           <td>
-                            <button
-                              className={alreadySelected ? "btn secondary" : "btn primary"}
-                              style={{ width: "100%", padding: "8px 10px", fontSize: 13 }}
-                              onClick={() => {
-                                onToggle(cartItem, alreadySelected);
-                                setLotSelection(null);
-                              }}
-                              disabled={disableAdd}
-                              type="button"
-                            >
-                              {alreadySelected ? "Rimuovi" : "Aggiungi"}
-                            </button>
+                            {isMultiLotSelection ? (
+                              <span className={`pill ${isChecked ? "success" : "ghost"}`} style={{ width: "100%", justifyContent: "center" }}>
+                                {isChecked ? "Selezionato" : "Non selezionato"}
+                              </span>
+                            ) : (
+                              <button
+                                className={alreadySelected ? "btn secondary" : "btn primary"}
+                                style={{ width: "100%", padding: "8px 10px", fontSize: 13 }}
+                                onClick={() => {
+                                  onToggle(cartItem, alreadySelected);
+                                  setLotSelection(null);
+                                }}
+                                disabled={selectionLimitReached && !alreadySelected}
+                                type="button"
+                              >
+                                {alreadySelected ? "Rimuovi" : "Aggiungi"}
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -1595,6 +1696,17 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                   </tbody>
                 </table>
               </div>
+              {isMultiLotSelection && (
+                <div className="section-heading" style={{ marginTop: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <span className="pill ghost">{lotDraftSelection.length} / {lotSelection.items.length} lotti selezionati</span>
+                    <button className="btn primary" onClick={handleApplyLotSelection} disabled={!hasLotDraftChanges} type="button">
+                      Aggiunti lotto/i
+                    </button>
+                  </div>
+                  <p className="muted" style={{ margin: "6px 0 0" }}>Seleziona uno o piu lotti e applica in un unico passaggio.</p>
+                </div>
+              )}
               <div className="section-heading" style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <span className="pill ghost">Nuovo lotto</span>
@@ -2463,6 +2575,7 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
     title: string;
     items: TubiItem[];
   } | null>(null);
+  const [lotDraftSelection, setLotDraftSelection] = useState<string[]>([]);
   const [detailGroup, setDetailGroup] = useState<{
     title: string;
     items: TubiItem[];
@@ -2605,23 +2718,19 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
   const handlePrev = () => setPage((p) => Math.max(1, p - 1));
   const handleNext = () => setPage((p) => Math.min(totalPages, p + 1));
 
-  const toCartItem = (item: TubiItem): CartItem => ({
-    key: `TUBI-${item.id}`,
-    source: "TUBI",
-    itemId: item.id,
-    title: toStr((item.fields as Record<string, unknown>).Title) || "-",
-    bolla: (item.fields as Record<string, unknown>).field_15,
-    colata: (item.fields as Record<string, unknown>).field_18,
-    lottoProg: tubiProgressiveMap.get(item.id) || "a",
-    fields: item.fields as Record<string, unknown>,
-  });
-
-  const handleSelectLot = (item: TubiItem) => {
-    const cartItem = toCartItem(item);
-    const alreadySelected = Boolean(selectedItems[cartItem.key]);
-    onToggle(cartItem, alreadySelected);
-    setLotSelection(null);
-  };
+  const toCartItem = useCallback(
+    (item: TubiItem): CartItem => ({
+      key: `TUBI-${item.id}`,
+      source: "TUBI",
+      itemId: item.id,
+      title: toStr((item.fields as Record<string, unknown>).Title) || "-",
+      bolla: (item.fields as Record<string, unknown>).field_15,
+      colata: (item.fields as Record<string, unknown>).field_18,
+      lottoProg: tubiProgressiveMap.get(item.id) || "a",
+      fields: item.fields as Record<string, unknown>,
+    }),
+    [tubiProgressiveMap]
+  );
 
   const existingColate = useMemo(() => {
     const set = new Set<string>();
@@ -2632,6 +2741,28 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
     });
     return set;
   }, [lotSelection]);
+
+  const selectedItemsCount = Object.keys(selectedItems).length;
+
+  useEffect(() => {
+    if (!lotSelection) {
+      setLotDraftSelection([]);
+      return;
+    }
+
+    const nextSelection = getSelectedLotKeys(lotSelection.items, selectedItems, toCartItem);
+    setLotDraftSelection((current) => (areStringListsEqual(current, nextSelection) ? current : nextSelection));
+  }, [lotSelection, selectedItems, toCartItem]);
+
+  const currentLotSelectedCount = lotSelection ? getSelectedLotKeys(lotSelection.items, selectedItems, toCartItem).length : 0;
+  const outsideLotSelectedCount = selectedItemsCount - currentLotSelectedCount;
+  const lotDraftSelectionSet = useMemo(() => new Set(lotDraftSelection), [lotDraftSelection]);
+  const hasLotDraftChanges = lotSelection
+    ? lotSelection.items.some((item) => {
+        const cartItem = toCartItem(item);
+        return lotDraftSelectionSet.has(cartItem.key) !== Boolean(selectedItems[cartItem.key]);
+      })
+    : false;
 
   useEffect(() => {
     if (lotSelection) {
@@ -2920,6 +3051,32 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
   const normalizedNewLotLower = normalizedNewLot.toLowerCase();
   const isDuplicateLot = normalizedNewLot.length > 0 && existingColate.has(normalizedNewLotLower);
   const canCreateLot = Boolean(normalizedNewLot) && !isDuplicateLot && lotSaveStatus !== "saving";
+  const isMultiLotSelection = Boolean(lotSelection && lotSelection.items.length > 1);
+
+  const handleApplyLotSelection = () => {
+    if (!lotSelection) return;
+
+    const removals: CartItem[] = [];
+    const additions: CartItem[] = [];
+
+    lotSelection.items.forEach((item) => {
+      const cartItem = toCartItem(item);
+      const alreadySelected = Boolean(selectedItems[cartItem.key]);
+      const shouldBeSelected = lotDraftSelectionSet.has(cartItem.key);
+
+      if (shouldBeSelected !== alreadySelected) {
+        if (alreadySelected) {
+          removals.push(cartItem);
+        } else {
+          additions.push(cartItem);
+        }
+      }
+    });
+
+    removals.forEach((item) => onToggle(item, true));
+    additions.forEach((item) => onToggle(item, false));
+    setLotSelection(null);
+  };
 
   return (
     <div className="panel inventory-panel">
@@ -3116,23 +3273,42 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
                 <table className="inventory-table">
                   <thead>
                     <tr>
+                      {isMultiLotSelection && (
+                        <th scope="col" className="selection-col" aria-label="Seleziona lotto">
+                          <span className="selection-col__icon" aria-hidden="true"></span>
+                        </th>
+                      )}
                       <th scope="col">Ident. Lotto</th>
                       <th scope="col">N° COLATA</th>
                       <th scope="col">N° ORDINE</th>
                       <th scope="col">DATA ORDINE</th>
                       <th scope="col">Grado materiale 2</th>
                       <th scope="col">Giacenza Non Tagliato</th>
-                      <th scope="col" style={{ width: 140 }}></th>
+                      <th scope="col" style={{ width: 140 }}>{isMultiLotSelection ? "Stato" : ""}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {lotSelection.items.map((item) => {
                       const cartItem = toCartItem(item);
                       const alreadySelected = Boolean(selectedItems[cartItem.key]);
-                      const disableAdd = selectionLimitReached && !alreadySelected;
+                      const isChecked = lotDraftSelectionSet.has(cartItem.key);
+                      const disableCheck = !isChecked && outsideLotSelectedCount + lotDraftSelection.length >= CART_SELECTION_LIMIT;
                       const lotProg = tubiProgressiveMap.get(item.id) || "a";
                       return (
                         <tr key={item.id}>
+                          {isMultiLotSelection && (
+                            <td className="selection-col">
+                              <input
+                                type="checkbox"
+                                aria-label={`Seleziona lotto ${formatLottoProg(lotProg)}`}
+                                checked={isChecked}
+                                disabled={disableCheck}
+                                onChange={(e) => {
+                                  setLotDraftSelection((current) => toggleLotDraftKey(current, cartItem.key, e.target.checked));
+                                }}
+                              />
+                            </td>
+                          )}
                           <td><span className="lotto-chip">{formatLottoProg(lotProg)}</span></td>
                           <td>{toStr((item.fields as any).field_18) || "-"}</td>
                           <td>{toStr((item.fields as any).field_2) || "-"}</td>
@@ -3140,15 +3316,24 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
                           <td>{toStr((item.fields as any).GRADOMATERIALE2) || "-"}</td>
                           <td>{toStr((item.fields as any).field_20) || "-"}</td>
                           <td>
-                            <button
-                              className={alreadySelected ? "btn secondary" : "btn primary"}
-                              style={{ width: "100%", padding: "8px 10px", fontSize: 13 }}
-                              onClick={() => handleSelectLot(item)}
-                              disabled={disableAdd}
-                              type="button"
-                            >
-                              {alreadySelected ? "Rimuovi" : "Aggiungi"}
-                            </button>
+                            {isMultiLotSelection ? (
+                              <span className={`pill ${isChecked ? "success" : "ghost"}`} style={{ width: "100%", justifyContent: "center" }}>
+                                {isChecked ? "Selezionato" : "Non selezionato"}
+                              </span>
+                            ) : (
+                              <button
+                                className={alreadySelected ? "btn secondary" : "btn primary"}
+                                style={{ width: "100%", padding: "8px 10px", fontSize: 13 }}
+                                onClick={() => {
+                                  onToggle(cartItem, alreadySelected);
+                                  setLotSelection(null);
+                                }}
+                                disabled={selectionLimitReached && !alreadySelected}
+                                type="button"
+                              >
+                                {alreadySelected ? "Rimuovi" : "Aggiungi"}
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -3156,6 +3341,17 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
                   </tbody>
                 </table>
               </div>
+              {isMultiLotSelection && (
+                <div className="section-heading" style={{ marginTop: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <span className="pill ghost">{lotDraftSelection.length} / {lotSelection.items.length} lotti selezionati</span>
+                    <button className="btn primary" onClick={handleApplyLotSelection} disabled={!hasLotDraftChanges} type="button">
+                      Aggiunti lotto/i
+                    </button>
+                  </div>
+                  <p className="muted" style={{ margin: "6px 0 0" }}>Seleziona uno o piu lotti e applica in un unico passaggio.</p>
+                </div>
+              )}
               <div className="section-heading" style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <span className="pill ghost">Nuovo lotto</span>
@@ -3294,6 +3490,7 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
     title: string;
     items: TuboMeccanicoItem[];
   } | null>(null);
+  const [lotDraftSelection, setLotDraftSelection] = useState<string[]>([]);
   const [newLotColata, setNewLotColata] = useState("");
   const [newLotOrdine, setNewLotOrdine] = useState("");
   const [newLotDataOrdine, setNewLotDataOrdine] = useState("");
@@ -3431,23 +3628,19 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
   const handlePrev = () => setPage((p) => Math.max(1, p - 1));
   const handleNext = () => setPage((p) => Math.min(totalPages, p + 1));
 
-  const toCartItem = (item: TuboMeccanicoItem): CartItem => ({
-    key: `TUBO-MECCANICO-${item.id}`,
-    source: "TUBO-MECCANICO",
-    itemId: item.id,
-    title: toStr((item.fields as Record<string, unknown>).Title) || "-",
-    bolla: (item.fields as Record<string, unknown>).field_11,
-    colata: (item.fields as Record<string, unknown>).field_14,
-    lottoProg: progressiveMap.get(item.id) || "a",
-    fields: item.fields as Record<string, unknown>,
-  });
-
-  const handleSelectLot = (item: TuboMeccanicoItem) => {
-    const cartItem = toCartItem(item);
-    const alreadySelected = Boolean(selectedItems[cartItem.key]);
-    onToggle(cartItem, alreadySelected);
-    setLotSelection(null);
-  };
+  const toCartItem = useCallback(
+    (item: TuboMeccanicoItem): CartItem => ({
+      key: `TUBO-MECCANICO-${item.id}`,
+      source: "TUBO-MECCANICO",
+      itemId: item.id,
+      title: toStr((item.fields as Record<string, unknown>).Title) || "-",
+      bolla: (item.fields as Record<string, unknown>).field_11,
+      colata: (item.fields as Record<string, unknown>).field_14,
+      lottoProg: progressiveMap.get(item.id) || "a",
+      fields: item.fields as Record<string, unknown>,
+    }),
+    [progressiveMap]
+  );
 
   const existingColate = useMemo(() => {
     const set = new Set<string>();
@@ -3458,6 +3651,28 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
     });
     return set;
   }, [lotSelection]);
+
+  const selectedItemsCount = Object.keys(selectedItems).length;
+
+  useEffect(() => {
+    if (!lotSelection) {
+      setLotDraftSelection([]);
+      return;
+    }
+
+    const nextSelection = getSelectedLotKeys(lotSelection.items, selectedItems, toCartItem);
+    setLotDraftSelection((current) => (areStringListsEqual(current, nextSelection) ? current : nextSelection));
+  }, [lotSelection, selectedItems, toCartItem]);
+
+  const currentLotSelectedCount = lotSelection ? getSelectedLotKeys(lotSelection.items, selectedItems, toCartItem).length : 0;
+  const outsideLotSelectedCount = selectedItemsCount - currentLotSelectedCount;
+  const lotDraftSelectionSet = useMemo(() => new Set(lotDraftSelection), [lotDraftSelection]);
+  const hasLotDraftChanges = lotSelection
+    ? lotSelection.items.some((item) => {
+        const cartItem = toCartItem(item);
+        return lotDraftSelectionSet.has(cartItem.key) !== Boolean(selectedItems[cartItem.key]);
+      })
+    : false;
 
   useEffect(() => {
     if (lotSelection) {
@@ -3718,6 +3933,32 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
   const normalizedNewLotLower = normalizedNewLot.toLowerCase();
   const isDuplicateLot = normalizedNewLot.length > 0 && existingColate.has(normalizedNewLotLower);
   const canCreateLot = Boolean(normalizedNewLot) && !isDuplicateLot && lotSaveStatus !== "saving";
+  const isMultiLotSelection = Boolean(lotSelection && lotSelection.items.length > 1);
+
+  const handleApplyLotSelection = () => {
+    if (!lotSelection) return;
+
+    const removals: CartItem[] = [];
+    const additions: CartItem[] = [];
+
+    lotSelection.items.forEach((item) => {
+      const cartItem = toCartItem(item);
+      const alreadySelected = Boolean(selectedItems[cartItem.key]);
+      const shouldBeSelected = lotDraftSelectionSet.has(cartItem.key);
+
+      if (shouldBeSelected !== alreadySelected) {
+        if (alreadySelected) {
+          removals.push(cartItem);
+        } else {
+          additions.push(cartItem);
+        }
+      }
+    });
+
+    removals.forEach((item) => onToggle(item, true));
+    additions.forEach((item) => onToggle(item, false));
+    setLotSelection(null);
+  };
 
   return (
     <div className="panel inventory-panel">
@@ -3889,40 +4130,65 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
                 <table className="inventory-table">
                   <thead>
                     <tr>
+                      {isMultiLotSelection && (
+                        <th scope="col" className="selection-col" aria-label="Seleziona lotto">
+                          <span className="selection-col__icon" aria-hidden="true"></span>
+                        </th>
+                      )}
                       <th scope="col">Ident. Lotto</th>
                       <th scope="col">N° COLATA</th>
                       <th scope="col">N° ORDINE</th>
                       <th scope="col">DATA OD</th>
                       <th scope="col">Giacenza (mm)</th>
-                      <th scope="col" style={{ width: 140 }}></th>
+                      <th scope="col" style={{ width: 140 }}>{isMultiLotSelection ? "Stato" : ""}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {lotSelection.items.map((item) => {
                       const cartItem = toCartItem(item);
                       const alreadySelected = Boolean(selectedItems[cartItem.key]);
-                      const disableAdd = selectionLimitReached && !alreadySelected;
+                      const isChecked = lotDraftSelectionSet.has(cartItem.key);
+                      const disableCheck = !isChecked && outsideLotSelectedCount + lotDraftSelection.length >= CART_SELECTION_LIMIT;
                       const lotProg = progressiveMap.get(item.id) || "a";
                       return (
                         <tr key={item.id}>
+                          {isMultiLotSelection && (
+                            <td className="selection-col">
+                              <input
+                                type="checkbox"
+                                aria-label={`Seleziona lotto ${formatLottoProg(lotProg)}`}
+                                checked={isChecked}
+                                disabled={disableCheck}
+                                onChange={(e) => {
+                                  setLotDraftSelection((current) => toggleLotDraftKey(current, cartItem.key, e.target.checked));
+                                }}
+                              />
+                            </td>
+                          )}
                           <td><span className="lotto-chip">{formatLottoProg(lotProg)}</span></td>
                           <td>{toStr((item.fields as any).field_14) || "-"}</td>
                           <td>{toStr((item.fields as any).field_2) || "-"}</td>
                           <td>{formatSharePointDate((item.fields as any).field_3)}</td>
                           <td>{toStr((item.fields as any).field_17) || "-"}</td>
                           <td>
-                            <button
-                              className={alreadySelected ? "btn secondary" : "btn primary"}
-                              style={{ width: "100%", padding: "8px 10px", fontSize: 13 }}
-                              onClick={() => {
-                                onToggle(cartItem, alreadySelected);
-                                setLotSelection(null);
-                              }}
-                              disabled={disableAdd}
-                              type="button"
-                            >
-                              {alreadySelected ? "Rimuovi" : "Aggiungi"}
-                            </button>
+                            {isMultiLotSelection ? (
+                              <span className={`pill ${isChecked ? "success" : "ghost"}`} style={{ width: "100%", justifyContent: "center" }}>
+                                {isChecked ? "Selezionato" : "Non selezionato"}
+                              </span>
+                            ) : (
+                              <button
+                                className={alreadySelected ? "btn secondary" : "btn primary"}
+                                style={{ width: "100%", padding: "8px 10px", fontSize: 13 }}
+                                onClick={() => {
+                                  onToggle(cartItem, alreadySelected);
+                                  setLotSelection(null);
+                                }}
+                                disabled={selectionLimitReached && !alreadySelected}
+                                type="button"
+                              >
+                                {alreadySelected ? "Rimuovi" : "Aggiungi"}
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -3930,6 +4196,17 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
                   </tbody>
                 </table>
               </div>
+              {isMultiLotSelection && (
+                <div className="section-heading" style={{ marginTop: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <span className="pill ghost">{lotDraftSelection.length} / {lotSelection.items.length} lotti selezionati</span>
+                    <button className="btn primary" onClick={handleApplyLotSelection} disabled={!hasLotDraftChanges} type="button">
+                      Aggiunti lotto/i
+                    </button>
+                  </div>
+                  <p className="muted" style={{ margin: "6px 0 0" }}>Seleziona uno o piu lotti e applica in un unico passaggio.</p>
+                </div>
+              )}
               <div className="section-heading" style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <span className="pill ghost">Nuovo lotto</span>
@@ -4902,7 +5179,7 @@ function AuthenticatedShell() {
     setView('dashboard');
   };
 
-  const selectionLimitReached = Object.keys(cartItems).length >= 10;
+  const selectionLimitReached = Object.keys(cartItems).length >= CART_SELECTION_LIMIT;
 
   const adminCta = isAdmin && view !== 'admin' ? (
     <button className="admin-cta" onClick={() => setView('admin')} type="button">
@@ -4918,7 +5195,7 @@ function AuthenticatedShell() {
         return rest;
       }
 
-      if (Object.keys(prev).length >= 10) {
+      if (Object.keys(prev).length >= CART_SELECTION_LIMIT) {
         setSelectionMessage("Puoi selezionare massimo 10 articoli.");
         return prev;
       }
