@@ -5256,10 +5256,14 @@ function AuthenticatedShell() {
         if (!base) return prev;
         const next: EditableItemState = { ...base, [field]: value };
 
-        if (base.type === "TUBI" && field === "giacenzaContab") {
-          const sum = sumAdditiveExpression(value);
-          if (sum !== null) {
-            next.giacenzaBib = String(sum);
+        if (base.type === "TUBI") {
+          if (field === "giacenzaContab") {
+            const sum = sumAdditiveExpression(value);
+            next.giacenzaBib = sum === null ? "" : String(sum);
+          }
+
+          if (field === "giacenzaBib" && value.trim() === "") {
+            next.giacenzaContab = "";
           }
         }
 
