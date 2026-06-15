@@ -16,6 +16,7 @@ import { formatSharePointDate } from "./utils/dateUtils";
 import { WebsiteViewer } from "./components/features/WebsiteViewer";
 import { DocumentBrowser } from "./components/features/DocumentBrowser";
 import { VideoBrowser } from "./components/features/VideoBrowser";
+import { IdleScreensaver } from "./components/features/IdleScreensaver";
 import { useIsAdmin } from "./hooks/useIsAdmin";
 import { AdminPanel } from "./components/features/AdminPanel";
 import { PowerAutomateService } from "./services/powerAutomateService";
@@ -92,6 +93,8 @@ type EditableItemState = {
 };
 
 const CART_SELECTION_LIMIT = 10;
+const IDLE_SCREENAVER_TIMEOUT_MS = 300_000;
+const IDLE_SCREENAVER_CATEGORY_NAME = "Screensaver";
 
 const getTimeValue = (val: unknown): number => {
   if (val === null || val === undefined) return 0;
@@ -5199,6 +5202,17 @@ function AuthenticatedShell() {
     </button>
   ) : null;
 
+  const screensaverOverlay = (
+    <IdleScreensaver
+      siteId={siteId}
+      driveId={import.meta.env.VITE_VIDEO_DRIVE_ID || import.meta.env.VITE_SHAREPOINT_DRIVE_ID}
+      rootPath={import.meta.env.VITE_VIDEO_ROOT_PATH || "VIDEO"}
+      categoryName={IDLE_SCREENAVER_CATEGORY_NAME}
+      idleTimeoutMs={IDLE_SCREENAVER_TIMEOUT_MS}
+      onWakeUp={() => setView("dashboard")}
+    />
+  );
+
   const handleToggleSelection = useCallback((item: CartItem, isSelected: boolean) => {
     setCartItems((prev) => {
       if (isSelected) {
@@ -6270,6 +6284,7 @@ function AuthenticatedShell() {
           </main>
         </div>
         {adminCta}
+        {screensaverOverlay}
       </>
     );
   }
@@ -6287,6 +6302,7 @@ function AuthenticatedShell() {
           </main>
         </div>
         {adminCta}
+        {screensaverOverlay}
       </>
     );
   }
@@ -6318,6 +6334,7 @@ function AuthenticatedShell() {
           </main>
         </div>
         {adminCta}
+        {screensaverOverlay}
       </>
     );
   }
@@ -6345,11 +6362,13 @@ function AuthenticatedShell() {
               siteId={siteId}
               driveId={import.meta.env.VITE_VIDEO_DRIVE_ID || import.meta.env.VITE_SHAREPOINT_DRIVE_ID}
               initialPath={import.meta.env.VITE_VIDEO_ROOT_PATH || "VIDEO"}
+              hiddenCategoryNames={[IDLE_SCREENAVER_CATEGORY_NAME]}
               onExitToHome={() => setView('dashboard')}
             />
           </main>
         </div>
         {adminCta}
+        {screensaverOverlay}
       </>
     );
   }
@@ -6388,6 +6407,7 @@ function AuthenticatedShell() {
           </main>
         </div>
         {adminCta}
+        {screensaverOverlay}
       </>
     );
   }
@@ -6412,6 +6432,7 @@ function AuthenticatedShell() {
           />
         </div>
         {adminCta}
+        {screensaverOverlay}
       </>
     );
   }
@@ -6516,6 +6537,7 @@ function AuthenticatedShell() {
         </main>
       </div>
       {adminCta}
+      {screensaverOverlay}
     </>
   );
 }

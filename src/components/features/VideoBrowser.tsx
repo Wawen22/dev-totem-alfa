@@ -12,7 +12,12 @@ type DriveItem = {
   "@microsoft.graph.downloadUrl"?: string;
 };
 
+type VideoCategory = DriveItem & {
+  previewImageUrl?: string;
+};
+
 const videoExtensions = new Set([".mp4", ".webm", ".mov", ".m4v"]);
+const previewFieldNeedle = "anteprima";
 
 const encodePathSegments = (path: string) =>
   path
@@ -60,6 +65,75 @@ const isSupportedVideo = (item: DriveItem) => {
 const sortByName = (left: DriveItem, right: DriveItem) =>
   left.name.localeCompare(right.name, "it", { numeric: true, sensitivity: "base" });
 
+const isAbsoluteUrl = (value: string) => /^https?:\/\//i.test(value);
+
+const joinUrl = (base?: string, relative?: string) => {
+  if (!base || !relative || !relative.startsWith("/")) return undefined;
+  return `${base.replace(/\/+$/g, "")}${relative}`;
+};
+
+const extractPreviewImageUrl = (value: unknown): string | undefined => {
+  if (!value) return undefined;
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (isAbsoluteUrl(trimmed) || trimmed.startsWith("/")) return trimmed;
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        return extractPreviewImageUrl(JSON.parse(trimmed));
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const extracted = extractPreviewImageUrl(item);
+      if (extracted) return extracted;
+    }
+    return undefined;
+  }
+
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    for (const key of ["thumbnailUrl", "url", "src", "imageUrl", "previewUrl", "absoluteUrl"]) {
+      const extracted = extractPreviewImageUrl(record[key]);
+      if (extracted) return extracted;
+    }
+
+    const serverUrl = typeof record.serverUrl === "string" ? record.serverUrl.trim() : undefined;
+    for (const key of ["serverRelativeUrl", "siteRelativeUrl", "fileRef", "path"]) {
+      const candidate = record[key];
+      if (typeof candidate !== "string") continue;
+      const trimmed = candidate.trim();
+      if (!trimmed) continue;
+      if (isAbsoluteUrl(trimmed)) return trimmed;
+      if (trimmed.startsWith("/")) {
+        return joinUrl(serverUrl, trimmed) || trimmed;
+      }
+    }
+
+    for (const key of ["file", "image", "preview", "media", "value"]) {
+      const extracted = extractPreviewImageUrl(record[key]);
+      if (extracted) return extracted;
+    }
+  }
+
+  return undefined;
+};
+
+const getPreviewFieldValue = (fields: Record<string, unknown>) => {
+  const match = Object.keys(fields).find((key) => key.toLowerCase().includes(previewFieldNeedle));
+  return match ? fields[match] : undefined;
+};
+
 const FolderIcon = () => (
   <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
@@ -77,6 +151,7 @@ type VideoBrowserProps = {
   siteId?: string;
   driveId?: string;
   initialPath?: string;
+  hiddenCategoryNames?: string[];
   onExitToHome: () => void;
 };
 
@@ -84,13 +159,14 @@ export function VideoBrowser({
   siteId,
   driveId,
   initialPath,
+  hiddenCategoryNames = [],
   onExitToHome,
 }: VideoBrowserProps) {
   const getClient = useAuthenticatedGraphClient();
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [categories, setCategories] = useState<DriveItem[]>([]);
+  const [categories, setCategories] = useState<VideoCategory[]>([]);
   const [videos, setVideos] = useState<DriveItem[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<DriveItem | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<VideoCategory | null>(null);
   const [activeVideo, setActiveVideo] = useState<DriveItem | null>(null);
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [loadingVideos, setLoadingVideos] = useState(false);
@@ -99,6 +175,10 @@ export function VideoBrowser({
   const [playbackError, setPlaybackError] = useState<string | null>(null);
 
   const rootPath = useMemo(() => (initialPath || "").trim().replace(/^\/+|\/+$/g, ""), [initialPath]);
+  const hiddenCategoryNamesSet = useMemo(
+    () => new Set(hiddenCategoryNames.map((name) => name.trim().toLowerCase()).filter(Boolean)),
+    [hiddenCategoryNames]
+  );
 
   const listChildren = useCallback(
     async (path: string) => {
@@ -131,12 +211,39 @@ export function VideoBrowser({
     [driveId, getClient, siteId]
   );
 
+  const fetchCategoryPreview = useCallback(
+    async (itemId: string) => {
+      if (!siteId || !driveId) return undefined;
+
+      try {
+        const client = await getClient();
+        const fields = (await client
+          .api(`/sites/${siteId}/drives/${driveId}/items/${itemId}/listItem/fields`)
+          .get()) as Record<string, unknown>;
+
+        return extractPreviewImageUrl(getPreviewFieldValue(fields));
+      } catch (err) {
+        console.warn("Anteprima categoria non disponibile", err);
+        return undefined;
+      }
+    },
+    [driveId, getClient, siteId]
+  );
+
   const loadCategories = useCallback(async () => {
     setLoadingCategories(true);
     setError(null);
     try {
       const items = await listChildren(rootPath);
-      const nextCategories = items.filter((item) => item.folder).sort(sortByName);
+      const folderItems = items
+        .filter((item) => item.folder && !hiddenCategoryNamesSet.has(item.name.trim().toLowerCase()))
+        .sort(sortByName);
+      const nextCategories = await Promise.all(
+        folderItems.map(async (item) => ({
+          ...item,
+          previewImageUrl: await fetchCategoryPreview(item.id),
+        }))
+      );
       setCategories(nextCategories);
     } catch (err: any) {
       console.error("Errore caricamento categorie video", err);
@@ -144,14 +251,14 @@ export function VideoBrowser({
     } finally {
       setLoadingCategories(false);
     }
-  }, [listChildren, rootPath]);
+  }, [fetchCategoryPreview, hiddenCategoryNamesSet, listChildren, rootPath]);
 
   useEffect(() => {
     loadCategories();
   }, [loadCategories]);
 
   const loadVideos = useCallback(
-    async (category: DriveItem) => {
+    async (category: VideoCategory) => {
       setLoadingVideos(true);
       setError(null);
       setActiveVideo(null);
@@ -379,6 +486,8 @@ export function VideoBrowser({
     <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 24, paddingBottom: 32 }}>
       <div
         style={{
+          position: "relative",
+          overflow: "hidden",
           borderRadius: 28,
           padding: "26px 30px",
           color: "#fff",
@@ -386,7 +495,41 @@ export function VideoBrowser({
           boxShadow: "0 26px 70px rgba(15, 23, 42, 0.22)",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
+        {selectedCategory?.previewImageUrl && (
+          <>
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                backgroundImage: `url("${selectedCategory.previewImageUrl}")`,
+                backgroundPosition: "center",
+                backgroundSize: "cover",
+                backgroundRepeat: "no-repeat",
+                transform: "scale(1.04)",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background:
+                  "linear-gradient(110deg, rgba(2, 6, 23, 0.82) 0%, rgba(15, 23, 42, 0.60) 38%, rgba(29, 78, 216, 0.48) 100%)",
+              }}
+            />
+          </>
+        )}
+
+        <div
+          style={{
+            position: "relative",
+            zIndex: 1,
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 20,
+            alignItems: "flex-start",
+            flexWrap: "wrap",
+          }}
+        >
           <div>
             <div style={{ fontSize: 14, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.7 }}>SharePoint / VIDEO</div>
             <h2 style={{ fontSize: 34, lineHeight: 1, margin: "10px 0 12px", fontWeight: 900 }}>
@@ -442,7 +585,7 @@ export function VideoBrowser({
       )}
 
       {!selectedCategory ? (
-        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 20 }}>
+        <section style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           {loadingCategories && <StatusCard message="Caricamento categorie video..." />}
           {!loadingCategories && !hasCategories && (
             <StatusCard message={`Nessuna categoria trovata nella cartella ${rootPath || "VIDEO"}.`} />
@@ -453,18 +596,168 @@ export function VideoBrowser({
                 key={category.id}
                 type="button"
                 onClick={() => loadVideos(category)}
-                style={tileButtonStyle}
+                style={categoryButtonStyle}
               >
-                <div style={iconWrapStyle}>
-                  <FolderIcon />
-                </div>
-                <div style={{ textAlign: "left" }}>
-                  <div style={{ fontSize: 28, fontWeight: 900, color: "#0f172a", lineHeight: 1.05 }}>{category.name}</div>
-                  <div style={{ marginTop: 10, fontSize: 15, color: "#475569" }}>
-                    {category.folder?.childCount ?? 0} elementi disponibili
+                <div style={categoryPreviewStyle}>
+                  {category.previewImageUrl && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        backgroundImage: `url("${category.previewImageUrl}")`,
+                        backgroundPosition: "center",
+                        backgroundSize: "cover",
+                        backgroundRepeat: "no-repeat",
+                        transform: "scale(1.02)",
+                      }}
+                    />
+                  )}
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      background: category.previewImageUrl
+                        ? "linear-gradient(135deg, rgba(15, 23, 42, 0.14) 0%, rgba(15, 23, 42, 0.68) 100%)"
+                        : "linear-gradient(135deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.04) 100%)",
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: "relative",
+                      zIndex: 1,
+                      height: "100%",
+                      padding: 22,
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "space-between",
+                      gap: 16,
+                      color: "#fff",
+                    }}
+                  >
+                    <div
+                      style={{
+                        alignSelf: "flex-start",
+                        padding: "8px 12px",
+                        borderRadius: 999,
+                        background: "rgba(255,255,255,0.16)",
+                        border: "1px solid rgba(255,255,255,0.18)",
+                        backdropFilter: "blur(8px)",
+                        fontSize: 12,
+                        fontWeight: 800,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {category.previewImageUrl ? "Anteprima SharePoint" : "Raccolta Video"}
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                      <div
+                        style={{
+                          ...iconWrapStyle,
+                          width: 64,
+                          height: 64,
+                          borderRadius: 20,
+                          background: "rgba(255,255,255,0.15)",
+                          color: "#fff",
+                          backdropFilter: "blur(10px)",
+                        }}
+                      >
+                        <FolderIcon />
+                      </div>
+                      <div style={{ textAlign: "left" }}>
+                        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.82 }}>
+                          Categoria
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 18, fontWeight: 800, lineHeight: 1.12 }}>
+                          {category.previewImageUrl ? "Visuale personalizzata attiva" : "Fallback grafico automatico"}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div style={{ marginLeft: "auto", fontSize: 36, fontWeight: 900, color: "#2563eb", opacity: 0.5 }}>→</div>
+
+                <div
+                  style={{
+                    flex: "1 1 420px",
+                    minWidth: 0,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 18,
+                    padding: "28px 30px",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ textAlign: "left", minWidth: 0, flex: "1 1 360px" }}>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 800,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        color: "#2563eb",
+                      }}
+                    >
+                      Raccolta Video
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 10,
+                        fontSize: "clamp(28px, 3vw, 40px)",
+                        fontWeight: 900,
+                        color: "#0f172a",
+                        lineHeight: 1.02,
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      {category.name}
+                    </div>
+                    <div style={{ marginTop: 12, fontSize: 16, color: "#475569", maxWidth: 760 }}>
+                      Apri la categoria per visualizzare i video associati e avviare subito la riproduzione fullscreen sul totem.
+                    </div>
+                    <div style={{ marginTop: 18, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      <span style={metaChipStyle}>
+                        {category.folder?.childCount ?? 0} elementi disponibili
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 14, marginLeft: "auto" }}>
+                    <div
+                      style={{
+                        padding: "12px 16px",
+                        borderRadius: 999,
+                        background: "#eff6ff",
+                        color: "#1d4ed8",
+                        fontSize: 14,
+                        fontWeight: 800,
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Apri categoria
+                    </div>
+                    <div
+                      style={{
+                        width: 56,
+                        height: 56,
+                        borderRadius: 18,
+                        display: "grid",
+                        placeItems: "center",
+                        background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)",
+                        color: "#fff",
+                        fontSize: 28,
+                        fontWeight: 900,
+                        boxShadow: "0 16px 28px rgba(37, 99, 235, 0.24)",
+                        flexShrink: 0,
+                      }}
+                    >
+                      →
+                    </div>
+                  </div>
+                </div>
               </button>
             ))}
         </section>
@@ -584,6 +877,40 @@ const tileButtonStyle: React.CSSProperties = {
   background: "linear-gradient(145deg, #ffffff 0%, #f8fbff 100%)",
   boxShadow: "0 16px 42px rgba(37, 99, 235, 0.08)",
   cursor: "pointer",
+};
+
+const categoryButtonStyle: React.CSSProperties = {
+  width: "100%",
+  display: "flex",
+  alignItems: "stretch",
+  gap: 0,
+  padding: 0,
+  borderRadius: 32,
+  overflow: "hidden",
+  border: "1px solid rgba(191, 219, 254, 0.95)",
+  background: "linear-gradient(145deg, #ffffff 0%, #f8fbff 100%)",
+  boxShadow: "0 22px 52px rgba(37, 99, 235, 0.10)",
+  cursor: "pointer",
+  flexWrap: "wrap",
+};
+
+const categoryPreviewStyle: React.CSSProperties = {
+  position: "relative",
+  flex: "0 0 clamp(260px, 28vw, 360px)",
+  minHeight: 220,
+  background: "linear-gradient(135deg, #1e3a8a 0%, #2563eb 55%, #38bdf8 100%)",
+  overflow: "hidden",
+};
+
+const metaChipStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "8px 12px",
+  borderRadius: 999,
+  background: "#eff6ff",
+  color: "#1d4ed8",
+  fontSize: 14,
+  fontWeight: 800,
 };
 
 const iconWrapStyle: React.CSSProperties = {
