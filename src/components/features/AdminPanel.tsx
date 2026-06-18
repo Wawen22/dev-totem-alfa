@@ -34,6 +34,9 @@ type AdminPanelProps = {
     listKind: ListKind,
     onProgress?: (msg: string) => void
   ) => Promise<{ success: boolean; message: string }>;
+  onSyncTubiFromExcel?: (
+    onProgress?: (msg: string) => void
+  ) => Promise<{ success: boolean; message: string }>;
 };
 
 const FORGIATI_FIELDS: FieldConfig[] = [
@@ -1033,6 +1036,7 @@ export function AdminPanel({
   tuboMeccanicoListId,
   filoFlussoListId,
   onSyncExcel,
+  onSyncTubiFromExcel,
 }: AdminPanelProps) {
   const getClient = useAuthenticatedGraphClient();
   const forgiatiExcelPath = (import.meta.env.VITE_FORGIATI_EXCEL_PATH || "").trim();
@@ -2049,6 +2053,7 @@ export function AdminPanel({
 
   const EXCEL_LISTS: ListKind[] = ["FORGIATI", "TUBI", "TUBO-MECCANICO", "SPARK-GUPS", "FILO-FLUSSO"];
   const hasExcel = EXCEL_LISTS.includes(activeList);
+  const showTubiSyncActions = activeList === "TUBI";
 
   const handleSyncExcel = useCallback(async () => {
     if (!onSyncExcel) return;
@@ -2058,6 +2063,18 @@ export function AdminPanel({
     setSyncStatus(result.success ? "success" : "error");
     setSyncMessage(result.message);
   }, [onSyncExcel, activeList]);
+
+  const handleSyncTubiFromExcel = useCallback(async () => {
+    if (!onSyncTubiFromExcel) return;
+    setSyncStatus("syncing");
+    setSyncMessage("Avvio sincronizzazione Excel -> SharePoint...");
+    const result = await onSyncTubiFromExcel((msg) => setSyncMessage(msg));
+    setSyncStatus(result.success ? "success" : "error");
+    setSyncMessage(result.message);
+    if (result.success) {
+      activeRefresh();
+    }
+  }, [onSyncTubiFromExcel, activeRefresh]);
 
   const renderField = (field: FieldConfig, form: FormState, onChange: (key: string, val: string) => void) => {
     const isDateField = field.type === "date";
@@ -2137,15 +2154,22 @@ export function AdminPanel({
           <span className="pill ghost" style={{ alignSelf: "flex-start", marginTop: 6 }}>
             Ruolo Totem.Admin attivo
           </span>
-          {hasExcel && onSyncExcel && (
+          {showTubiSyncActions && hasExcel && onSyncExcel && (
             <button
               className="btn secondary"
               type="button"
               onClick={handleSyncExcel}
-              disabled
-              title="Funzionalità disponibile — verrà attivata dopo il ripristino dei dati SharePoint"
             >
-              Sincronizza Excel ({activeList})
+              {"SP -> Excel"}
+            </button>
+          )}
+          {showTubiSyncActions && onSyncTubiFromExcel && (
+            <button
+              className="btn secondary"
+              type="button"
+              onClick={handleSyncTubiFromExcel}
+            >
+              {"Excel -> SP"}
             </button>
           )}
           <button className="btn primary" type="button" onClick={() => setIsCreateOpen(true)}>

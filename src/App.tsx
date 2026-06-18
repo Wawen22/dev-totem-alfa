@@ -56,6 +56,18 @@ type CartItem = {
   fields: Record<string, unknown>;
 };
 
+type SyncResult = {
+  success: boolean;
+  message: string;
+};
+
+type SyncProgressHandler = (msg: string) => void;
+
+type WorkbookTableRow = {
+  index: number;
+  values: Array<Array<unknown>>;
+};
+
 type EditableItemState = {
   type: CartItem["source"];
   title: string;
@@ -813,6 +825,203 @@ const extractProgLetter = (val: string | undefined | null): string | null => {
   if (!val) return null;
   const match = String(val).trim().match(/[a-z]/i);
   return match ? match[0] : null;
+};
+
+const TUBI_SHAREPOINT_TEXT_FIELDS = [
+  "CodiceSAM",
+  "field_1",
+  "field_2",
+  "field_4",
+  "field_5",
+  "field_6",
+  "field_7",
+  "field_8",
+  "field_9",
+  "field_10",
+  "field_11",
+  "GRADOMATERIALE2",
+  "field_12",
+  "field_13",
+  "field_14",
+  "field_15",
+  "field_17",
+  "field_18",
+  "field_19",
+  "field_20",
+  "field_22",
+  "field_23",
+  "field_24",
+  "field_25",
+  "field_26",
+  "field_27",
+] as const;
+
+const TUBI_SHAREPOINT_DATE_FIELDS = ["field_3", "field_16", "field_21"] as const;
+
+const normalizeTrimmedValue = (value: unknown): string | null => {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed ? trimmed : null;
+};
+
+const normalizeDateValue = (value: unknown): string | null => {
+  const t = getTimeValue(value);
+  if (!t) return null;
+  return new Date(t).toISOString();
+};
+
+const buildTubiSyncKey = (title: string, identLotto?: string | null) => {
+  const normalizedTitle = normalizeExcelKey(title || "");
+  const resolvedIdent = formatLottoProg(extractProgLetter(identLotto || "") || identLotto || "A");
+  return `${normalizedTitle}::${normalizeExcelKey(resolvedIdent)}`;
+};
+
+const buildProgressiveMapForGroupedItems = <T extends SharePointListItem<Record<string, unknown>>>(items: T[]) => {
+  const grouped = new Map<string, T[]>();
+  const normalizeLetter = (val: string | null | undefined) => {
+    if (!val) return null;
+    const cleaned = String(val).trim().toLowerCase();
+    return /^[a-z]$/.test(cleaned) ? cleaned : null;
+  };
+  const getCreatedKey = (item: T) => {
+    const created = getTimeValue((item.fields as Record<string, unknown>).Created);
+    if (created) return created;
+    const idNum = Number(item.id);
+    return Number.isFinite(idNum) ? idNum : 0;
+  };
+
+  items.forEach((item) => {
+    const title = toStr((item.fields as Record<string, unknown>).Title).trim();
+    if (!title) return;
+    const current = grouped.get(title) || [];
+    current.push(item);
+    grouped.set(title, current);
+  });
+
+  const progressiveMap = new Map<string, string>();
+  grouped.forEach((groupItems) => {
+    const sorted = [...groupItems].sort((a, b) => getCreatedKey(a) - getCreatedKey(b));
+    const used = new Set<string>();
+    sorted.forEach((item) => {
+      const existing = normalizeLetter((item.fields as Record<string, unknown>).LottoProgressivo as string | undefined);
+      let letter = existing;
+      if (!letter || used.has(letter)) {
+        let code = "a".charCodeAt(0);
+        while (used.has(String.fromCharCode(code))) {
+          code++;
+        }
+        letter = String.fromCharCode(code);
+      }
+      used.add(letter);
+      progressiveMap.set(item.id, letter);
+    });
+  });
+
+  return progressiveMap;
+};
+
+const getResolvedTubiIdentLotto = (
+  item: SharePointListItem<Record<string, unknown>>,
+  progressiveMap: Map<string, string>
+) => formatLottoProg(progressiveMap.get(item.id) || (item.fields as Record<string, unknown>).LottoProgressivo as string | undefined || "A");
+
+const getTubiExcelFieldKey = (columnName: string) =>
+  tubiExcelColumnFieldMap.get(normalizeExcelKey(columnName || "")) || null;
+
+const normalizeComparableCellValue = (value: string | number | boolean | null | undefined) => {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
+  const trimmed = String(value).trim();
+  if (!trimmed) return "";
+  if (/^-?\d+(?:[.,]\d+)?$/.test(trimmed)) {
+    return String(Number(trimmed.replace(",", ".")));
+  }
+  return trimmed;
+};
+
+const buildComparableTubiWorkbookRow = (excelColumns: string[], rowValues: unknown[]) =>
+  excelColumns.map((columnName, index) =>
+    normalizeComparableCellValue(
+      toExcelCellValueForDateFields(TUBI_DATE_FIELDS, getTubiExcelFieldKey(columnName), rowValues[index] ?? null)
+    )
+  );
+
+const buildComparableTubiFieldsRow = (excelColumns: string[], fields: Record<string, unknown>) =>
+  buildTubiExcelRow(excelColumns, fields).map((value) => normalizeComparableCellValue(value));
+
+const cloneWorkbookRows = (rows: WorkbookTableRow[]) =>
+  rows.map((row) => ({
+    index: row.index,
+    values: [[...(row.values?.[0] || [])]],
+  }));
+
+const upsertWorkbookRowCache = (rows: WorkbookTableRow[], rowIndex: number, rowValues: Array<string | number | boolean | null>) => {
+  const existing = rows.find((row) => row.index === rowIndex);
+  if (existing) {
+    existing.values = [rowValues as Array<unknown>];
+    return;
+  }
+  rows.push({ index: rowIndex, values: [rowValues as Array<unknown>] });
+  rows.sort((left, right) => left.index - right.index);
+};
+
+const insertWorkbookRowCache = (
+  rows: WorkbookTableRow[],
+  rowValues: Array<string | number | boolean | null>,
+  insertIndex?: number
+) => {
+  const targetIndex =
+    insertIndex !== undefined
+      ? insertIndex
+      : rows.reduce((max, row) => Math.max(max, row.index), -1) + 1;
+  rows.forEach((row) => {
+    if (row.index >= targetIndex) {
+      row.index += 1;
+    }
+  });
+  rows.push({
+    index: targetIndex,
+    values: [rowValues as Array<unknown>],
+  });
+  rows.sort((left, right) => left.index - right.index);
+  return targetIndex;
+};
+
+const buildTubiPayloadFromExcelRow = (excelColumns: string[], rowValues: unknown[]) => {
+  const rawByField = new Map<string, unknown>();
+  excelColumns.forEach((columnName, index) => {
+    const fieldKey = getTubiExcelFieldKey(columnName);
+    if (!fieldKey) return;
+    rawByField.set(fieldKey, rowValues[index] ?? null);
+  });
+
+  const title = normalizeTrimmedValue(rawByField.get("Title"));
+  if (!title) return null;
+
+  const identRaw =
+    normalizeTrimmedValue(rawByField.get("IdentLotto")) ||
+    normalizeTrimmedValue(rawByField.get("LottoProgressivo")) ||
+    "A";
+  const identLotto = formatLottoProg(extractProgLetter(identRaw) || identRaw);
+  const fields: Record<string, unknown> = {
+    Title: title,
+    LottoProgressivo: identLotto,
+  };
+
+  TUBI_SHAREPOINT_TEXT_FIELDS.forEach((fieldKey) => {
+    fields[fieldKey] = normalizeTrimmedValue(rawByField.get(fieldKey));
+  });
+  TUBI_SHAREPOINT_DATE_FIELDS.forEach((fieldKey) => {
+    fields[fieldKey] = normalizeDateValue(rawByField.get(fieldKey));
+  });
+
+  return {
+    key: buildTubiSyncKey(title, identLotto),
+    title,
+    identLotto,
+    fields,
+  };
 };
 
 const buildColataPlaceholder = (lottoProg?: string | null) => {
@@ -2570,7 +2779,7 @@ function FiloFlussoPanel({ selectedItems, onToggle, selectionLimitReached }: Sel
                   );
                   }
 
-                  function TubiPanel
+function TubiPanel
 ({ selectedItems, onToggle, selectionLimitReached }: SelectionStateProps) {
   const getClient = useAuthenticatedGraphClient();
   const siteId = import.meta.env.VITE_SHAREPOINT_SITE_ID;
@@ -5307,10 +5516,323 @@ function AuthenticatedShell() {
     setSaveMessage(null);
   }, [view]);
 
+  const resolveTubiExcelContext = useCallback(async () => {
+    if (!sharepointService) {
+      throw new Error("Configurazione SharePoint mancante.");
+    }
+
+    const resolvedPath =
+      tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : "");
+    if (!resolvedPath || !tubiExcelTable) {
+      throw new Error("Percorso Excel o tabella TUBI non configurati.");
+    }
+
+    let resolvedDriveId = tubiExcelDriveIdRef.current;
+    if (!resolvedDriveId && tubiExcelDriveNameEnv) {
+      resolvedDriveId = await sharepointService.getDriveIdByName(tubiExcelDriveNameEnv);
+      tubiExcelDriveIdRef.current = resolvedDriveId;
+    }
+    if (!resolvedDriveId && tubiExcelDriveNameEnv) {
+      throw new Error(`Libreria "${tubiExcelDriveNameEnv}" non trovata`);
+    }
+
+    const driveItem = await sharepointService.getDriveItemByPath(resolvedPath, resolvedDriveId || undefined);
+    const columns = await sharepointService.listWorkbookTableColumnsByItemId(
+      driveItem.id,
+      tubiExcelTable,
+      resolvedDriveId || undefined
+    );
+    const rows = await sharepointService.listWorkbookTableRowsByItemId(
+      driveItem.id,
+      tubiExcelTable,
+      resolvedDriveId || undefined
+    );
+
+    let dataBodyRange: { address: string; rowCount?: number; columnCount?: number } | null = null;
+    try {
+      dataBodyRange = await sharepointService.getWorkbookTableDataBodyRangeByItemId(
+        driveItem.id,
+        tubiExcelTable,
+        resolvedDriveId || undefined
+      );
+    } catch (err) {
+      if (rows.length > 0) {
+        throw err;
+      }
+    }
+
+    return {
+      driveId: resolvedDriveId || undefined,
+      driveItem,
+      columns,
+      rows,
+      dataBodyRange,
+    };
+  }, [
+    sharepointService,
+    tubiExcelPath,
+    tubiExcelFolder,
+    tubiExcelFilename,
+    tubiExcelTable,
+    tubiExcelDriveNameEnv,
+  ]);
+
+  const handleSyncTubiSharePointToExcel = useCallback(async (
+    onProgress?: SyncProgressHandler
+  ): Promise<SyncResult> => {
+    if (!sharepointService) {
+      return { success: false, message: "Configurazione SharePoint mancante." };
+    }
+    if (!tubiListId) {
+      return { success: false, message: "List ID TUBI non configurato." };
+    }
+
+    try {
+      onProgress?.("Caricamento articoli TUBI da SharePoint...");
+      const spItems = await sharepointService.listItems<Record<string, unknown>>(tubiListId);
+      const progressiveMap = buildProgressiveMapForGroupedItems(spItems);
+
+      onProgress?.(`Trovati ${spItems.length} articoli. Apertura tabella Excel TUBI...`);
+      const { driveId, driveItem, columns, rows: rawRows, dataBodyRange } = await resolveTubiExcelContext();
+      const rows = cloneWorkbookRows(rawRows);
+      let effectiveRowCount = dataBodyRange?.rowCount ?? rows.length;
+      if (rows.length > 0 && !dataBodyRange) {
+        throw new Error("Intervallo dati Excel non disponibile per gli aggiornamenti TUBI.");
+      }
+
+      const sortableItems = [...spItems].sort((left, right) => {
+        const titleCompare = compareTubiTitle(
+          toStr((left.fields as Record<string, unknown>).Title),
+          toStr((right.fields as Record<string, unknown>).Title)
+        );
+        if (titleCompare !== 0) return titleCompare;
+        return getResolvedTubiIdentLotto(left, progressiveMap).localeCompare(getResolvedTubiIdentLotto(right, progressiveMap), "it");
+      });
+
+      const sessionId = await sharepointService.createWorkbookSessionByItemId(
+        driveItem.id,
+        { persistChanges: true },
+        driveId
+      );
+
+      let updated = 0;
+      let created = 0;
+      let unchanged = 0;
+      let skipped = 0;
+
+      try {
+        for (let i = 0; i < sortableItems.length; i++) {
+          const item = sortableItems[i];
+          const fields = (item.fields || {}) as Record<string, unknown>;
+          const title = normalizeTrimmedValue(fields.Title);
+          if (!title) {
+            skipped++;
+            continue;
+          }
+
+          const identLotto = getResolvedTubiIdentLotto(item, progressiveMap);
+          const excelFields = {
+            ...fields,
+            IdentLotto: identLotto,
+          };
+          const nextRowValues = buildTubiExcelRow(columns, excelFields);
+          const nextComparable = buildComparableTubiFieldsRow(columns, excelFields);
+          const rowIndex = findExcelRowIndex(rows, columns, {
+            codice: title,
+            identLotto,
+          });
+
+          if (rowIndex === null) {
+            const insertAfter = findLastRowIndexByCodice(rows, columns, title, getExcelColumnIndex);
+            const insertIndex = insertAfter !== null ? insertAfter + 1 : undefined;
+            let cacheUpdated = false;
+            try {
+              await sharepointService.appendWorkbookTableRowByItemId(
+                driveItem.id,
+                tubiExcelTable,
+                nextRowValues,
+                { sessionId, index: insertIndex },
+                driveId
+              );
+            } catch (appendErr) {
+              if (insertIndex !== undefined) {
+                await sharepointService.appendWorkbookTableRowByItemId(
+                  driveItem.id,
+                  tubiExcelTable,
+                  nextRowValues,
+                  { sessionId },
+                  driveId
+                );
+                insertWorkbookRowCache(rows, nextRowValues);
+                cacheUpdated = true;
+              } else {
+                throw appendErr;
+              }
+            }
+            if (!cacheUpdated) {
+              insertWorkbookRowCache(rows, nextRowValues, insertIndex);
+            }
+            effectiveRowCount += 1;
+            created++;
+          } else {
+            const currentRow = rows.find((row) => row.index === rowIndex);
+            const currentComparable = buildComparableTubiWorkbookRow(columns, currentRow?.values?.[0] || []);
+            if (areStringListsEqual(currentComparable, nextComparable)) {
+              unchanged++;
+            } else {
+              const rowRange = buildRowRangeAddress(dataBodyRange!.address, rowIndex, effectiveRowCount);
+              if (!rowRange) {
+                skipped++;
+                continue;
+              }
+              await sharepointService.updateWorkbookRangeByAddress(
+                driveItem.id,
+                rowRange.sheetName,
+                rowRange.address,
+                [nextRowValues],
+                { sessionId },
+                driveId
+              );
+              upsertWorkbookRowCache(rows, rowIndex, nextRowValues);
+              updated++;
+            }
+          }
+
+          if ((i + 1) % 10 === 0) {
+            onProgress?.(
+              `SharePoint -> Excel TUBI: ${updated} aggiornate, ${created} nuove, ${unchanged} invariate (${i + 1}/${sortableItems.length})...`
+            );
+          }
+        }
+      } finally {
+        try {
+          await sharepointService.closeWorkbookSessionByItemId(driveItem.id, sessionId, driveId);
+        } catch (closeErr) {
+          console.warn("Errore chiusura sessione Excel sync TUBI", closeErr);
+        }
+      }
+
+      return {
+        success: true,
+        message: `Sincronizzazione TUBI SharePoint -> Excel completata: ${updated} righe aggiornate, ${created} nuove, ${unchanged} invariate, ${skipped} saltate.`,
+      };
+    } catch (err: any) {
+      console.error("Errore sync TUBI SharePoint -> Excel", err);
+      return { success: false, message: `Errore sync TUBI SharePoint -> Excel: ${err?.message || "errore sconosciuto"}` };
+    }
+  }, [
+    sharepointService,
+    tubiListId,
+    resolveTubiExcelContext,
+  ]);
+
+  const handleSyncTubiExcelToSharePoint = useCallback(async (
+    onProgress?: SyncProgressHandler
+  ): Promise<SyncResult> => {
+    if (!sharepointService) {
+      return { success: false, message: "Configurazione SharePoint mancante." };
+    }
+    if (!tubiListId) {
+      return { success: false, message: "List ID TUBI non configurato." };
+    }
+
+    try {
+      onProgress?.("Caricamento righe TUBI da Excel...");
+      const { columns, rows } = await resolveTubiExcelContext();
+      const spItems = await sharepointService.listItems<Record<string, unknown>>(tubiListId);
+      const progressiveMap = buildProgressiveMapForGroupedItems(spItems);
+      const spIndex = new Map<string, SharePointListItem<Record<string, unknown>>>();
+      spItems.forEach((item) => {
+        const title = normalizeTrimmedValue((item.fields as Record<string, unknown>).Title);
+        if (!title) return;
+        const key = buildTubiSyncKey(title, getResolvedTubiIdentLotto(item, progressiveMap));
+        if (!spIndex.has(key)) {
+          spIndex.set(key, item);
+        }
+      });
+
+      let skipped = 0;
+      let duplicateExcelRows = 0;
+      const seenExcelKeys = new Set<string>();
+      const excelRecords = rows.reduce<Array<{
+        key: string;
+        title: string;
+        identLotto: string;
+        fields: Record<string, unknown>;
+        comparable: string[];
+      }>>((acc, row) => {
+        const parsed = buildTubiPayloadFromExcelRow(columns, row.values?.[0] || []);
+        if (!parsed) {
+          skipped++;
+          return acc;
+        }
+        if (seenExcelKeys.has(parsed.key)) {
+          duplicateExcelRows++;
+          return acc;
+        }
+        seenExcelKeys.add(parsed.key);
+        acc.push({
+          ...parsed,
+          comparable: buildComparableTubiWorkbookRow(columns, row.values?.[0] || []),
+        });
+        return acc;
+      }, []);
+
+      let updated = 0;
+      let created = 0;
+      let unchanged = 0;
+
+      for (let i = 0; i < excelRecords.length; i++) {
+        const record = excelRecords[i];
+        const currentItem = spIndex.get(record.key);
+        if (!currentItem) {
+          await sharepointService.createItem<Record<string, unknown>>(tubiListId, record.fields);
+          created++;
+        } else {
+          const currentComparable = buildComparableTubiFieldsRow(columns, {
+            ...(currentItem.fields || {}),
+            IdentLotto: getResolvedTubiIdentLotto(currentItem, progressiveMap),
+          } as Record<string, unknown>);
+
+          if (areStringListsEqual(currentComparable, record.comparable)) {
+            unchanged++;
+          } else {
+            await sharepointService.updateItem<Record<string, unknown>>(tubiListId, currentItem.id, record.fields);
+            updated++;
+          }
+        }
+
+        if ((i + 1) % 10 === 0) {
+          onProgress?.(
+            `Excel -> SharePoint TUBI: ${updated} aggiornati, ${created} nuovi, ${unchanged} invariati (${i + 1}/${excelRecords.length})...`
+          );
+        }
+      }
+
+      clearCacheKeys(["tubi"]);
+
+      const duplicateSuffix = duplicateExcelRows > 0 ? ` ${duplicateExcelRows} righe Excel duplicate ignorate.` : "";
+      return {
+        success: true,
+        message: `Sincronizzazione TUBI Excel -> SharePoint completata: ${updated} aggiornati, ${created} nuovi, ${unchanged} invariati, ${skipped} righe vuote saltate.${duplicateSuffix}`,
+      };
+    } catch (err: any) {
+      console.error("Errore sync TUBI Excel -> SharePoint", err);
+      return { success: false, message: `Errore sync TUBI Excel -> SharePoint: ${err?.message || "errore sconosciuto"}` };
+    }
+  }, [
+    sharepointService,
+    tubiListId,
+    resolveTubiExcelContext,
+  ]);
+
   const handleSyncExcel = useCallback(async (
     listKind: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO",
     onProgress?: (msg: string) => void
   ): Promise<{ success: boolean; message: string }> => {
+    if (listKind === "TUBI") {
+      return handleSyncTubiSharePointToExcel(onProgress);
+    }
     if (!sharepointService) {
       return { success: false, message: "Configurazione SharePoint mancante." };
     }
@@ -5490,6 +6012,7 @@ function AuthenticatedShell() {
       return { success: false, message: `Errore: ${err?.message || "Errore sync Excel"}` };
     }
   }, [
+    handleSyncTubiSharePointToExcel,
     sharepointService,
     forgiatiListId, forgiatiExcelPath, forgiatiExcelFolder, forgiatiExcelFilename, forgiatiExcelTable, forgiatiExcelDriveNameEnv,
     tubiListId, tubiExcelPath, tubiExcelFolder, tubiExcelFilename, tubiExcelTable, tubiExcelDriveNameEnv,
@@ -6403,6 +6926,7 @@ function AuthenticatedShell() {
               tuboMeccanicoListId={tuboMeccanicoListId}
               filoFlussoListId={filoFlussoListId}
               onSyncExcel={handleSyncExcel}
+              onSyncTubiFromExcel={handleSyncTubiExcelToSharePoint}
             />
           </main>
         </div>
