@@ -1918,6 +1918,63 @@ h3 { font-size: 20px; }
 
 .btn.primary { background: linear-gradient(135deg, #0c65d3, #0f8bff); color: #fff; border-color: #0c65d3; }
 .btn.secondary { background: #f8fafc; color: var(--muted); }
+.admin-sync-btn {
+  display: inline-flex;
+  align-items: center;
+  min-width: 196px;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  border-width: 1px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+.admin-sync-btn__icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 800;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.62);
+}
+.admin-sync-btn__content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.1;
+}
+.admin-sync-btn__title {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+.admin-sync-btn__subtitle {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.8;
+  margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.admin-sync-btn--sp {
+  background: linear-gradient(135deg, #e8fff2, #d2f7e5);
+  color: #166534;
+  border-color: #86efac;
+}
+.admin-sync-btn--sp:hover:not(:disabled) {
+  box-shadow: 0 14px 30px rgba(22, 101, 52, 0.18);
+}
+.admin-sync-btn--excel {
+  background: linear-gradient(135deg, #eef5ff, #dcecff);
+  color: #1d4ed8;
+  border-color: #93c5fd;
+}
+.admin-sync-btn--excel:hover:not(:disabled) {
+  box-shadow: 0 14px 30px rgba(29, 78, 216, 0.18);
+}
 .btn:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(12, 101, 211, 0.25); }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
 .btn.danger-ghost { background: rgba(239, 68, 68, 0.12); color: #b91c1c; border-color: rgba(239, 68, 68, 0.3); }
@@ -2688,4 +2745,5 @@ h3 { font-size: 20px; }
   .totem-shell { padding: 20px; }
   h1 { font-size: 26px; }
   .inventory-table { min-width: 720px; }
+  .admin-sync-btn { min-width: 100%; }
 }

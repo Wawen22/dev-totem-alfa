@@ -2256,20 +2256,30 @@ export function AdminPanel({
           </span>
           {showTubiSyncActions && hasExcel && onSyncExcel && (
             <button
-              className="btn secondary"
+              className="btn admin-sync-btn admin-sync-btn--sp"
               type="button"
               onClick={handleSyncExcel}
+              title="Aggiorna la tabella Excel TUBI usando i dati presenti in SharePoint"
             >
-              {"SP -> Excel"}
+              <span className="admin-sync-btn__icon" aria-hidden="true">↘</span>
+              <span className="admin-sync-btn__content">
+                <span className="admin-sync-btn__title">Aggiorna Excel</span>
+                <span className="admin-sync-btn__subtitle">da SharePoint</span>
+              </span>
             </button>
           )}
           {showTubiSyncActions && onSyncTubiFromExcel && (
             <button
-              className="btn secondary"
+              className="btn admin-sync-btn admin-sync-btn--excel"
               type="button"
               onClick={handleSyncTubiFromExcel}
+              title="Aggiorna SharePoint TUBI usando i dati presenti nel file Excel"
             >
-              {"Excel -> SP"}
+              <span className="admin-sync-btn__icon" aria-hidden="true">↗</span>
+              <span className="admin-sync-btn__content">
+                <span className="admin-sync-btn__title">Aggiorna SharePoint</span>
+                <span className="admin-sync-btn__subtitle">da Excel</span>
+              </span>
             </button>
           )}
           <button className="btn primary" type="button" onClick={() => setIsCreateOpen(true)}>
