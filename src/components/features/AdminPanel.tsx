@@ -2264,7 +2264,7 @@ export function AdminPanel({
               <span className="admin-sync-btn__icon" aria-hidden="true">↘</span>
               <span className="admin-sync-btn__content">
                 <span className="admin-sync-btn__title">Aggiorna Excel</span>
-                <span className="admin-sync-btn__subtitle">da SharePoint</span>
+                <span className="admin-sync-btn__subtitle">da Totem</span>
               </span>
             </button>
           )}
@@ -2277,7 +2277,7 @@ export function AdminPanel({
             >
               <span className="admin-sync-btn__icon" aria-hidden="true">↗</span>
               <span className="admin-sync-btn__content">
-                <span className="admin-sync-btn__title">Aggiorna SharePoint</span>
+                <span className="admin-sync-btn__title">Aggiorna Totem</span>
                 <span className="admin-sync-btn__subtitle">da Excel</span>
               </span>
             </button>
