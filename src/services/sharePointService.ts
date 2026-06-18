@@ -318,18 +318,28 @@ export class SharePointService {
     const client = await this.getClient();
     const encodedTable = encodeURIComponent(tableName);
     const base = this.buildDriveBase(driveId);
+    let firstError: any = null;
     try {
       let req = client.api(`${base}/items/${itemId}/workbook/tables/${encodedTable}/rows/${rowIndex}`);
       if (options.sessionId) {
         req = req.header("workbook-session-id", options.sessionId);
       }
       await req.patch({ values: [values] });
+      return;
     } catch (err) {
-      let req = client.api(`${base}/items/${itemId}/workbook/tables/${encodedTable}/rows/${rowIndex}/range`);
+      firstError = err;
+    }
+
+    try {
+      let req = client.api(`${base}/items/${itemId}/workbook/tables/${encodedTable}/rows/itemAt(index=${rowIndex})`);
       if (options.sessionId) {
         req = req.header("workbook-session-id", options.sessionId);
       }
       await req.patch({ values: [values] });
+    } catch (fallbackErr: any) {
+      const firstMsg = firstError?.body?.error?.message || firstError?.message || "errore aggiornamento riga";
+      const fallbackMsg = fallbackErr?.body?.error?.message || fallbackErr?.message || "errore fallback aggiornamento riga";
+      throw new Error(`${firstMsg}; fallback itemAt: ${fallbackMsg}`);
     }
   }
 

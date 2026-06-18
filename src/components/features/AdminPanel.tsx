@@ -4,6 +4,7 @@ import { SharePointService } from "../../services/sharePointService";
 import { useCachedList } from "../../hooks/useCachedList";
 import { formatSharePointDate } from "../../utils/dateUtils";
 import { SharePointListItem } from "../../types/sharepoint";
+import { SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "../../types/sync";
 
 type ListKind = "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO";
 
@@ -21,6 +22,44 @@ type FieldConfig = {
 
 type FormState = Record<string, string>;
 
+type SyncLogTableRow = {
+  key: string;
+  status: string;
+  statusKey: SyncDetailSection["key"];
+  code: string;
+  reference: string;
+  detail: string;
+  changes: SyncFieldChange[];
+  searchText: string;
+};
+
+const parseSyncLogLabel = (value: string) => {
+  const labelPart = String(value || "").trim();
+  const match = labelPart.match(/^(.*?)\s*\[(colata|lotto)\s+([^\]]+)\]$/i);
+
+  const code = (match?.[1] || labelPart || "-").trim();
+  const referenceType = (match?.[2] || "").trim();
+  const referenceValue = (match?.[3] || "").trim();
+  const reference = referenceType && referenceValue
+    ? `${referenceType.charAt(0).toUpperCase()}${referenceType.slice(1).toLowerCase()} ${referenceValue}`
+    : "-";
+
+  return {
+    code,
+    reference,
+  };
+};
+
+const normalizeSyncLogItem = (item: SyncDetailItem) => {
+  const fallback = parseSyncLogLabel(item.label);
+  return {
+    code: (item.code || fallback.code || "-").trim(),
+    reference: (item.reference || fallback.reference || "-").trim(),
+    detail: (item.detail || "").trim(),
+    changes: item.changes || [],
+  };
+};
+
 type AdminPanelProps = {
   siteId?: string;
   forgiatiListId?: string;
@@ -33,10 +72,10 @@ type AdminPanelProps = {
   onSyncExcel?: (
     listKind: ListKind,
     onProgress?: (msg: string) => void
-  ) => Promise<{ success: boolean; message: string }>;
+  ) => Promise<SyncResult>;
   onSyncTubiFromExcel?: (
     onProgress?: (msg: string) => void
-  ) => Promise<{ success: boolean; message: string }>;
+  ) => Promise<SyncResult>;
 };
 
 const FORGIATI_FIELDS: FieldConfig[] = [
@@ -1143,6 +1182,9 @@ export function AdminPanel({
   const [createMessage, setCreateMessage] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "success" | "error">("idle");
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncDetails, setSyncDetails] = useState<SyncDetailSection[] | null>(null);
+  const [isSyncLogOpen, setIsSyncLogOpen] = useState(false);
+  const [syncLogSearch, setSyncLogSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -2059,22 +2101,80 @@ export function AdminPanel({
     if (!onSyncExcel) return;
     setSyncStatus("syncing");
     setSyncMessage("Avvio sincronizzazione...");
+    setSyncDetails(null);
+    setIsSyncLogOpen(false);
+    setSyncLogSearch("");
     const result = await onSyncExcel(activeList, (msg) => setSyncMessage(msg));
     setSyncStatus(result.success ? "success" : "error");
     setSyncMessage(result.message);
+    setSyncDetails(result.details || null);
   }, [onSyncExcel, activeList]);
 
   const handleSyncTubiFromExcel = useCallback(async () => {
     if (!onSyncTubiFromExcel) return;
     setSyncStatus("syncing");
     setSyncMessage("Avvio sincronizzazione Excel -> SharePoint...");
+    setSyncDetails(null);
+    setIsSyncLogOpen(false);
+    setSyncLogSearch("");
     const result = await onSyncTubiFromExcel((msg) => setSyncMessage(msg));
     setSyncStatus(result.success ? "success" : "error");
     setSyncMessage(result.message);
+    setSyncDetails(result.details || null);
     if (result.success) {
       activeRefresh();
     }
   }, [onSyncTubiFromExcel, activeRefresh]);
+
+  const syncSummary = useMemo(
+    () =>
+      (syncDetails || []).map((section) => ({
+        key: section.key,
+        label: section.label,
+        count: section.items.length,
+      })),
+    [syncDetails]
+  );
+
+  const syncDetailRows = useMemo<SyncLogTableRow[]>(
+    () =>
+      (syncDetails || [])
+        .filter((section) => section.key === "updated" || section.key === "created")
+        .flatMap((section) =>
+          section.items.map((item, index) => {
+            const parsed = normalizeSyncLogItem(item);
+            const detail =
+              parsed.detail ||
+              (section.key === "created" ? "Nuovo articolo inserito" : "Articolo aggiornato");
+
+            return {
+              key: `${section.key}-${index}-${item.label}`,
+              status: section.key === "updated" ? "Aggiornato" : "Creato",
+              statusKey: section.key,
+              code: parsed.code,
+              reference: parsed.reference,
+              detail,
+              changes: parsed.changes,
+              searchText: [
+                parsed.code,
+                parsed.reference,
+                detail,
+                section.label,
+                ...parsed.changes.flatMap((change) => [change.field, change.previous, change.next]),
+              ]
+                .join(" ")
+                .toLowerCase(),
+            };
+          })
+        ),
+    [syncDetails]
+  );
+
+  const filteredSyncDetailRows = useMemo(() => {
+    const term = syncLogSearch.trim().toLowerCase();
+    if (!term) return syncDetailRows;
+    return syncDetailRows.filter((row) => row.searchText.includes(term));
+  }, [syncDetailRows, syncLogSearch]);
 
   const renderField = (field: FieldConfig, form: FormState, onChange: (key: string, val: string) => void) => {
     const isDateField = field.type === "date";
@@ -2196,7 +2296,34 @@ export function AdminPanel({
           className={`alert ${syncStatus === "success" ? "success" : syncStatus === "error" ? "error" : "warning"}`}
           style={{ margin: "12px 0 0" }}
         >
-          {syncMessage}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div style={{ display: "grid", gap: 8 }}>
+              <strong>{syncMessage}</strong>
+              {syncSummary.length > 0 && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {syncSummary.map((item) => (
+                    <span key={item.key} className="pill ghost">
+                      {item.label}: {item.count}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            {syncDetailRows.length > 0 && (
+              <button
+                className="icon-btn"
+                type="button"
+                aria-label="Apri dettaglio sincronizzazione"
+                title="Apri dettaglio sincronizzazione"
+                onClick={() => {
+                  setSyncLogSearch("");
+                  setIsSyncLogOpen(true);
+                }}
+              >
+                📋
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -2386,6 +2513,137 @@ export function AdminPanel({
               <button className="btn primary" onClick={handleCreate} disabled={createStatus === "saving"} type="button">
                 {createStatus === "saving" ? "Creo..." : "Crea nuovo"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isSyncLogOpen && syncDetailRows.length > 0 && (
+        <div className="modal-backdrop blur" role="dialog" aria-modal="true">
+          <div className="modal" style={{ maxWidth: 1120, width: "96%" }}>
+            <div className="modal__header">
+              <div>
+                <p className="eyebrow" style={{ marginBottom: 4 }}>Dettaglio sincronizzazione</p>
+                <h3 style={{ margin: 0 }}>Log aggiornamenti {activeList}</h3>
+                <p className="muted" style={{ margin: "6px 0 0" }}>
+                  Sono mostrati solo gli articoli creati o aggiornati.
+                </p>
+              </div>
+              <button className="icon-btn" aria-label="Chiudi" onClick={() => setIsSyncLogOpen(false)} type="button">✕</button>
+            </div>
+            <div className="modal__body">
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
+                {syncSummary.map((item) => (
+                  <span key={item.key} className="pill ghost">
+                    {item.label}: {item.count}
+                  </span>
+                ))}
+                <span className="pill ghost" style={{ background: "#f8fafc" }}>
+                  Mostrati nel log: {syncDetailRows.length}
+                </span>
+              </div>
+              <div className="admin-search" style={{ marginBottom: 12 }}>
+                <span role="img" aria-label="search">
+                  🔍
+                </span>
+                <input
+                  type="search"
+                  placeholder="Cerca per codice, colata, lotto, campo o valore"
+                  value={syncLogSearch}
+                  onChange={(e) => setSyncLogSearch(e.target.value)}
+                />
+              </div>
+              <div className="table-scroll modal-table">
+                <table className="inventory-table">
+                  <thead>
+                    <tr>
+                      <th scope="col" style={{ width: 140 }}>Azione</th>
+                      <th scope="col" style={{ width: 220 }}>Codice</th>
+                      <th scope="col" style={{ width: 220 }}>Riferimento</th>
+                      <th scope="col">Dettaglio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSyncDetailRows.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="muted" style={{ textAlign: "center" }}>
+                          Nessun risultato nel log
+                        </td>
+                      </tr>
+                    )}
+                    {filteredSyncDetailRows.map((row) => (
+                      <tr key={row.key}>
+                        <td>
+                          <span
+                            className="pill ghost"
+                            style={
+                              row.statusKey === "created"
+                                ? { background: "#dcfce7", color: "#166534", borderColor: "#86efac" }
+                                : { background: "#dbeafe", color: "#1d4ed8", borderColor: "#93c5fd" }
+                            }
+                          >
+                            {row.status}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight: 600 }}>{row.code}</td>
+                        <td>{row.reference}</td>
+                        <td>
+                          <div style={{ display: "grid", gap: 8 }}>
+                            <div style={{ fontWeight: 500 }}>{row.detail}</div>
+                            {row.changes.length > 0 && (
+                              <div style={{ display: "grid", gap: 8 }}>
+                                {row.changes.map((change, index) => (
+                                  <div
+                                    key={`${row.key}-change-${index}`}
+                                    style={{
+                                      display: "grid",
+                                      gap: 6,
+                                      padding: "10px 12px",
+                                      border: "1px solid #e2e8f0",
+                                      borderRadius: 12,
+                                      background: "#f8fafc",
+                                    }}
+                                  >
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", letterSpacing: 0.2 }}>
+                                      {change.field}
+                                    </div>
+                                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                                      <span
+                                        style={{
+                                          fontSize: 12,
+                                          color: "#b91c1c",
+                                          background: "#fef2f2",
+                                          border: "1px solid #fecaca",
+                                          borderRadius: 999,
+                                          padding: "3px 8px",
+                                        }}
+                                      >
+                                        Prima: {change.previous || "-"}
+                                      </span>
+                                      <span
+                                        style={{
+                                          fontSize: 12,
+                                          color: "#166534",
+                                          background: "#f0fdf4",
+                                          border: "1px solid #bbf7d0",
+                                          borderRadius: 999,
+                                          padding: "3px 8px",
+                                        }}
+                                      >
+                                        Dopo: {change.next || "-"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>

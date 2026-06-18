@@ -12,6 +12,7 @@ import { sparkGupsColumns } from "./config/sparkGupsColumns";
 import { filoFlussoColumns } from "./config/filoFlussoColumns";
 import { tuboMeccanicoColumns } from "./config/tuboMeccanicoColumns";
 import { SharePointListItem } from "./types/sharepoint";
+import { SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "./types/sync";
 import { formatSharePointDate } from "./utils/dateUtils";
 import { WebsiteViewer } from "./components/features/WebsiteViewer";
 import { DocumentBrowser } from "./components/features/DocumentBrowser";
@@ -54,11 +55,6 @@ type CartItem = {
   colata?: unknown;
   lottoProg?: string;
   fields: Record<string, unknown>;
-};
-
-type SyncResult = {
-  success: boolean;
-  message: string;
 };
 
 type SyncProgressHandler = (msg: string) => void;
@@ -276,6 +272,9 @@ const tubiExcelColumnFieldMap = (() => {
   const map = buildExcelColumnFieldMap(tubiColumns);
   map.set(normalizeExcelKey("CODICE"), "Title");
   map.set(normalizeExcelKey("CODICE SAM"), "CodiceSAM");
+  map.set(normalizeExcelKey("COD.SAM"), "CodiceSAM");
+  map.set(normalizeExcelKey("COD SAM"), "CodiceSAM");
+  map.set(normalizeExcelKey("CODESAM"), "CodiceSAM");
   map.set(normalizeExcelKey("NORDINE"), "field_2");
   map.set(normalizeExcelKey("N ORDINE"), "field_2");
   map.set(normalizeExcelKey("DATA OD"), "field_3");
@@ -870,10 +869,14 @@ const normalizeDateValue = (value: unknown): string | null => {
   return new Date(t).toISOString();
 };
 
-const buildTubiSyncKey = (title: string, identLotto?: string | null) => {
+const buildTubiSyncKey = (title: string, identLotto?: string | null, colata?: string | null) => {
   const normalizedTitle = normalizeExcelKey(title || "");
+  const normalizedColata = normalizeExcelKey(colata || "");
+  if (normalizedColata) {
+    return `${normalizedTitle}::colata::${normalizedColata}`;
+  }
   const resolvedIdent = formatLottoProg(extractProgLetter(identLotto || "") || identLotto || "A");
-  return `${normalizedTitle}::${normalizeExcelKey(resolvedIdent)}`;
+  return `${normalizedTitle}::lotto::${normalizeExcelKey(resolvedIdent)}`;
 };
 
 const buildProgressiveMapForGroupedItems = <T extends SharePointListItem<Record<string, unknown>>>(items: T[]) => {
@@ -925,8 +928,26 @@ const getResolvedTubiIdentLotto = (
   progressiveMap: Map<string, string>
 ) => formatLottoProg(progressiveMap.get(item.id) || (item.fields as Record<string, unknown>).LottoProgressivo as string | undefined || "A");
 
+const getResolvedTubiColata = (fields: Record<string, unknown>) =>
+  normalizeTrimmedValue(fields.field_18);
+
+const getResolvedTubiCertificato = (fields: Record<string, unknown>) =>
+  normalizeTrimmedValue(fields.field_17);
+
+const getResolvedTubiBolla = (fields: Record<string, unknown>) =>
+  normalizeTrimmedValue(fields.field_15);
+
+const getResolvedTubiOrdine = (fields: Record<string, unknown>) =>
+  normalizeTrimmedValue(fields.field_2);
+
 const getTubiExcelFieldKey = (columnName: string) =>
   tubiExcelColumnFieldMap.get(normalizeExcelKey(columnName || "")) || null;
+
+const isTubiNonBusinessCompareField = (fieldKey: string | null) =>
+  fieldKey === "IdentLotto" ||
+  fieldKey === "LottoProgressivo" ||
+  fieldKey === "Modified" ||
+  fieldKey === "Created";
 
 const normalizeComparableCellValue = (value: string | number | boolean | null | undefined) => {
   if (value === null || value === undefined || value === "") return "";
@@ -943,12 +964,102 @@ const normalizeComparableCellValue = (value: string | number | boolean | null | 
 const buildComparableTubiWorkbookRow = (excelColumns: string[], rowValues: unknown[]) =>
   excelColumns.map((columnName, index) =>
     normalizeComparableCellValue(
-      toExcelCellValueForDateFields(TUBI_DATE_FIELDS, getTubiExcelFieldKey(columnName), rowValues[index] ?? null)
+      (() => {
+        const fieldKey = getTubiExcelFieldKey(columnName);
+        if (isTubiNonBusinessCompareField(fieldKey)) return "";
+        return toExcelCellValueForDateFields(TUBI_DATE_FIELDS, fieldKey, rowValues[index] ?? null);
+      })()
     )
   );
 
 const buildComparableTubiFieldsRow = (excelColumns: string[], fields: Record<string, unknown>) =>
-  buildTubiExcelRow(excelColumns, fields).map((value) => normalizeComparableCellValue(value));
+  excelColumns.map((columnName) => {
+    const fieldKey = getTubiExcelFieldKey(columnName);
+    if (isTubiNonBusinessCompareField(fieldKey)) return "";
+    const rawValue = fieldKey ? fields[fieldKey] : null;
+    return normalizeComparableCellValue(toExcelCellValueForDateFields(TUBI_DATE_FIELDS, fieldKey, rawValue));
+  });
+
+const buildTubiFieldLabelMap = (excelColumns: string[]) => {
+  const map = new Map<string, string>();
+  excelColumns.forEach((columnName) => {
+    const fieldKey = getTubiExcelFieldKey(columnName);
+    if (!fieldKey || isTubiNonBusinessCompareField(fieldKey) || map.has(fieldKey)) return;
+    map.set(fieldKey, String(columnName || fieldKey).replace(/\s+/g, " ").trim());
+  });
+  return map;
+};
+
+type TubiSyncFieldState = {
+  compare: string;
+  display: string;
+};
+
+const formatTubiSyncDisplayValue = (fieldKey: string | null, value: unknown) => {
+  if (value === null || value === undefined || value === "") return "-";
+  if (fieldKey && TUBI_DATE_FIELDS.has(fieldKey)) {
+    const t = getTimeValue(value);
+    if (!t) return "-";
+    return new Date(t).toLocaleDateString("it-IT");
+  }
+  if (typeof value === "boolean") return value ? "Si" : "No";
+  const normalized = normalizeTrimmedValue(value);
+  return normalized || "-";
+};
+
+const buildTubiWorkbookFieldStateMap = (excelColumns: string[], rowValues: unknown[]) => {
+  const map = new Map<string, TubiSyncFieldState>();
+  excelColumns.forEach((columnName, index) => {
+    const fieldKey = getTubiExcelFieldKey(columnName);
+    if (!fieldKey || isTubiNonBusinessCompareField(fieldKey)) return;
+    const rawValue = rowValues[index] ?? null;
+    map.set(fieldKey, {
+      compare: normalizeComparableCellValue(
+        toExcelCellValueForDateFields(TUBI_DATE_FIELDS, fieldKey, rawValue)
+      ),
+      display: formatTubiSyncDisplayValue(fieldKey, rawValue),
+    });
+  });
+  return map;
+};
+
+const buildTubiFieldsFieldStateMap = (excelColumns: string[], fields: Record<string, unknown>) => {
+  const map = new Map<string, TubiSyncFieldState>();
+  excelColumns.forEach((columnName) => {
+    const fieldKey = getTubiExcelFieldKey(columnName);
+    if (!fieldKey || isTubiNonBusinessCompareField(fieldKey)) return;
+    const rawValue = fields[fieldKey] ?? null;
+    map.set(fieldKey, {
+      compare: normalizeComparableCellValue(
+        toExcelCellValueForDateFields(TUBI_DATE_FIELDS, fieldKey, rawValue)
+      ),
+      display: formatTubiSyncDisplayValue(fieldKey, rawValue),
+    });
+  });
+  return map;
+};
+
+const diffComparableTubiFieldMaps = (
+  left: Map<string, TubiSyncFieldState>,
+  right: Map<string, TubiSyncFieldState>,
+  fieldLabelMap: Map<string, string>
+) => {
+  const changed: SyncFieldChange[] = [];
+  fieldLabelMap.forEach((label, fieldKey) => {
+    const previousState = left.get(fieldKey);
+    const nextState = right.get(fieldKey);
+    const previousCompare = previousState?.compare || "";
+    const nextCompare = nextState?.compare || "";
+    if (previousCompare !== nextCompare) {
+      changed.push({
+        field: label,
+        previous: previousState?.display || "-",
+        next: nextState?.display || "-",
+      });
+    }
+  });
+  return changed;
+};
 
 const cloneWorkbookRows = (rows: WorkbookTableRow[]) =>
   rows.map((row) => ({
@@ -1004,9 +1115,9 @@ const buildTubiPayloadFromExcelRow = (excelColumns: string[], rowValues: unknown
     normalizeTrimmedValue(rawByField.get("LottoProgressivo")) ||
     "A";
   const identLotto = formatLottoProg(extractProgLetter(identRaw) || identRaw);
+  const colata = normalizeTrimmedValue(rawByField.get("field_18"));
   const fields: Record<string, unknown> = {
     Title: title,
-    LottoProgressivo: identLotto,
   };
 
   TUBI_SHAREPOINT_TEXT_FIELDS.forEach((fieldKey) => {
@@ -1017,12 +1128,131 @@ const buildTubiPayloadFromExcelRow = (excelColumns: string[], rowValues: unknown
   });
 
   return {
-    key: buildTubiSyncKey(title, identLotto),
+    key: buildTubiSyncKey(title, identLotto, colata),
     title,
     identLotto,
+    colata,
     fields,
   };
 };
+
+const buildTubiMatchKeys = (options: {
+  title: string;
+  identLotto?: string | null;
+  colata?: string | null;
+  certificato?: string | null;
+  bolla?: string | null;
+  ordine?: string | null;
+}) => {
+  const title = normalizeExcelKey(options.title || "");
+  if (!title) return [];
+
+  const lotto = normalizeExcelKey(
+    formatLottoProg(extractProgLetter(options.identLotto || "") || options.identLotto || "A")
+  );
+  const colata = normalizeExcelKey(options.colata || "");
+  const certificato = normalizeExcelKey(options.certificato || "");
+  const bolla = normalizeExcelKey(options.bolla || "");
+  const ordine = normalizeExcelKey(options.ordine || "");
+
+  const keys: string[] = [];
+  const pushKey = (tag: string, ...parts: string[]) => {
+    if (!parts.every(Boolean)) return;
+    keys.push([title, tag, ...parts].join("::"));
+  };
+
+  pushKey("colata-cert-bolla", colata, certificato, bolla);
+  pushKey("colata-cert", colata, certificato);
+  pushKey("colata-bolla", colata, bolla);
+  pushKey("cert-bolla", certificato, bolla);
+  pushKey("colata", colata);
+  pushKey("cert", certificato);
+  pushKey("bolla", bolla);
+  pushKey("ordine", ordine);
+  pushKey("lotto", lotto);
+
+  return Array.from(new Set(keys));
+};
+
+const indexTubiRecordsByMatchKey = <T,>(records: T[], getKeys: (record: T) => string[]) => {
+  const index = new Map<string, T[]>();
+  records.forEach((record) => {
+    getKeys(record).forEach((key) => {
+      const current = index.get(key) || [];
+      current.push(record);
+      index.set(key, current);
+    });
+  });
+  return index;
+};
+
+const findUniqueTubiMatch = <T,>(
+  candidateKeys: string[],
+  index: Map<string, T[]>,
+  isAvailable: (record: T) => boolean
+) => {
+  let ambiguous = false;
+  for (const key of candidateKeys) {
+    const matches = (index.get(key) || []).filter(isAvailable);
+    if (matches.length === 1) {
+      return { match: matches[0], ambiguous: false };
+    }
+    if (matches.length > 1) {
+      ambiguous = true;
+    }
+  }
+  return { match: null as T | null, ambiguous };
+};
+
+const buildPrimaryTubiMatchKey = (options: {
+  title: string;
+  identLotto?: string | null;
+  colata?: string | null;
+  certificato?: string | null;
+  bolla?: string | null;
+  ordine?: string | null;
+}) => {
+  const keys = buildTubiMatchKeys(options);
+  return keys[0] || buildTubiSyncKey(options.title, options.identLotto, options.colata);
+};
+
+const buildTubiLogLabel = (title: string, colata?: string | null, identLotto?: string | null) => {
+  const trimmedColata = normalizeTrimmedValue(colata);
+  if (trimmedColata) {
+    return `${title} [colata ${trimmedColata}]`;
+  }
+  const resolvedIdent = identLotto ? formatLottoProg(identLotto) : "";
+  return resolvedIdent ? `${title} [lotto ${resolvedIdent}]` : title;
+};
+
+const buildTubiReferenceLabel = (colata?: string | null, identLotto?: string | null) => {
+  const trimmedColata = normalizeTrimmedValue(colata);
+  if (trimmedColata) return `Colata ${trimmedColata}`;
+  const resolvedIdent = identLotto ? formatLottoProg(identLotto) : "";
+  return resolvedIdent ? `Lotto ${resolvedIdent}` : "-";
+};
+
+const buildTubiSyncDetailItem = (options: {
+  title: string;
+  colata?: string | null;
+  identLotto?: string | null;
+  detail?: string;
+  changes?: SyncFieldChange[];
+}): SyncDetailItem => ({
+  label: buildTubiLogLabel(options.title, options.colata, options.identLotto),
+  code: options.title,
+  reference: buildTubiReferenceLabel(options.colata, options.identLotto),
+  detail: options.detail,
+  changes: options.changes,
+});
+
+const buildGenericSyncDetailItem = (label: string, detail?: string): SyncDetailItem => ({
+  label,
+  detail,
+});
+
+const buildSyncDetailSections = (sections: SyncDetailSection[]) =>
+  sections.filter((section) => section.items.length > 0);
 
 const buildColataPlaceholder = (lottoProg?: string | null) => {
   const prefix = lottoProg ? `${formatLottoProg(lottoProg)}-` : "";
@@ -5595,10 +5825,39 @@ function AuthenticatedShell() {
       onProgress?.(`Trovati ${spItems.length} articoli. Apertura tabella Excel TUBI...`);
       const { driveId, driveItem, columns, rows: rawRows, dataBodyRange } = await resolveTubiExcelContext();
       const rows = cloneWorkbookRows(rawRows);
-      let effectiveRowCount = dataBodyRange?.rowCount ?? rows.length;
       if (rows.length > 0 && !dataBodyRange) {
         throw new Error("Intervallo dati Excel non disponibile per gli aggiornamenti TUBI.");
       }
+      const fieldLabelMap = buildTubiFieldLabelMap(columns);
+      const excelRecords = rows.reduce<Array<{
+        key: string;
+        title: string;
+        identLotto: string;
+        colata: string | null;
+        fields: Record<string, unknown>;
+        rowIndex: number;
+        matchKeys: string[];
+        comparableFieldMap: Map<string, TubiSyncFieldState>;
+      }>>((acc, row) => {
+        const parsed = buildTubiPayloadFromExcelRow(columns, row.values?.[0] || []);
+        if (!parsed) return acc;
+        acc.push({
+          ...parsed,
+          rowIndex: row.index,
+          matchKeys: buildTubiMatchKeys({
+            title: parsed.title,
+            identLotto: parsed.identLotto,
+            colata: parsed.colata,
+            certificato: getResolvedTubiCertificato(parsed.fields),
+            bolla: getResolvedTubiBolla(parsed.fields),
+            ordine: getResolvedTubiOrdine(parsed.fields),
+          }),
+          comparableFieldMap: buildTubiWorkbookFieldStateMap(columns, row.values?.[0] || []),
+        });
+        return acc;
+      }, []);
+      const excelIndex = indexTubiRecordsByMatchKey(excelRecords, (record) => record.matchKeys);
+      const usedRowIndexes = new Set<number>();
 
       const sortableItems = [...spItems].sort((left, right) => {
         const titleCompare = compareTubiTitle(
@@ -5619,6 +5878,10 @@ function AuthenticatedShell() {
       let created = 0;
       let unchanged = 0;
       let skipped = 0;
+      const updatedLabels: SyncDetailItem[] = [];
+      const createdLabels: SyncDetailItem[] = [];
+      const unchangedLabels: SyncDetailItem[] = [];
+      const skippedLabels: SyncDetailItem[] = [];
 
       try {
         for (let i = 0; i < sortableItems.length; i++) {
@@ -5627,25 +5890,46 @@ function AuthenticatedShell() {
           const title = normalizeTrimmedValue(fields.Title);
           if (!title) {
             skipped++;
+            skippedLabels.push(buildGenericSyncDetailItem("(senza codice)", "Articolo senza CODICE"));
             continue;
           }
 
           const identLotto = getResolvedTubiIdentLotto(item, progressiveMap);
+          const colata = getResolvedTubiColata(fields);
           const excelFields = {
             ...fields,
             IdentLotto: identLotto,
           };
           const nextRowValues = buildTubiExcelRow(columns, excelFields);
-          const nextComparable = buildComparableTubiFieldsRow(columns, excelFields);
-          const rowIndex = findExcelRowIndex(rows, columns, {
-            codice: title,
+          const nextComparableFieldMap = buildTubiFieldsFieldStateMap(columns, excelFields);
+          const matchKeys = buildTubiMatchKeys({
+            title,
             identLotto,
+            colata,
+            certificato: getResolvedTubiCertificato(fields),
+            bolla: getResolvedTubiBolla(fields),
+            ordine: getResolvedTubiOrdine(fields),
           });
+          const matchResult = findUniqueTubiMatch(matchKeys, excelIndex, (record) => !usedRowIndexes.has(record.rowIndex));
 
-          if (rowIndex === null) {
+          if (!matchResult.match && matchResult.ambiguous) {
+            skipped++;
+            skippedLabels.push(
+              buildTubiSyncDetailItem({
+                title,
+                colata,
+                identLotto,
+                detail: "Match Excel ambiguo",
+              })
+            );
+            continue;
+          }
+
+          if (!matchResult.match) {
             const insertAfter = findLastRowIndexByCodice(rows, columns, title, getExcelColumnIndex);
             const insertIndex = insertAfter !== null ? insertAfter + 1 : undefined;
             let cacheUpdated = false;
+            let insertedRowIndex: number | undefined;
             try {
               await sharepointService.appendWorkbookTableRowByItemId(
                 driveItem.id,
@@ -5663,26 +5947,79 @@ function AuthenticatedShell() {
                   { sessionId },
                   driveId
                 );
-                insertWorkbookRowCache(rows, nextRowValues);
+                insertedRowIndex = insertWorkbookRowCache(rows, nextRowValues);
                 cacheUpdated = true;
               } else {
                 throw appendErr;
               }
             }
             if (!cacheUpdated) {
-              insertWorkbookRowCache(rows, nextRowValues, insertIndex);
+              insertedRowIndex = insertWorkbookRowCache(rows, nextRowValues, insertIndex);
             }
-            effectiveRowCount += 1;
+            if (insertedRowIndex !== undefined) {
+              usedRowIndexes.add(insertedRowIndex);
+              const parsedInserted = buildTubiPayloadFromExcelRow(columns, nextRowValues);
+              if (parsedInserted) {
+                const insertedRecord = {
+                  ...parsedInserted,
+                  rowIndex: insertedRowIndex,
+                  matchKeys: buildTubiMatchKeys({
+                    title: parsedInserted.title,
+                    identLotto: parsedInserted.identLotto,
+                    colata: parsedInserted.colata,
+                    certificato: getResolvedTubiCertificato(parsedInserted.fields),
+                    bolla: getResolvedTubiBolla(parsedInserted.fields),
+                    ordine: getResolvedTubiOrdine(parsedInserted.fields),
+                  }),
+                  comparableFieldMap: buildTubiFieldsFieldStateMap(columns, excelFields),
+                };
+                excelRecords.push(insertedRecord);
+                insertedRecord.matchKeys.forEach((key) => {
+                  const current = excelIndex.get(key) || [];
+                  current.push(insertedRecord);
+                  excelIndex.set(key, current);
+                });
+              }
+            }
             created++;
+            createdLabels.push(
+              buildTubiSyncDetailItem({
+                title,
+                colata,
+                identLotto,
+                detail: "Nuovo articolo inserito in Excel",
+              })
+            );
           } else {
-            const currentRow = rows.find((row) => row.index === rowIndex);
-            const currentComparable = buildComparableTubiWorkbookRow(columns, currentRow?.values?.[0] || []);
-            if (areStringListsEqual(currentComparable, nextComparable)) {
+            const currentRecord = matchResult.match;
+            usedRowIndexes.add(currentRecord.rowIndex);
+            const changedFields = diffComparableTubiFieldMaps(
+              currentRecord.comparableFieldMap,
+              nextComparableFieldMap,
+              fieldLabelMap
+            );
+            if (changedFields.length === 0) {
               unchanged++;
+              unchangedLabels.push(
+                buildTubiSyncDetailItem({
+                  title,
+                  colata,
+                  identLotto,
+                  detail: "Nessuna differenza rilevata",
+                })
+              );
             } else {
-              const rowRange = buildRowRangeAddress(dataBodyRange!.address, rowIndex, effectiveRowCount);
+              const rowRange = buildRowRangeAddress(dataBodyRange!.address, currentRecord.rowIndex, rows.length);
               if (!rowRange) {
                 skipped++;
+                skippedLabels.push(
+                  buildTubiSyncDetailItem({
+                    title,
+                    colata,
+                    identLotto,
+                    detail: "Impossibile risolvere la riga Excel",
+                  })
+                );
                 continue;
               }
               await sharepointService.updateWorkbookRangeByAddress(
@@ -5693,8 +6030,22 @@ function AuthenticatedShell() {
                 { sessionId },
                 driveId
               );
-              upsertWorkbookRowCache(rows, rowIndex, nextRowValues);
+              upsertWorkbookRowCache(rows, currentRecord.rowIndex, nextRowValues);
+              currentRecord.fields = {
+                ...currentRecord.fields,
+                ...excelFields,
+              };
+              currentRecord.comparableFieldMap = nextComparableFieldMap;
               updated++;
+              updatedLabels.push(
+                buildTubiSyncDetailItem({
+                  title,
+                  colata,
+                  identLotto,
+                  detail: `${changedFields.length} campi aggiornati`,
+                  changes: changedFields,
+                })
+              );
             }
           }
 
@@ -5714,7 +6065,13 @@ function AuthenticatedShell() {
 
       return {
         success: true,
-        message: `Sincronizzazione TUBI SharePoint -> Excel completata: ${updated} righe aggiornate, ${created} nuove, ${unchanged} invariate, ${skipped} saltate.`,
+        message: `Sincronizzazione TUBI SharePoint -> Excel completata. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}.`,
+        details: buildSyncDetailSections([
+          { key: "updated", label: "Aggiornati", items: updatedLabels },
+          { key: "created", label: "Creati", items: createdLabels },
+          { key: "unchanged", label: "Invariati", items: unchangedLabels },
+          { key: "skipped", label: "Saltati", items: skippedLabels },
+        ]),
       };
     } catch (err: any) {
       console.error("Errore sync TUBI SharePoint -> Excel", err);
@@ -5723,6 +6080,7 @@ function AuthenticatedShell() {
   }, [
     sharepointService,
     tubiListId,
+    tubiExcelTable,
     resolveTubiExcelContext,
   ]);
 
@@ -5741,39 +6099,93 @@ function AuthenticatedShell() {
       const { columns, rows } = await resolveTubiExcelContext();
       const spItems = await sharepointService.listItems<Record<string, unknown>>(tubiListId);
       const progressiveMap = buildProgressiveMapForGroupedItems(spItems);
-      const spIndex = new Map<string, SharePointListItem<Record<string, unknown>>>();
-      spItems.forEach((item) => {
+      const fieldLabelMap = buildTubiFieldLabelMap(columns);
+      const spRecords = spItems.reduce<Array<{
+        item: SharePointListItem<Record<string, unknown>>;
+        title: string;
+        identLotto: string;
+        colata: string | null;
+        fields: Record<string, unknown>;
+        matchKeys: string[];
+        comparableFieldMap: Map<string, TubiSyncFieldState>;
+      }>>((acc, item) => {
         const title = normalizeTrimmedValue((item.fields as Record<string, unknown>).Title);
-        if (!title) return;
-        const key = buildTubiSyncKey(title, getResolvedTubiIdentLotto(item, progressiveMap));
-        if (!spIndex.has(key)) {
-          spIndex.set(key, item);
-        }
-      });
+        if (!title) return acc;
+        const fields = (item.fields as Record<string, unknown>) || {};
+        const identLotto = getResolvedTubiIdentLotto(item, progressiveMap);
+        acc.push({
+          item,
+          title,
+          identLotto,
+          colata: getResolvedTubiColata(fields),
+          fields,
+          matchKeys: buildTubiMatchKeys({
+            title,
+            identLotto,
+            colata: getResolvedTubiColata(fields),
+            certificato: getResolvedTubiCertificato(fields),
+            bolla: getResolvedTubiBolla(fields),
+            ordine: getResolvedTubiOrdine(fields),
+          }),
+          comparableFieldMap: buildTubiFieldsFieldStateMap(columns, {
+            ...fields,
+            IdentLotto: identLotto,
+          }),
+        });
+        return acc;
+      }, []);
+      const spIndex = indexTubiRecordsByMatchKey(spRecords, (record) => record.matchKeys);
 
       let skipped = 0;
       let duplicateExcelRows = 0;
+      const duplicateLabels: SyncDetailItem[] = [];
       const seenExcelKeys = new Set<string>();
       const excelRecords = rows.reduce<Array<{
         key: string;
         title: string;
         identLotto: string;
+        colata: string | null;
         fields: Record<string, unknown>;
-        comparable: string[];
+        matchKeys: string[];
+        comparableFieldMap: Map<string, TubiSyncFieldState>;
       }>>((acc, row) => {
         const parsed = buildTubiPayloadFromExcelRow(columns, row.values?.[0] || []);
         if (!parsed) {
           skipped++;
           return acc;
         }
-        if (seenExcelKeys.has(parsed.key)) {
+        const primaryMatchKey = buildPrimaryTubiMatchKey({
+          title: parsed.title,
+          identLotto: parsed.identLotto,
+          colata: parsed.colata,
+          certificato: getResolvedTubiCertificato(parsed.fields),
+          bolla: getResolvedTubiBolla(parsed.fields),
+          ordine: getResolvedTubiOrdine(parsed.fields),
+        });
+        if (seenExcelKeys.has(primaryMatchKey)) {
           duplicateExcelRows++;
+          duplicateLabels.push(
+            buildTubiSyncDetailItem({
+              title: parsed.title,
+              colata: parsed.colata,
+              identLotto: parsed.identLotto,
+              detail: "Chiave duplicata in Excel",
+            })
+          );
           return acc;
         }
-        seenExcelKeys.add(parsed.key);
+        seenExcelKeys.add(primaryMatchKey);
         acc.push({
           ...parsed,
-          comparable: buildComparableTubiWorkbookRow(columns, row.values?.[0] || []),
+          matchKeys: buildTubiMatchKeys({
+            title: parsed.title,
+            identLotto: parsed.identLotto,
+            colata: parsed.colata,
+            certificato: getResolvedTubiCertificato(parsed.fields),
+            bolla: getResolvedTubiBolla(parsed.fields),
+            ordine: getResolvedTubiOrdine(parsed.fields),
+          }),
+          comparableFieldMap: buildTubiWorkbookFieldStateMap(columns, row.values?.[0] || []),
         });
         return acc;
       }, []);
@@ -5781,24 +6193,94 @@ function AuthenticatedShell() {
       let updated = 0;
       let created = 0;
       let unchanged = 0;
+      const usedItemIds = new Set<string>();
+      const updatedLabels: SyncDetailItem[] = [];
+      const createdLabels: SyncDetailItem[] = [];
+      const unchangedLabels: SyncDetailItem[] = [];
+      const skippedLabels: SyncDetailItem[] = [];
 
       for (let i = 0; i < excelRecords.length; i++) {
         const record = excelRecords[i];
-        const currentItem = spIndex.get(record.key);
-        if (!currentItem) {
-          await sharepointService.createItem<Record<string, unknown>>(tubiListId, record.fields);
-          created++;
-        } else {
-          const currentComparable = buildComparableTubiFieldsRow(columns, {
-            ...(currentItem.fields || {}),
-            IdentLotto: getResolvedTubiIdentLotto(currentItem, progressiveMap),
-          } as Record<string, unknown>);
+        const matchResult = findUniqueTubiMatch(record.matchKeys, spIndex, (candidate) => !usedItemIds.has(candidate.item.id));
+        if (!matchResult.match && matchResult.ambiguous) {
+          skipped++;
+          skippedLabels.push(
+            buildTubiSyncDetailItem({
+              title: record.title,
+              colata: record.colata,
+              identLotto: record.identLotto,
+              detail: "Match SharePoint ambiguo",
+            })
+          );
+          continue;
+        }
 
-          if (areStringListsEqual(currentComparable, record.comparable)) {
+        if (!matchResult.match) {
+          const createdItem = await sharepointService.createItem<Record<string, unknown>>(tubiListId, record.fields);
+          const createdRecord = {
+            item: createdItem,
+            title: record.title,
+            identLotto: record.identLotto,
+            colata: record.colata,
+            fields: createdItem.fields || record.fields,
+            matchKeys: record.matchKeys,
+            comparableFieldMap: buildTubiFieldsFieldStateMap(columns, {
+              ...(createdItem.fields || record.fields),
+              IdentLotto: record.identLotto,
+            }),
+          };
+          usedItemIds.add(createdItem.id);
+          spRecords.push(createdRecord);
+          createdRecord.matchKeys.forEach((key) => {
+            const current = spIndex.get(key) || [];
+            current.push(createdRecord);
+            spIndex.set(key, current);
+          });
+          created++;
+          createdLabels.push(
+            buildTubiSyncDetailItem({
+              title: record.title,
+              colata: record.colata,
+              identLotto: record.identLotto,
+              detail: "Nuovo articolo creato in SharePoint",
+            })
+          );
+        } else {
+          const currentRecord = matchResult.match;
+          usedItemIds.add(currentRecord.item.id);
+          const changedFields = diffComparableTubiFieldMaps(
+            currentRecord.comparableFieldMap,
+            record.comparableFieldMap,
+            fieldLabelMap
+          );
+
+          if (changedFields.length === 0) {
             unchanged++;
+            unchangedLabels.push(
+              buildTubiSyncDetailItem({
+                title: record.title,
+                colata: record.colata,
+                identLotto: record.identLotto,
+                detail: "Nessuna differenza rilevata",
+              })
+            );
           } else {
-            await sharepointService.updateItem<Record<string, unknown>>(tubiListId, currentItem.id, record.fields);
+            await sharepointService.updateItem<Record<string, unknown>>(tubiListId, currentRecord.item.id, record.fields);
+            currentRecord.fields = {
+              ...currentRecord.fields,
+              ...record.fields,
+            };
+            currentRecord.comparableFieldMap = record.comparableFieldMap;
             updated++;
+            updatedLabels.push(
+              buildTubiSyncDetailItem({
+                title: record.title,
+                colata: record.colata,
+                identLotto: record.identLotto,
+                detail: `${changedFields.length} campi aggiornati`,
+                changes: changedFields,
+              })
+            );
           }
         }
 
@@ -5811,10 +6293,16 @@ function AuthenticatedShell() {
 
       clearCacheKeys(["tubi"]);
 
-      const duplicateSuffix = duplicateExcelRows > 0 ? ` ${duplicateExcelRows} righe Excel duplicate ignorate.` : "";
       return {
         success: true,
-        message: `Sincronizzazione TUBI Excel -> SharePoint completata: ${updated} aggiornati, ${created} nuovi, ${unchanged} invariati, ${skipped} righe vuote saltate.${duplicateSuffix}`,
+        message: `Sincronizzazione TUBI Excel -> SharePoint completata. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.`,
+        details: buildSyncDetailSections([
+          { key: "updated", label: "Aggiornati", items: updatedLabels },
+          { key: "created", label: "Creati", items: createdLabels },
+          { key: "unchanged", label: "Invariati", items: unchangedLabels },
+          { key: "skipped", label: "Saltati", items: skippedLabels },
+          { key: "duplicates", label: "Duplicati Excel ignorati", items: duplicateLabels },
+        ]),
       };
     } catch (err: any) {
       console.error("Errore sync TUBI Excel -> SharePoint", err);
@@ -5829,7 +6317,7 @@ function AuthenticatedShell() {
   const handleSyncExcel = useCallback(async (
     listKind: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO",
     onProgress?: (msg: string) => void
-  ): Promise<{ success: boolean; message: string }> => {
+  ): Promise<SyncResult> => {
     if (listKind === "TUBI") {
       return handleSyncTubiSharePointToExcel(onProgress);
     }
