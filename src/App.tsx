@@ -736,6 +736,17 @@ const buildRowRangeAddress = (
   };
 };
 
+const buildRangeAddressBelowTable = (dataBodyAddress: string, rowsToInspect: number) => {
+  const parsed = parseExcelAddress(dataBodyAddress);
+  if (!parsed || rowsToInspect <= 0) return null;
+  const startRow = parsed.endRow + 1;
+  const endRow = startRow + rowsToInspect - 1;
+  return {
+    sheetName: parsed.sheetName,
+    address: `${parsed.startCol}${startRow}:${parsed.endCol}${endRow}`,
+  };
+};
+
 const getExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
   const target = normalizeExcelKey(fieldKey);
   for (let i = 0; i < excelColumns.length; i++) {
@@ -1215,6 +1226,9 @@ const buildPrimaryTubiMatchKey = (options: {
   const keys = buildTubiMatchKeys(options);
   return keys[0] || buildTubiSyncKey(options.title, options.identLotto, options.colata);
 };
+
+const buildTubiLottoIdentityKey = (title: string, identLotto?: string | null) =>
+  `${normalizeExcelKey(title || "")}::lotto::${normalizeExcelKey(formatLottoProg(extractProgLetter(identLotto || "") || identLotto || "A"))}`;
 
 const buildTubiLogLabel = (title: string, colata?: string | null, identLotto?: string | null) => {
   const trimmedColata = normalizeTrimmedValue(colata);
@@ -6096,7 +6110,7 @@ function AuthenticatedShell() {
 
     try {
       onProgress?.("Caricamento righe TUBI da Excel...");
-      const { columns, rows } = await resolveTubiExcelContext();
+      const { columns, rows, dataBodyRange, driveId, driveItem } = await resolveTubiExcelContext();
       const spItems = await sharepointService.listItems<Record<string, unknown>>(tubiListId);
       const progressiveMap = buildProgressiveMapForGroupedItems(spItems);
       const fieldLabelMap = buildTubiFieldLabelMap(columns);
@@ -6107,6 +6121,7 @@ function AuthenticatedShell() {
         colata: string | null;
         fields: Record<string, unknown>;
         matchKeys: string[];
+        lottoIdentityKey: string;
         comparableFieldMap: Map<string, TubiSyncFieldState>;
       }>>((acc, item) => {
         const title = normalizeTrimmedValue((item.fields as Record<string, unknown>).Title);
@@ -6127,6 +6142,7 @@ function AuthenticatedShell() {
             bolla: getResolvedTubiBolla(fields),
             ordine: getResolvedTubiOrdine(fields),
           }),
+          lottoIdentityKey: buildTubiLottoIdentityKey(title, identLotto),
           comparableFieldMap: buildTubiFieldsFieldStateMap(columns, {
             ...fields,
             IdentLotto: identLotto,
@@ -6135,11 +6151,53 @@ function AuthenticatedShell() {
         return acc;
       }, []);
       const spIndex = indexTubiRecordsByMatchKey(spRecords, (record) => record.matchKeys);
+      const spLottoIndex = new Map<string, (typeof spRecords)[number]>();
+      spRecords.forEach((record) => {
+        if (!spLottoIndex.has(record.lottoIdentityKey)) {
+          spLottoIndex.set(record.lottoIdentityKey, record);
+        }
+      });
 
       let skipped = 0;
       let duplicateExcelRows = 0;
       const duplicateLabels: SyncDetailItem[] = [];
       const seenExcelKeys = new Set<string>();
+      const outsideTableLabels: SyncDetailItem[] = [];
+
+      if (dataBodyRange?.address) {
+        const belowTableRange = buildRangeAddressBelowTable(dataBodyRange.address, 15);
+        if (belowTableRange) {
+          try {
+            const belowValues = await sharepointService.getWorkbookRangeValuesByAddress(
+              driveItem.id,
+              belowTableRange.sheetName,
+              belowTableRange.address,
+              {},
+              driveId
+            );
+            belowValues.forEach((rowValues) => {
+              const hasData = rowValues.some((value) => normalizeTrimmedValue(value));
+              if (!hasData) return;
+              const title = normalizeTrimmedValue(rowValues[0]) || "(senza codice)";
+              const ident = formatLottoProg(
+                extractProgLetter(normalizeTrimmedValue(rowValues[1]) || "") ||
+                  normalizeTrimmedValue(rowValues[1]) ||
+                  "A"
+              );
+              outsideTableLabels.push(
+                buildTubiSyncDetailItem({
+                  title,
+                  identLotto: ident,
+                  detail: "Riga valorizzata fuori dalla tabella Excel: non viene sincronizzata",
+                })
+              );
+            });
+          } catch (outsideErr) {
+            console.warn("Impossibile controllare righe fuori tabella TUBI", outsideErr);
+          }
+        }
+      }
+
       const excelRecords = rows.reduce<Array<{
         key: string;
         title: string;
@@ -6147,6 +6205,7 @@ function AuthenticatedShell() {
         colata: string | null;
         fields: Record<string, unknown>;
         matchKeys: string[];
+        lottoIdentityKey: string;
         comparableFieldMap: Map<string, TubiSyncFieldState>;
       }>>((acc, row) => {
         const parsed = buildTubiPayloadFromExcelRow(columns, row.values?.[0] || []);
@@ -6154,14 +6213,7 @@ function AuthenticatedShell() {
           skipped++;
           return acc;
         }
-        const primaryMatchKey = buildPrimaryTubiMatchKey({
-          title: parsed.title,
-          identLotto: parsed.identLotto,
-          colata: parsed.colata,
-          certificato: getResolvedTubiCertificato(parsed.fields),
-          bolla: getResolvedTubiBolla(parsed.fields),
-          ordine: getResolvedTubiOrdine(parsed.fields),
-        });
+        const primaryMatchKey = buildTubiLottoIdentityKey(parsed.title, parsed.identLotto);
         if (seenExcelKeys.has(primaryMatchKey)) {
           duplicateExcelRows++;
           duplicateLabels.push(
@@ -6185,6 +6237,7 @@ function AuthenticatedShell() {
             bolla: getResolvedTubiBolla(parsed.fields),
             ordine: getResolvedTubiOrdine(parsed.fields),
           }),
+          lottoIdentityKey: primaryMatchKey,
           comparableFieldMap: buildTubiWorkbookFieldStateMap(columns, row.values?.[0] || []),
         });
         return acc;
@@ -6201,21 +6254,31 @@ function AuthenticatedShell() {
 
       for (let i = 0; i < excelRecords.length; i++) {
         const record = excelRecords[i];
-        const matchResult = findUniqueTubiMatch(record.matchKeys, spIndex, (candidate) => !usedItemIds.has(candidate.item.id));
-        if (!matchResult.match && matchResult.ambiguous) {
-          skipped++;
-          skippedLabels.push(
-            buildTubiSyncDetailItem({
-              title: record.title,
-              colata: record.colata,
-              identLotto: record.identLotto,
-              detail: "Match SharePoint ambiguo",
-            })
-          );
-          continue;
-        }
+        const lottoMatch = spLottoIndex.get(record.lottoIdentityKey);
+        const strongMatch = findUniqueTubiMatch(
+          record.matchKeys,
+          spIndex,
+          (candidate) => !usedItemIds.has(candidate.item.id)
+        );
+        const shouldCreateNewLot = !lottoMatch;
+        const currentRecord =
+          shouldCreateNewLot
+            ? null
+            : strongMatch.match || (lottoMatch && !usedItemIds.has(lottoMatch.item.id) ? lottoMatch : null);
 
-        if (!matchResult.match) {
+        if (!currentRecord) {
+          if (!shouldCreateNewLot && strongMatch.ambiguous) {
+            skipped++;
+            skippedLabels.push(
+              buildTubiSyncDetailItem({
+                title: record.title,
+                colata: record.colata,
+                identLotto: record.identLotto,
+                detail: "Match SharePoint ambiguo",
+              })
+            );
+            continue;
+          }
           const createdItem = await sharepointService.createItem<Record<string, unknown>>(tubiListId, record.fields);
           const createdRecord = {
             item: createdItem,
@@ -6224,6 +6287,7 @@ function AuthenticatedShell() {
             colata: record.colata,
             fields: createdItem.fields || record.fields,
             matchKeys: record.matchKeys,
+            lottoIdentityKey: record.lottoIdentityKey,
             comparableFieldMap: buildTubiFieldsFieldStateMap(columns, {
               ...(createdItem.fields || record.fields),
               IdentLotto: record.identLotto,
@@ -6236,6 +6300,7 @@ function AuthenticatedShell() {
             current.push(createdRecord);
             spIndex.set(key, current);
           });
+          spLottoIndex.set(createdRecord.lottoIdentityKey, createdRecord);
           created++;
           createdLabels.push(
             buildTubiSyncDetailItem({
@@ -6246,7 +6311,6 @@ function AuthenticatedShell() {
             })
           );
         } else {
-          const currentRecord = matchResult.match;
           usedItemIds.add(currentRecord.item.id);
           const changedFields = diffComparableTubiFieldMaps(
             currentRecord.comparableFieldMap,
@@ -6295,12 +6359,12 @@ function AuthenticatedShell() {
 
       return {
         success: true,
-        message: `Sincronizzazione TUBI Excel -> SharePoint completata. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.`,
+        message: `Sincronizzazione TUBI Excel -> SharePoint completata. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
         details: buildSyncDetailSections([
           { key: "updated", label: "Aggiornati", items: updatedLabels },
           { key: "created", label: "Creati", items: createdLabels },
           { key: "unchanged", label: "Invariati", items: unchangedLabels },
-          { key: "skipped", label: "Saltati", items: skippedLabels },
+          { key: "skipped", label: "Saltati", items: [...skippedLabels, ...outsideTableLabels] },
           { key: "duplicates", label: "Duplicati Excel ignorati", items: duplicateLabels },
         ]),
       };

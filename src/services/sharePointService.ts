@@ -304,6 +304,27 @@ export class SharePointService {
     await req.patch({ values });
   }
 
+  async getWorkbookRangeValuesByAddress(
+    itemId: string,
+    sheetName: string,
+    address: string,
+    options: { sessionId?: string } = {},
+    driveId?: string
+  ): Promise<Array<Array<unknown>>> {
+    if (!itemId) throw new Error("itemId mancante");
+    if (!sheetName) throw new Error("sheetName mancante");
+    if (!address) throw new Error("address mancante");
+    const client = await this.getClient();
+    const base = this.buildDriveBase(driveId);
+    const sheetSegment = encodeURIComponent(sheetName);
+    let req = client.api(`${base}/items/${itemId}/workbook/worksheets/${sheetSegment}/range(address='${address}')`);
+    if (options.sessionId) {
+      req = req.header("workbook-session-id", options.sessionId);
+    }
+    const response = await req.get();
+    return response.values || [];
+  }
+
   async updateWorkbookTableRowByIndex(
     itemId: string,
     tableName: string,
