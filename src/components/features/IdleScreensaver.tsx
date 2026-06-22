@@ -61,7 +61,11 @@ export function IdleScreensaver({
   const getClient = useAuthenticatedGraphClient();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const idleTimerRef = useRef<number | null>(null);
-  const [activeVideo, setActiveVideo] = useState<DriveItem | null>(null);
+  const [playlist, setPlaylist] = useState<DriveItem[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const isActive = playlist.length > 0;
+  const activeVideo = playlist[currentIndex] ?? null;
 
   const normalizedRootPath = useMemo(
     () => (rootPath || "").trim().replace(/^\/+|\/+$/g, ""),
@@ -106,36 +110,41 @@ export function IdleScreensaver({
     [driveId, getClient, siteId]
   );
 
-  const loadScreensaverVideo = useCallback(async () => {
+  const loadScreensaverPlaylist = useCallback(async () => {
     const screensaverPath = normalizedRootPath
       ? `${normalizedRootPath}/${categoryName}`
       : categoryName;
     const items = await listChildren(screensaverPath);
-    const candidate = items.filter((item) => !item.folder && isSupportedVideo(item)).sort(sortByName)[0];
+    const candidates = items.filter((item) => !item.folder && isSupportedVideo(item)).sort(sortByName);
 
-    if (!candidate) {
+    if (candidates.length === 0) {
       throw new Error(`Nessun video supportato trovato nella cartella ${screensaverPath}.`);
     }
 
-    const hydrated = await hydrateItem(candidate.id);
+    const settled = await Promise.allSettled(candidates.map((item) => hydrateItem(item.id)));
+    const playable = settled
+      .filter((result): result is PromiseFulfilledResult<DriveItem> => result.status === "fulfilled")
+      .map((result) => result.value)
+      .filter((item) => item["@microsoft.graph.downloadUrl"]);
 
-    if (!hydrated["@microsoft.graph.downloadUrl"]) {
-      throw new Error("Il video screensaver non espone un downloadUrl.");
+    if (playable.length === 0) {
+      throw new Error("I video screensaver non espongono un downloadUrl.");
     }
 
-    return hydrated;
+    return playable;
   }, [categoryName, hydrateItem, listChildren, normalizedRootPath]);
 
   const wakeUp = useCallback(() => {
     clearIdleTimer();
-    setActiveVideo(null);
+    setPlaylist([]);
+    setCurrentIndex(0);
     onWakeUp?.();
   }, [clearIdleTimer, onWakeUp]);
 
   const armIdleTimer = useCallback(() => {
     clearIdleTimer();
 
-    if (!enabled || activeVideo) return;
+    if (!enabled || isActive) return;
 
     idleTimerRef.current = window.setTimeout(async () => {
       if (document.hidden) {
@@ -149,19 +158,21 @@ export function IdleScreensaver({
       }
 
       try {
-        const nextVideo = await loadScreensaverVideo();
-        setActiveVideo(nextVideo);
+        const nextPlaylist = await loadScreensaverPlaylist();
+        setPlaylist(nextPlaylist);
+        setCurrentIndex(0);
       } catch (err) {
         console.warn("Screensaver non avviato", err);
         armIdleTimer();
       }
     }, idleTimeoutMs);
-  }, [activeVideo, clearIdleTimer, enabled, idleTimeoutMs, loadScreensaverVideo]);
+  }, [clearIdleTimer, enabled, idleTimeoutMs, isActive, loadScreensaverPlaylist]);
 
   useEffect(() => {
     if (!enabled) {
       clearIdleTimer();
-      setActiveVideo(null);
+      setPlaylist([]);
+      setCurrentIndex(0);
       return;
     }
 
@@ -169,7 +180,7 @@ export function IdleScreensaver({
     const wakeEvents = new Set<string>(["pointerdown", "touchstart", "keydown", "wheel"]);
 
     const handleActivity = (event: Event) => {
-      if (activeVideo) {
+      if (isActive) {
         if (wakeEvents.has(event.type)) {
           wakeUp();
         }
@@ -190,7 +201,7 @@ export function IdleScreensaver({
       });
       clearIdleTimer();
     };
-  }, [activeVideo, armIdleTimer, clearIdleTimer, enabled, wakeUp]);
+  }, [armIdleTimer, clearIdleTimer, enabled, isActive, wakeUp]);
 
   useEffect(() => {
     if (!activeVideo || !videoRef.current) return;
@@ -213,6 +224,8 @@ export function IdleScreensaver({
     return null;
   }
 
+  const isSingleVideo = playlist.length <= 1;
+
   return (
     <div
       onClick={wakeUp}
@@ -228,12 +241,17 @@ export function IdleScreensaver({
       }}
     >
       <video
+        key={activeVideo.id}
         ref={videoRef}
         src={activeVideo["@microsoft.graph.downloadUrl"]}
         autoPlay
         muted
-        loop
+        loop={isSingleVideo}
         playsInline
+        onEnded={() => {
+          if (isSingleVideo) return;
+          setCurrentIndex((prev) => (prev + 1) % playlist.length);
+        }}
         style={{
           width: "100%",
           height: "100%",
@@ -275,7 +293,7 @@ export function IdleScreensaver({
           }}
         >
           <div style={{ fontSize: 14, opacity: 0.75, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            Screensaver
+            Screensaver{playlist.length > 1 ? ` · ${currentIndex + 1}/${playlist.length}` : ""}
           </div>
           <div style={{ marginTop: 8, fontSize: 28, lineHeight: 1.05, fontWeight: 900 }}>
             {activeVideo.name}

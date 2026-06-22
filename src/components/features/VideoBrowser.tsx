@@ -16,6 +16,10 @@ type VideoCategory = DriveItem & {
   previewImageUrl?: string;
 };
 
+type VideoItem = DriveItem & {
+  previewImageUrl?: string;
+};
+
 const videoExtensions = new Set([".mp4", ".webm", ".mov", ".m4v"]);
 const previewFieldNeedle = "anteprima";
 
@@ -165,7 +169,7 @@ export function VideoBrowser({
   const getClient = useAuthenticatedGraphClient();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [categories, setCategories] = useState<VideoCategory[]>([]);
-  const [videos, setVideos] = useState<DriveItem[]>([]);
+  const [videos, setVideos] = useState<VideoItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<VideoCategory | null>(null);
   const [activeVideo, setActiveVideo] = useState<DriveItem | null>(null);
   const [loadingCategories, setLoadingCategories] = useState(false);
@@ -211,7 +215,7 @@ export function VideoBrowser({
     [driveId, getClient, siteId]
   );
 
-  const fetchCategoryPreview = useCallback(
+  const fetchItemPreview = useCallback(
     async (itemId: string) => {
       if (!siteId || !driveId) return undefined;
 
@@ -223,7 +227,7 @@ export function VideoBrowser({
 
         return extractPreviewImageUrl(getPreviewFieldValue(fields));
       } catch (err) {
-        console.warn("Anteprima categoria non disponibile", err);
+        console.warn("Anteprima elemento non disponibile", err);
         return undefined;
       }
     },
@@ -241,7 +245,7 @@ export function VideoBrowser({
       const nextCategories = await Promise.all(
         folderItems.map(async (item) => ({
           ...item,
-          previewImageUrl: await fetchCategoryPreview(item.id),
+          previewImageUrl: await fetchItemPreview(item.id),
         }))
       );
       setCategories(nextCategories);
@@ -251,7 +255,7 @@ export function VideoBrowser({
     } finally {
       setLoadingCategories(false);
     }
-  }, [fetchCategoryPreview, hiddenCategoryNamesSet, listChildren, rootPath]);
+  }, [fetchItemPreview, hiddenCategoryNamesSet, listChildren, rootPath]);
 
   useEffect(() => {
     loadCategories();
@@ -267,7 +271,13 @@ export function VideoBrowser({
       try {
         const categoryPath = rootPath ? `${rootPath}/${category.name}` : category.name;
         const items = await listChildren(categoryPath);
-        const nextVideos = items.filter((item) => !item.folder && isSupportedVideo(item)).sort(sortByName);
+        const supportedVideos = items.filter((item) => !item.folder && isSupportedVideo(item)).sort(sortByName);
+        const nextVideos = await Promise.all(
+          supportedVideos.map(async (item) => ({
+            ...item,
+            previewImageUrl: await fetchItemPreview(item.id),
+          }))
+        );
         setSelectedCategory(category);
         setVideos(nextVideos);
       } catch (err: any) {
@@ -277,7 +287,7 @@ export function VideoBrowser({
         setLoadingVideos(false);
       }
     },
-    [listChildren, rootPath]
+    [fetchItemPreview, listChildren, rootPath]
   );
 
   const handleOpenVideo = useCallback(
@@ -348,7 +358,6 @@ export function VideoBrowser({
   if (activeVideo?.["@microsoft.graph.downloadUrl"]) {
     return (
       <div
-        onClick={onExitToHome}
         style={{
           position: "fixed",
           inset: 0,
@@ -357,7 +366,7 @@ export function VideoBrowser({
           overflow: "hidden",
           background: "radial-gradient(circle at top, #1f3554 0%, #09111d 58%, #02050a 100%)",
           boxShadow: "0 28px 80px rgba(2, 6, 23, 0.45)",
-          cursor: "pointer",
+          cursor: "default",
           zIndex: 9999,
         }}
       >
@@ -365,7 +374,10 @@ export function VideoBrowser({
           ref={videoRef}
           src={activeVideo["@microsoft.graph.downloadUrl"]}
           autoPlay
+          controls
+          controlsList="nodownload"
           playsInline
+          onClick={(event) => event.stopPropagation()}
           onError={() => setPlaybackError("Impossibile riprodurre il video selezionato.")}
           style={{ width: "100%", height: "100%", objectFit: "contain", background: "#000" }}
         />
@@ -419,25 +431,6 @@ export function VideoBrowser({
               Home
             </button>
           </div>
-        </div>
-
-        <div
-          style={{
-            position: "absolute",
-            bottom: 24,
-            left: "50%",
-            transform: "translateX(-50%)",
-            background: "rgba(15, 23, 42, 0.72)",
-            color: "#fff",
-            padding: "14px 20px",
-            borderRadius: 999,
-            fontSize: 16,
-            fontWeight: 700,
-            letterSpacing: "0.01em",
-            backdropFilter: "blur(10px)",
-          }}
-        >
-          Tocca lo schermo per uscire e tornare alla home
         </div>
 
         {playbackError && (
@@ -762,7 +755,7 @@ export function VideoBrowser({
             ))}
         </section>
       ) : (
-        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 20 }}>
+        <section style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           {loadingVideos && <StatusCard message="Caricamento video della categoria..." />}
           {!loadingVideos && !hasVideos && (
             <StatusCard message={`Nessun video supportato presente in ${selectedCategory.name}.`} />
@@ -775,38 +768,156 @@ export function VideoBrowser({
                 onClick={() => handleOpenVideo(video)}
                 disabled={openingVideoId === video.id}
                 style={{
-                  ...tileButtonStyle,
+                  ...videoCardStyle,
                   opacity: openingVideoId && openingVideoId !== video.id ? 0.72 : 1,
                   cursor: openingVideoId ? "wait" : "pointer",
                 }}
               >
-                <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center" }}>
-                    <div style={{ ...iconWrapStyle, background: "linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)", color: "#1d4ed8" }}>
-                      <VideoIcon />
+                <div style={videoCoverStyle}>
+                  {video.previewImageUrl && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        backgroundImage: `url("${video.previewImageUrl}")`,
+                        backgroundPosition: "center",
+                        backgroundSize: "cover",
+                        backgroundRepeat: "no-repeat",
+                        transform: "scale(1.02)",
+                      }}
+                    />
+                  )}
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      background: video.previewImageUrl
+                        ? "linear-gradient(135deg, rgba(15, 23, 42, 0.14) 0%, rgba(15, 23, 42, 0.68) 100%)"
+                        : "linear-gradient(135deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.04) 100%)",
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: "relative",
+                      zIndex: 1,
+                      height: "100%",
+                      padding: 22,
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "space-between",
+                      gap: 16,
+                      color: "#fff",
+                    }}
+                  >
+                    <div
+                      style={{
+                        alignSelf: "flex-start",
+                        padding: "8px 12px",
+                        borderRadius: 999,
+                        background: "rgba(255,255,255,0.16)",
+                        border: "1px solid rgba(255,255,255,0.18)",
+                        backdropFilter: "blur(8px)",
+                        fontSize: 12,
+                        fontWeight: 800,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {video.previewImageUrl ? "Anteprima SharePoint" : "Raccolta Video"}
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                      <div
+                        style={{
+                          ...iconWrapStyle,
+                          width: 64,
+                          height: 64,
+                          borderRadius: 20,
+                          background: "rgba(255,255,255,0.15)",
+                          color: "#fff",
+                          backdropFilter: "blur(10px)",
+                        }}
+                      >
+                        <VideoIcon />
+                      </div>
+                      <div style={{ textAlign: "left" }}>
+                        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.82 }}>
+                          Video
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 18, fontWeight: 800, lineHeight: 1.12 }}>
+                          {video.previewImageUrl ? "Anteprima personalizzata attiva" : "Fallback grafico automatico"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={videoCardContentStyle}>
+                  <div style={{ textAlign: "left", minWidth: 0, flex: "1 1 360px" }}>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 800,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        color: "#2563eb",
+                      }}
+                    >
+                      Video
                     </div>
                     <div
                       style={{
-                        padding: "8px 12px",
+                        marginTop: 10,
+                        fontSize: "clamp(28px, 3vw, 40px)",
+                        fontWeight: 900,
+                        color: "#0f172a",
+                        lineHeight: 1.02,
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      {video.name}
+                    </div>
+                    <div style={{ marginTop: 12, color: "#475569", fontSize: 16 }}>
+                      Aggiornato il {formatDateTime(video.lastModifiedDateTime)}
+                    </div>
+                    <div style={{ marginTop: 18, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      <span style={metaChipStyle}>{formatFileSize(video.size)}</span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 14, marginLeft: "auto" }}>
+                    <div
+                      style={{
+                        padding: "12px 16px",
                         borderRadius: 999,
                         background: "#eff6ff",
                         color: "#1d4ed8",
+                        fontSize: 14,
                         fontWeight: 800,
-                        fontSize: 13,
+                        letterSpacing: "0.04em",
                         textTransform: "uppercase",
-                        letterSpacing: "0.05em",
+                        whiteSpace: "nowrap",
                       }}
                     >
                       {openingVideoId === video.id ? "Apertura..." : "Riproduci"}
                     </div>
-                  </div>
-
-                  <div style={{ textAlign: "left" }}>
-                    <div style={{ fontSize: 24, fontWeight: 900, color: "#0f172a", lineHeight: 1.12 }}>{video.name}</div>
-                    <div style={{ marginTop: 12, color: "#475569", fontSize: 15 }}>
-                      Aggiornato il {formatDateTime(video.lastModifiedDateTime)}
+                    <div
+                      style={{
+                        width: 56,
+                        height: 56,
+                        borderRadius: 18,
+                        display: "grid",
+                        placeItems: "center",
+                        background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)",
+                        color: "#fff",
+                        fontSize: 22,
+                        fontWeight: 900,
+                        boxShadow: "0 16px 28px rgba(37, 99, 235, 0.24)",
+                        flexShrink: 0,
+                      }}
+                    >
+                      ▶
                     </div>
-                    <div style={{ marginTop: 4, color: "#64748b", fontSize: 15 }}>{formatFileSize(video.size)}</div>
                   </div>
                 </div>
               </button>
@@ -865,18 +976,38 @@ const overlayButtonStyle: React.CSSProperties = {
   backdropFilter: "blur(10px)",
 };
 
-const tileButtonStyle: React.CSSProperties = {
-  minHeight: 220,
+const videoCardStyle: React.CSSProperties = {
   width: "100%",
   display: "flex",
+  alignItems: "stretch",
+  gap: 0,
+  padding: 0,
+  borderRadius: 32,
+  overflow: "hidden",
+  border: "1px solid rgba(191, 219, 254, 0.95)",
+  background: "linear-gradient(145deg, #ffffff 0%, #f8fbff 100%)",
+  boxShadow: "0 22px 52px rgba(37, 99, 235, 0.10)",
+  cursor: "pointer",
+  flexWrap: "wrap",
+};
+
+const videoCoverStyle: React.CSSProperties = {
+  position: "relative",
+  flex: "0 0 clamp(260px, 28vw, 360px)",
+  minHeight: 220,
+  background: "linear-gradient(135deg, #1e3a8a 0%, #2563eb 55%, #38bdf8 100%)",
+  overflow: "hidden",
+};
+
+const videoCardContentStyle: React.CSSProperties = {
+  flex: "1 1 420px",
+  minWidth: 0,
+  display: "flex",
+  justifyContent: "space-between",
   alignItems: "center",
   gap: 18,
-  padding: "24px 26px",
-  borderRadius: 28,
-  border: "1px solid #dbeafe",
-  background: "linear-gradient(145deg, #ffffff 0%, #f8fbff 100%)",
-  boxShadow: "0 16px 42px rgba(37, 99, 235, 0.08)",
-  cursor: "pointer",
+  padding: "28px 30px",
+  flexWrap: "wrap",
 };
 
 const categoryButtonStyle: React.CSSProperties = {
