@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuthenticatedGraphClient } from "../../hooks/useAuthenticatedGraphClient";
 import { SharePointService } from "../../services/sharePointService";
-import { useCachedList } from "../../hooks/useCachedList";
+import { useCachedList, clearCacheKeys } from "../../hooks/useCachedList";
 import { formatSharePointDate } from "../../utils/dateUtils";
 import { SharePointListItem } from "../../types/sharepoint";
 import { SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "../../types/sync";
 
 type ListKind = "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO";
 
-type FieldType = "text" | "number" | "date" | "textarea";
+type FieldType = "text" | "number" | "decimal" | "date" | "textarea";
 
 type FieldConfig = {
   key: string;
@@ -73,7 +73,8 @@ type AdminPanelProps = {
     listKind: ListKind,
     onProgress?: (msg: string) => void
   ) => Promise<SyncResult>;
-  onSyncTubiFromExcel?: (
+  onSyncFromExcel?: (
+    listKind: Extract<ListKind, "FORGIATI" | "TUBI">,
     onProgress?: (msg: string) => void
   ) => Promise<SyncResult>;
 };
@@ -100,7 +101,7 @@ const FORGIATI_FIELDS: FieldConfig[] = [
   { key: "field_11", label: "Data consegna", type: "date" },
   { key: "field_12", label: "N° cert" },
   { key: "field_14", label: "Tipo Certificazione" },
-  { key: "field_15", label: "Prez. C/D €" },
+  { key: "field_15", label: "Prez. C/D €", type: "decimal" },
   { key: "field_16", label: "Ø Est.(mm)" },
   { key: "field_17", label: "Ø Int.(mm)" },
   { key: "field_18", label: "H Altez. (mm)" },
@@ -331,8 +332,17 @@ const toIsoOrNull = (val?: string): string | null => {
 };
 
 const toNumberOrNull = (val?: string): number | null => {
-  if (val === undefined || val === null || val === "") return null;
-  const parsed = Number(val);
+  if (val === undefined || val === null) return null;
+  const trimmed = String(val).trim();
+  if (!trimmed) return null;
+  const compact = trimmed.replace(/\s+/g, "");
+  const normalized =
+    compact.includes(",") && compact.includes(".")
+      ? compact.lastIndexOf(",") > compact.lastIndexOf(".")
+        ? compact.replace(/\./g, "").replace(",", ".")
+        : compact.replace(/,/g, "")
+      : compact.replace(",", ".");
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 };
 
@@ -940,7 +950,7 @@ const normalizePayload = (form: FormState, fields: FieldConfig[]): Record<string
   fields.forEach((field) => {
     if (field.writable === false || field.sendToSharePoint === false) return;
     const raw = form[field.key];
-    if (field.type === "number") {
+    if (field.type === "number" || field.type === "decimal") {
       payload[field.key] = toNumberOrNull(raw);
       return;
     }
@@ -985,6 +995,16 @@ const getListNoun = (kind: ListKind) => {
   if (kind === "SPARK-GUPS") return "spark gups";
   if (kind === "FILO-FLUSSO") return "filo & flusso";
   return "oring NBR";
+};
+
+const getCacheKeysForList = (kind: ListKind) => {
+  if (kind === "FORGIATI") return ["forgiati", "admin-forgiati"];
+  if (kind === "TUBI") return ["tubi", "admin-tubi"];
+  if (kind === "TUBO-MECCANICO") return ["tubo-meccanico", "admin-tubo-meccanico"];
+  if (kind === "ORING-HNBR") return ["oring-hnbr", "admin-oring-hnbr"];
+  if (kind === "SPARK-GUPS") return ["spark-gups", "admin-spark-gups"];
+  if (kind === "FILO-FLUSSO") return ["filo-flusso", "admin-filo-flusso"];
+  return ["oring-nbr", "admin-oring-nbr"];
 };
 
 const getSortDateKey = (kind: ListKind) => {
@@ -1075,7 +1095,7 @@ export function AdminPanel({
   tuboMeccanicoListId,
   filoFlussoListId,
   onSyncExcel,
-  onSyncTubiFromExcel,
+  onSyncFromExcel,
 }: AdminPanelProps) {
   const getClient = useAuthenticatedGraphClient();
   const forgiatiExcelPath = (import.meta.env.VITE_FORGIATI_EXCEL_PATH || "").trim();
@@ -1635,6 +1655,7 @@ export function AdminPanel({
           ? `Elemento aggiornato; Excel non aggiornato: ${excelError}`
           : "Elemento aggiornato con successo"
       );
+      clearCacheKeys(getCacheKeysForList(activeList));
       activeRefresh();
     } catch (err: any) {
       setUpdateStatus("error");
@@ -1840,6 +1861,7 @@ export function AdminPanel({
       if (selectedId === item.id) {
         setSelectedId(null);
       }
+      clearCacheKeys(getCacheKeysForList(activeList));
       activeRefresh();
     } catch (err: any) {
       setDeleteStatus("error");
@@ -2049,6 +2071,7 @@ export function AdminPanel({
       );
       setCreateForm(buildFormFromItem(null, fields));
       setIsCreateOpen(false);
+      clearCacheKeys(getCacheKeysForList(activeList));
       activeRefresh();
     } catch (err: any) {
       setCreateStatus("error");
@@ -2095,7 +2118,7 @@ export function AdminPanel({
 
   const EXCEL_LISTS: ListKind[] = ["FORGIATI", "TUBI", "TUBO-MECCANICO", "SPARK-GUPS", "FILO-FLUSSO"];
   const hasExcel = EXCEL_LISTS.includes(activeList);
-  const showTubiSyncActions = activeList === "TUBI";
+  const showBidirectionalSyncActions = activeList === "TUBI" || activeList === "FORGIATI";
 
   const handleSyncExcel = useCallback(async () => {
     if (!onSyncExcel) return;
@@ -2110,21 +2133,21 @@ export function AdminPanel({
     setSyncDetails(result.details || null);
   }, [onSyncExcel, activeList]);
 
-  const handleSyncTubiFromExcel = useCallback(async () => {
-    if (!onSyncTubiFromExcel) return;
+  const handleSyncFromExcel = useCallback(async () => {
+    if (!onSyncFromExcel || (activeList !== "TUBI" && activeList !== "FORGIATI")) return;
     setSyncStatus("syncing");
     setSyncMessage("Avvio sincronizzazione Excel -> SharePoint...");
     setSyncDetails(null);
     setIsSyncLogOpen(false);
     setSyncLogSearch("");
-    const result = await onSyncTubiFromExcel((msg) => setSyncMessage(msg));
+    const result = await onSyncFromExcel(activeList, (msg) => setSyncMessage(msg));
     setSyncStatus(result.success ? "success" : "error");
     setSyncMessage(result.message);
     setSyncDetails(result.details || null);
     if (result.success) {
       activeRefresh();
     }
-  }, [onSyncTubiFromExcel, activeRefresh]);
+  }, [onSyncFromExcel, activeList, activeRefresh]);
 
   const syncSummary = useMemo(
     () =>
@@ -2178,10 +2201,11 @@ export function AdminPanel({
 
   const renderField = (field: FieldConfig, form: FormState, onChange: (key: string, val: string) => void) => {
     const isDateField = field.type === "date";
+    const isDecimalField = field.type === "decimal";
     const commonProps = {
       value: form[field.key] ?? "",
       onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(field.key, e.target.value),
-      placeholder: field.placeholder ?? (isDateField ? "gg/mm/aaaa" : undefined),
+      placeholder: field.placeholder ?? (isDateField ? "gg/mm/aaaa" : isDecimalField ? "Es. 645,00" : undefined),
       disabled: field.writable === false,
     };
 
@@ -2205,7 +2229,8 @@ export function AdminPanel({
         </span>
         <input
           type={field.type === "number" ? "number" : "text"}
-          inputMode={isDateField ? "numeric" : undefined}
+          inputMode={isDateField ? "numeric" : field.type === "number" || isDecimalField ? "decimal" : undefined}
+          step={field.type === "number" ? "any" : undefined}
           {...commonProps}
         />
       </label>
@@ -2254,12 +2279,12 @@ export function AdminPanel({
           <span className="pill ghost" style={{ alignSelf: "flex-start", marginTop: 6 }}>
             Ruolo Totem.Admin attivo
           </span>
-          {showTubiSyncActions && hasExcel && onSyncExcel && (
+          {showBidirectionalSyncActions && hasExcel && onSyncExcel && (
             <button
               className="btn admin-sync-btn admin-sync-btn--sp"
               type="button"
               onClick={handleSyncExcel}
-              title="Aggiorna la tabella Excel TUBI usando i dati presenti in SharePoint"
+              title={`Aggiorna la tabella Excel ${activeList} usando i dati presenti in SharePoint`}
             >
               <span className="admin-sync-btn__icon" aria-hidden="true">↘</span>
               <span className="admin-sync-btn__content">
@@ -2268,12 +2293,12 @@ export function AdminPanel({
               </span>
             </button>
           )}
-          {showTubiSyncActions && onSyncTubiFromExcel && (
+          {showBidirectionalSyncActions && onSyncFromExcel && (
             <button
               className="btn admin-sync-btn admin-sync-btn--excel"
               type="button"
-              onClick={handleSyncTubiFromExcel}
-              title="Aggiorna SharePoint TUBI usando i dati presenti nel file Excel"
+              onClick={handleSyncFromExcel}
+              title={`Aggiorna SharePoint ${activeList} usando i dati presenti nel file Excel`}
             >
               <span className="admin-sync-btn__icon" aria-hidden="true">↗</span>
               <span className="admin-sync-btn__content">

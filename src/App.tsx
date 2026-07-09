@@ -169,8 +169,17 @@ const toIsoOrNull = (val: string | undefined): string | null => {
 };
 
 const toNumberOrNull = (val: string | undefined): number | null => {
-  if (val === undefined || val === null || val === "") return null;
-  const n = Number(val);
+  if (val === undefined || val === null) return null;
+  const trimmed = String(val).trim();
+  if (!trimmed) return null;
+  const compact = trimmed.replace(/\s+/g, "");
+  const normalized =
+    compact.includes(",") && compact.includes(".")
+      ? compact.lastIndexOf(",") > compact.lastIndexOf(".")
+        ? compact.replace(/\./g, "").replace(",", ".")
+        : compact.replace(/,/g, "")
+      : compact.replace(",", ".");
+  const n = Number(normalized);
   return Number.isFinite(n) ? n : null;
 };
 
@@ -868,10 +877,54 @@ const TUBI_SHAREPOINT_TEXT_FIELDS = [
 
 const TUBI_SHAREPOINT_DATE_FIELDS = ["field_3", "field_16", "field_21"] as const;
 
+const FORGIATI_SHAREPOINT_TEXT_FIELDS = [
+  "CodiceSAM",
+  "field_1",
+  "field_3",
+  "field_4",
+  "field_6",
+  "field_7",
+  "field_8",
+  "field_9",
+  "GRADOMATERIALE2",
+  "field_10",
+  "field_12",
+  "field_13",
+  "field_14",
+  "field_19",
+  "field_20",
+  "field_24",
+  "field_25",
+] as const;
+
+const FORGIATI_SHAREPOINT_NUMERIC_FIELDS = [
+  "field_5",
+  "field_15",
+  "field_16",
+  "field_17",
+  "field_18",
+  "field_21",
+  "field_22",
+] as const;
+
+const FORGIATI_SHAREPOINT_DATE_FIELDS = ["field_2", "field_11", "field_23"] as const;
+
 const normalizeTrimmedValue = (value: unknown): string | null => {
   if (value === null || value === undefined) return null;
   const trimmed = String(value).trim();
   return trimmed ? trimmed : null;
+};
+
+const normalizeWorkbookScalarValue = (value: unknown) => {
+  return normalizeTrimmedValue(value);
+};
+
+const normalizeWorkbookNumberValue = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  return toNumberOrNull(String(value));
 };
 
 const normalizeDateValue = (value: unknown): string | null => {
@@ -1048,6 +1101,123 @@ const buildTubiFieldsFieldStateMap = (excelColumns: string[], fields: Record<str
     });
   });
   return map;
+};
+
+const getResolvedForgiatiIdentLotto = (
+  item: SharePointListItem<Record<string, unknown>>,
+  progressiveMap: Map<string, string>
+) =>
+  formatLottoProg(
+    progressiveMap.get(item.id) ||
+      ((item.fields as Record<string, unknown>).LottoProgressivo as string | undefined) ||
+      "A"
+  );
+
+const getForgiatiExcelFieldKey = (columnName: string) =>
+  forgiatiExcelColumnFieldMap.get(normalizeExcelKey(columnName || "")) || null;
+
+const isForgiatiNonBusinessCompareField = (fieldKey: string | null) =>
+  fieldKey === "IdentLotto" ||
+  fieldKey === "LottoProgressivo" ||
+  fieldKey === "Modified" ||
+  fieldKey === "Created";
+
+const formatForgiatiSyncDisplayValue = (fieldKey: string | null, value: unknown) => {
+  if (value === null || value === undefined || value === "") return "-";
+  if (fieldKey && FORGIATI_DATE_FIELDS.has(fieldKey)) {
+    const t = getTimeValue(value);
+    if (!t) return "-";
+    return new Date(t).toLocaleDateString("it-IT");
+  }
+  if (typeof value === "boolean") return value ? "Si" : "No";
+  const normalized = normalizeTrimmedValue(value);
+  return normalized || "-";
+};
+
+const buildForgiatiFieldLabelMap = (excelColumns: string[]) => {
+  const map = new Map<string, string>();
+  excelColumns.forEach((columnName) => {
+    const fieldKey = getForgiatiExcelFieldKey(columnName);
+    if (!fieldKey || isForgiatiNonBusinessCompareField(fieldKey) || map.has(fieldKey)) return;
+    map.set(fieldKey, String(columnName || fieldKey).replace(/\s+/g, " ").trim());
+  });
+  return map;
+};
+
+const buildForgiatiWorkbookFieldStateMap = (excelColumns: string[], rowValues: unknown[]) => {
+  const map = new Map<string, TubiSyncFieldState>();
+  excelColumns.forEach((columnName, index) => {
+    const fieldKey = getForgiatiExcelFieldKey(columnName);
+    if (!fieldKey || isForgiatiNonBusinessCompareField(fieldKey)) return;
+    const rawValue = rowValues[index] ?? null;
+    map.set(fieldKey, {
+      compare: normalizeComparableCellValue(
+        toExcelCellValueForDateFields(FORGIATI_DATE_FIELDS, fieldKey, rawValue)
+      ),
+      display: formatForgiatiSyncDisplayValue(fieldKey, rawValue),
+    });
+  });
+  return map;
+};
+
+const buildForgiatiFieldsFieldStateMap = (excelColumns: string[], fields: Record<string, unknown>) => {
+  const map = new Map<string, TubiSyncFieldState>();
+  excelColumns.forEach((columnName) => {
+    const fieldKey = getForgiatiExcelFieldKey(columnName);
+    if (!fieldKey || isForgiatiNonBusinessCompareField(fieldKey)) return;
+    const rawValue = fields[fieldKey] ?? null;
+    map.set(fieldKey, {
+      compare: normalizeComparableCellValue(
+        toExcelCellValueForDateFields(FORGIATI_DATE_FIELDS, fieldKey, rawValue)
+      ),
+      display: formatForgiatiSyncDisplayValue(fieldKey, rawValue),
+    });
+  });
+  return map;
+};
+
+const buildForgiatiLottoIdentityKey = (title: string, identLotto?: string | null) =>
+  `${normalizeExcelKey(title || "")}::lotto::${normalizeExcelKey(
+    formatLottoProg(identLotto || "A")
+  )}`;
+
+const buildForgiatiPayloadFromExcelRow = (excelColumns: string[], rowValues: unknown[]) => {
+  const rawByField = new Map<string, unknown>();
+  excelColumns.forEach((columnName, index) => {
+    const fieldKey = getForgiatiExcelFieldKey(columnName);
+    if (!fieldKey) return;
+    rawByField.set(fieldKey, rowValues[index] ?? null);
+  });
+
+  const title = normalizeTrimmedValue(rawByField.get("Title"));
+  if (!title) return null;
+
+  const identRaw =
+    normalizeTrimmedValue(rawByField.get("IdentLotto")) ||
+    normalizeTrimmedValue(rawByField.get("LottoProgressivo")) ||
+    "A";
+  const identLotto = formatLottoProg(extractProgLetter(identRaw) || identRaw);
+  const fields: Record<string, unknown> = {
+    Title: title,
+  };
+
+  FORGIATI_SHAREPOINT_TEXT_FIELDS.forEach((fieldKey) => {
+    fields[fieldKey] = normalizeWorkbookScalarValue(rawByField.get(fieldKey));
+  });
+  FORGIATI_SHAREPOINT_NUMERIC_FIELDS.forEach((fieldKey) => {
+    fields[fieldKey] = normalizeWorkbookNumberValue(rawByField.get(fieldKey));
+  });
+  FORGIATI_SHAREPOINT_DATE_FIELDS.forEach((fieldKey) => {
+    fields[fieldKey] = normalizeDateValue(rawByField.get(fieldKey));
+  });
+
+  return {
+    key: buildForgiatiLottoIdentityKey(title, identLotto),
+    title,
+    identLotto,
+    colata: normalizeTrimmedValue(rawByField.get("field_13")),
+    fields,
+  };
 };
 
 const diffComparableTubiFieldMaps = (
@@ -5760,6 +5930,73 @@ function AuthenticatedShell() {
     setSaveMessage(null);
   }, [view]);
 
+  const resolveForgiatiExcelContext = useCallback(async () => {
+    if (!sharepointService) {
+      throw new Error("Configurazione SharePoint mancante.");
+    }
+
+    const resolvedPath =
+      forgiatiExcelPath ||
+      (forgiatiExcelFolder && forgiatiExcelFilename
+        ? `${forgiatiExcelFolder}/${forgiatiExcelFilename}`
+        : "");
+    if (!resolvedPath || !forgiatiExcelTable) {
+      throw new Error("Percorso Excel o tabella FORGIATI non configurati.");
+    }
+
+    let resolvedDriveId = forgiatiExcelDriveIdRef.current;
+    if (!resolvedDriveId && forgiatiExcelDriveNameEnv) {
+      resolvedDriveId = await sharepointService.getDriveIdByName(forgiatiExcelDriveNameEnv);
+      forgiatiExcelDriveIdRef.current = resolvedDriveId;
+    }
+    if (!resolvedDriveId && forgiatiExcelDriveNameEnv) {
+      throw new Error(`Libreria "${forgiatiExcelDriveNameEnv}" non trovata`);
+    }
+
+    const driveItem = await sharepointService.getDriveItemByPath(
+      resolvedPath,
+      resolvedDriveId || undefined
+    );
+    const columns = await sharepointService.listWorkbookTableColumnsByItemId(
+      driveItem.id,
+      forgiatiExcelTable,
+      resolvedDriveId || undefined
+    );
+    const rows = await sharepointService.listWorkbookTableRowsByItemId(
+      driveItem.id,
+      forgiatiExcelTable,
+      resolvedDriveId || undefined
+    );
+
+    let dataBodyRange: { address: string; rowCount?: number; columnCount?: number } | null = null;
+    try {
+      dataBodyRange = await sharepointService.getWorkbookTableDataBodyRangeByItemId(
+        driveItem.id,
+        forgiatiExcelTable,
+        resolvedDriveId || undefined
+      );
+    } catch (err) {
+      if (rows.length > 0) {
+        throw err;
+      }
+    }
+
+    return {
+      driveId: resolvedDriveId || undefined,
+      driveItem,
+      columns,
+      rows,
+      dataBodyRange,
+    };
+  }, [
+    sharepointService,
+    forgiatiExcelPath,
+    forgiatiExcelFolder,
+    forgiatiExcelFilename,
+    forgiatiExcelTable,
+    forgiatiExcelDriveNameEnv,
+  ]);
+
   const resolveTubiExcelContext = useCallback(async () => {
     if (!sharepointService) {
       throw new Error("Configurazione SharePoint mancante.");
@@ -5819,6 +6056,270 @@ function AuthenticatedShell() {
     tubiExcelFilename,
     tubiExcelTable,
     tubiExcelDriveNameEnv,
+  ]);
+
+  const handleSyncForgiatiSharePointToExcel = useCallback(async (
+    onProgress?: SyncProgressHandler
+  ): Promise<SyncResult> => {
+    if (!sharepointService) {
+      return { success: false, message: "Configurazione SharePoint mancante." };
+    }
+    if (!forgiatiListId) {
+      return { success: false, message: "List ID FORGIATI non configurato." };
+    }
+
+    try {
+      onProgress?.("Caricamento articoli FORGIATI da SharePoint...");
+      const spItems = await sharepointService.listItems<Record<string, unknown>>(forgiatiListId);
+      const progressiveMap = buildProgressiveMapForGroupedItems(spItems);
+
+      onProgress?.(`Trovati ${spItems.length} articoli. Apertura tabella Excel FORGIATI...`);
+      const { driveId, driveItem, columns, rows: rawRows, dataBodyRange } =
+        await resolveForgiatiExcelContext();
+      const rows = cloneWorkbookRows(rawRows);
+      if (rows.length > 0 && !dataBodyRange) {
+        throw new Error("Intervallo dati Excel non disponibile per gli aggiornamenti FORGIATI.");
+      }
+
+      const fieldLabelMap = buildForgiatiFieldLabelMap(columns);
+      const excelIndex = new Map<
+        string,
+        Array<{
+          title: string;
+          identLotto: string;
+          colata: string | null;
+          rowIndex: number;
+          comparableFieldMap: Map<string, TubiSyncFieldState>;
+        }>
+      >();
+
+      rows.forEach((row) => {
+        const parsed = buildForgiatiPayloadFromExcelRow(columns, row.values?.[0] || []);
+        if (!parsed) return;
+        const current = excelIndex.get(parsed.key) || [];
+        current.push({
+          title: parsed.title,
+          identLotto: parsed.identLotto,
+          colata: parsed.colata,
+          rowIndex: row.index,
+          comparableFieldMap: buildForgiatiWorkbookFieldStateMap(columns, row.values?.[0] || []),
+        });
+        excelIndex.set(parsed.key, current);
+      });
+
+      const sortableItems = [...spItems].sort((left, right) => {
+        const titleCompare = compareTubiTitle(
+          toStr((left.fields as Record<string, unknown>).Title),
+          toStr((right.fields as Record<string, unknown>).Title)
+        );
+        if (titleCompare !== 0) return titleCompare;
+        return getResolvedForgiatiIdentLotto(left, progressiveMap).localeCompare(
+          getResolvedForgiatiIdentLotto(right, progressiveMap),
+          "it"
+        );
+      });
+
+      const sessionId = await sharepointService.createWorkbookSessionByItemId(
+        driveItem.id,
+        { persistChanges: true },
+        driveId
+      );
+
+      let updated = 0;
+      let created = 0;
+      let unchanged = 0;
+      let skipped = 0;
+      const usedRowIndexes = new Set<number>();
+      const updatedLabels: SyncDetailItem[] = [];
+      const createdLabels: SyncDetailItem[] = [];
+      const unchangedLabels: SyncDetailItem[] = [];
+      const skippedLabels: SyncDetailItem[] = [];
+
+      try {
+        for (let i = 0; i < sortableItems.length; i++) {
+          const item = sortableItems[i];
+          const fields = (item.fields || {}) as Record<string, unknown>;
+          const title = normalizeTrimmedValue(fields.Title);
+          if (!title) {
+            skipped++;
+            skippedLabels.push(buildGenericSyncDetailItem("(senza codice)", "Articolo senza CODICE"));
+            continue;
+          }
+
+          const identLotto = getResolvedForgiatiIdentLotto(item, progressiveMap);
+          const colata = normalizeTrimmedValue(fields.field_13);
+          const key = buildForgiatiLottoIdentityKey(title, identLotto);
+          const nextFields = {
+            ...fields,
+            IdentLotto: identLotto,
+          };
+          const nextRowValues = buildForgiatiExcelRow(columns, nextFields);
+          const nextComparableFieldMap = buildForgiatiFieldsFieldStateMap(columns, nextFields);
+          const matches = (excelIndex.get(key) || []).filter(
+            (record) => !usedRowIndexes.has(record.rowIndex)
+          );
+
+          if (matches.length > 1) {
+            skipped++;
+            skippedLabels.push(
+              buildTubiSyncDetailItem({
+                title,
+                colata,
+                identLotto,
+                detail: "Match Excel ambiguo",
+              })
+            );
+            continue;
+          }
+
+          if (matches.length === 0) {
+            const insertAfter = findLastRowIndexByCodice(
+              rows,
+              columns,
+              title,
+              getForgiatiExcelColumnIndex
+            );
+            const insertIndex = insertAfter !== null ? insertAfter + 1 : undefined;
+            let insertedRowIndex: number | undefined;
+            try {
+              await sharepointService.appendWorkbookTableRowByItemId(
+                driveItem.id,
+                forgiatiExcelTable,
+                nextRowValues,
+                { sessionId, index: insertIndex },
+                driveId
+              );
+            } catch (appendErr) {
+              if (insertIndex !== undefined) {
+                await sharepointService.appendWorkbookTableRowByItemId(
+                  driveItem.id,
+                  forgiatiExcelTable,
+                  nextRowValues,
+                  { sessionId },
+                  driveId
+                );
+                insertedRowIndex = insertWorkbookRowCache(rows, nextRowValues);
+              } else {
+                throw appendErr;
+              }
+            }
+            if (insertedRowIndex === undefined) {
+              insertedRowIndex = insertWorkbookRowCache(rows, nextRowValues, insertIndex);
+            }
+            usedRowIndexes.add(insertedRowIndex);
+            const current = excelIndex.get(key) || [];
+            current.push({
+              title,
+              identLotto,
+              colata,
+              rowIndex: insertedRowIndex,
+              comparableFieldMap: nextComparableFieldMap,
+            });
+            excelIndex.set(key, current);
+            created++;
+            createdLabels.push(
+              buildTubiSyncDetailItem({
+                title,
+                colata,
+                identLotto,
+                detail: "Nuovo articolo inserito in Excel",
+              })
+            );
+          } else {
+            const currentRecord = matches[0];
+            usedRowIndexes.add(currentRecord.rowIndex);
+            const changedFields = diffComparableTubiFieldMaps(
+              currentRecord.comparableFieldMap,
+              nextComparableFieldMap,
+              fieldLabelMap
+            );
+            if (changedFields.length === 0) {
+              unchanged++;
+              unchangedLabels.push(
+                buildTubiSyncDetailItem({
+                  title,
+                  colata,
+                  identLotto,
+                  detail: "Nessuna differenza rilevata",
+                })
+              );
+            } else {
+              const rowRange = buildRowRangeAddress(
+                dataBodyRange!.address,
+                currentRecord.rowIndex,
+                rows.length
+              );
+              if (!rowRange) {
+                skipped++;
+                skippedLabels.push(
+                  buildTubiSyncDetailItem({
+                    title,
+                    colata,
+                    identLotto,
+                    detail: "Impossibile risolvere la riga Excel",
+                  })
+                );
+                continue;
+              }
+              await sharepointService.updateWorkbookRangeByAddress(
+                driveItem.id,
+                rowRange.sheetName,
+                rowRange.address,
+                [nextRowValues],
+                { sessionId },
+                driveId
+              );
+              upsertWorkbookRowCache(rows, currentRecord.rowIndex, nextRowValues);
+              currentRecord.comparableFieldMap = nextComparableFieldMap;
+              updated++;
+              updatedLabels.push(
+                buildTubiSyncDetailItem({
+                  title,
+                  colata,
+                  identLotto,
+                  detail: `${changedFields.length} campi aggiornati`,
+                  changes: changedFields,
+                })
+              );
+            }
+          }
+
+          if ((i + 1) % 10 === 0) {
+            onProgress?.(
+              `SharePoint -> Excel FORGIATI: ${updated} aggiornati, ${created} nuovi, ${unchanged} invariati (${i + 1}/${sortableItems.length})...`
+            );
+          }
+        }
+      } finally {
+        try {
+          await sharepointService.closeWorkbookSessionByItemId(driveItem.id, sessionId, driveId);
+        } catch (closeErr) {
+          console.warn("Errore chiusura sessione Excel sync FORGIATI", closeErr);
+        }
+      }
+
+      return {
+        success: true,
+        message: `Sincronizzazione FORGIATI SharePoint -> Excel completata. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}.`,
+        details: buildSyncDetailSections([
+          { key: "updated", label: "Aggiornati", items: updatedLabels },
+          { key: "created", label: "Creati", items: createdLabels },
+          { key: "unchanged", label: "Invariati", items: unchangedLabels },
+          { key: "skipped", label: "Saltati", items: skippedLabels },
+        ]),
+      };
+    } catch (err: any) {
+      console.error("Errore sync FORGIATI SharePoint -> Excel", err);
+      return {
+        success: false,
+        message: `Errore sync FORGIATI SharePoint -> Excel: ${err?.message || "errore sconosciuto"}`,
+      };
+    }
+  }, [
+    sharepointService,
+    forgiatiListId,
+    forgiatiExcelTable,
+    resolveForgiatiExcelContext,
   ]);
 
   const handleSyncTubiSharePointToExcel = useCallback(async (
@@ -6378,10 +6879,276 @@ function AuthenticatedShell() {
     resolveTubiExcelContext,
   ]);
 
+  const handleSyncForgiatiExcelToSharePoint = useCallback(async (
+    onProgress?: SyncProgressHandler
+  ): Promise<SyncResult> => {
+    if (!sharepointService) {
+      return { success: false, message: "Configurazione SharePoint mancante." };
+    }
+    if (!forgiatiListId) {
+      return { success: false, message: "List ID FORGIATI non configurato." };
+    }
+
+    try {
+      onProgress?.("Caricamento righe FORGIATI da Excel...");
+      const { columns, rows, dataBodyRange, driveId, driveItem } = await resolveForgiatiExcelContext();
+      const spItems = await sharepointService.listItems<Record<string, unknown>>(forgiatiListId);
+      const progressiveMap = buildProgressiveMapForGroupedItems(spItems);
+      const fieldLabelMap = buildForgiatiFieldLabelMap(columns);
+      const spIndex = new Map<
+        string,
+        Array<{
+          item: SharePointListItem<Record<string, unknown>>;
+          comparableFieldMap: Map<string, TubiSyncFieldState>;
+        }>
+      >();
+
+      spItems.forEach((item) => {
+        const fields = (item.fields || {}) as Record<string, unknown>;
+        const title = normalizeTrimmedValue(fields.Title);
+        if (!title) return;
+        const identLotto = getResolvedForgiatiIdentLotto(item, progressiveMap);
+        const key = buildForgiatiLottoIdentityKey(title, identLotto);
+        const current = spIndex.get(key) || [];
+        current.push({
+          item,
+          comparableFieldMap: buildForgiatiFieldsFieldStateMap(columns, {
+            ...fields,
+            IdentLotto: identLotto,
+          }),
+        });
+        spIndex.set(key, current);
+      });
+
+      let skipped = 0;
+      let duplicateExcelRows = 0;
+      const duplicateLabels: SyncDetailItem[] = [];
+      const outsideTableLabels: SyncDetailItem[] = [];
+      const seenExcelKeys = new Set<string>();
+
+      if (dataBodyRange?.address) {
+        const belowTableRange = buildRangeAddressBelowTable(dataBodyRange.address, 15);
+        if (belowTableRange) {
+          try {
+            const belowValues = await sharepointService.getWorkbookRangeValuesByAddress(
+              driveItem.id,
+              belowTableRange.sheetName,
+              belowTableRange.address,
+              {},
+              driveId
+            );
+            belowValues.forEach((rowValues) => {
+              const parsed = buildForgiatiPayloadFromExcelRow(columns, rowValues);
+              if (!parsed) return;
+              outsideTableLabels.push(
+                buildTubiSyncDetailItem({
+                  title: parsed.title,
+                  colata: parsed.colata,
+                  identLotto: parsed.identLotto,
+                  detail: "Riga valorizzata fuori dalla tabella Excel: non viene sincronizzata",
+                })
+              );
+            });
+          } catch (outsideErr) {
+            console.warn("Impossibile controllare righe fuori tabella FORGIATI", outsideErr);
+          }
+        }
+      }
+
+      const excelRecords = rows.reduce<Array<{
+        key: string;
+        title: string;
+        identLotto: string;
+        colata: string | null;
+        fields: Record<string, unknown>;
+        comparableFieldMap: Map<string, TubiSyncFieldState>;
+      }>>((acc, row) => {
+        const parsed = buildForgiatiPayloadFromExcelRow(columns, row.values?.[0] || []);
+        if (!parsed) {
+          skipped++;
+          return acc;
+        }
+        if (seenExcelKeys.has(parsed.key)) {
+          duplicateExcelRows++;
+          duplicateLabels.push(
+            buildTubiSyncDetailItem({
+              title: parsed.title,
+              colata: parsed.colata,
+              identLotto: parsed.identLotto,
+              detail: "Chiave duplicata in Excel",
+            })
+          );
+          return acc;
+        }
+        seenExcelKeys.add(parsed.key);
+        acc.push({
+          ...parsed,
+          comparableFieldMap: buildForgiatiWorkbookFieldStateMap(columns, row.values?.[0] || []),
+        });
+        return acc;
+      }, []);
+
+      let updated = 0;
+      let created = 0;
+      let unchanged = 0;
+      const usedItemIds = new Set<string>();
+      const updatedLabels: SyncDetailItem[] = [];
+      const createdLabels: SyncDetailItem[] = [];
+      const unchangedLabels: SyncDetailItem[] = [];
+      const skippedLabels: SyncDetailItem[] = [];
+
+      for (let i = 0; i < excelRecords.length; i++) {
+        const record = excelRecords[i];
+        try {
+          const matches = (spIndex.get(record.key) || []).filter(
+            (candidate) => !usedItemIds.has(candidate.item.id)
+          );
+
+          if (matches.length > 1) {
+            skipped++;
+            skippedLabels.push(
+              buildTubiSyncDetailItem({
+                title: record.title,
+                colata: record.colata,
+                identLotto: record.identLotto,
+                detail: "Match SharePoint ambiguo",
+              })
+            );
+            continue;
+          }
+
+          if (matches.length === 0) {
+            const createdItem = await sharepointService.createItem<Record<string, unknown>>(
+              forgiatiListId,
+              record.fields
+            );
+            usedItemIds.add(createdItem.id);
+            const current = spIndex.get(record.key) || [];
+            current.push({
+              item: createdItem,
+              comparableFieldMap: buildForgiatiFieldsFieldStateMap(columns, {
+                ...(createdItem.fields || record.fields),
+                IdentLotto: record.identLotto,
+              }),
+            });
+            spIndex.set(record.key, current);
+            created++;
+            createdLabels.push(
+              buildTubiSyncDetailItem({
+                title: record.title,
+                colata: record.colata,
+                identLotto: record.identLotto,
+                detail: "Nuovo articolo creato in SharePoint",
+              })
+            );
+          } else {
+            const currentRecord = matches[0];
+            usedItemIds.add(currentRecord.item.id);
+            const changedFields = diffComparableTubiFieldMaps(
+              currentRecord.comparableFieldMap,
+              record.comparableFieldMap,
+              fieldLabelMap
+            );
+            if (changedFields.length === 0) {
+              unchanged++;
+              unchangedLabels.push(
+                buildTubiSyncDetailItem({
+                  title: record.title,
+                  colata: record.colata,
+                  identLotto: record.identLotto,
+                  detail: "Nessuna differenza rilevata",
+                })
+              );
+            } else {
+              await sharepointService.updateItem<Record<string, unknown>>(
+                forgiatiListId,
+                currentRecord.item.id,
+                record.fields
+              );
+              currentRecord.comparableFieldMap = record.comparableFieldMap;
+              updated++;
+              updatedLabels.push(
+                buildTubiSyncDetailItem({
+                  title: record.title,
+                  colata: record.colata,
+                  identLotto: record.identLotto,
+                  detail: `${changedFields.length} campi aggiornati`,
+                  changes: changedFields,
+                })
+              );
+            }
+          }
+        } catch (rowErr: any) {
+          const message = rowErr?.message || "Errore SharePoint in creazione/aggiornamento";
+          console.error("Errore sync FORGIATI Excel -> SharePoint su record", {
+            title: record.title,
+            identLotto: record.identLotto,
+            colata: record.colata,
+            fields: record.fields,
+            error: rowErr,
+          });
+          skipped++;
+          skippedLabels.push(
+            buildTubiSyncDetailItem({
+              title: record.title,
+              colata: record.colata,
+              identLotto: record.identLotto,
+              detail: message,
+            })
+          );
+          continue;
+        }
+
+        if ((i + 1) % 10 === 0) {
+          onProgress?.(
+            `Excel -> SharePoint FORGIATI: ${updated} aggiornati, ${created} nuovi, ${unchanged} invariati (${i + 1}/${excelRecords.length})...`
+          );
+        }
+      }
+
+      clearCacheKeys(["forgiati", "admin-forgiati"]);
+
+      return {
+        success: true,
+        message: `Sincronizzazione FORGIATI Excel -> SharePoint completata. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
+        details: buildSyncDetailSections([
+          { key: "updated", label: "Aggiornati", items: updatedLabels },
+          { key: "created", label: "Creati", items: createdLabels },
+          { key: "unchanged", label: "Invariati", items: unchangedLabels },
+          { key: "skipped", label: "Saltati", items: [...skippedLabels, ...outsideTableLabels] },
+          { key: "duplicates", label: "Duplicati Excel ignorati", items: duplicateLabels },
+        ]),
+      };
+    } catch (err: any) {
+      console.error("Errore sync FORGIATI Excel -> SharePoint", err);
+      return {
+        success: false,
+        message: `Errore sync FORGIATI Excel -> SharePoint: ${err?.message || "errore sconosciuto"}`,
+      };
+    }
+  }, [
+    sharepointService,
+    forgiatiListId,
+    resolveForgiatiExcelContext,
+  ]);
+
+  const handleSyncFromExcel = useCallback(async (
+    listKind: "FORGIATI" | "TUBI",
+    onProgress?: SyncProgressHandler
+  ): Promise<SyncResult> => {
+    if (listKind === "FORGIATI") {
+      return handleSyncForgiatiExcelToSharePoint(onProgress);
+    }
+    return handleSyncTubiExcelToSharePoint(onProgress);
+  }, [handleSyncForgiatiExcelToSharePoint, handleSyncTubiExcelToSharePoint]);
+
   const handleSyncExcel = useCallback(async (
     listKind: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO",
     onProgress?: (msg: string) => void
   ): Promise<SyncResult> => {
+    if (listKind === "FORGIATI") {
+      return handleSyncForgiatiSharePointToExcel(onProgress);
+    }
     if (listKind === "TUBI") {
       return handleSyncTubiSharePointToExcel(onProgress);
     }
@@ -6564,6 +7331,7 @@ function AuthenticatedShell() {
       return { success: false, message: `Errore: ${err?.message || "Errore sync Excel"}` };
     }
   }, [
+    handleSyncForgiatiSharePointToExcel,
     handleSyncTubiSharePointToExcel,
     sharepointService,
     forgiatiListId, forgiatiExcelPath, forgiatiExcelFolder, forgiatiExcelFilename, forgiatiExcelTable, forgiatiExcelDriveNameEnv,
@@ -7478,7 +8246,7 @@ function AuthenticatedShell() {
               tuboMeccanicoListId={tuboMeccanicoListId}
               filoFlussoListId={filoFlussoListId}
               onSyncExcel={handleSyncExcel}
-              onSyncTubiFromExcel={handleSyncTubiExcelToSharePoint}
+              onSyncFromExcel={handleSyncFromExcel}
             />
           </main>
         </div>
