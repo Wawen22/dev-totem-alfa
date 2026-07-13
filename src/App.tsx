@@ -483,6 +483,7 @@ const tuboMeccanicoExcelColumnFieldMap = (() => {
   map.set(normalizeExcelKey("GIACENZA MM"), "field_17");
   map.set(normalizeExcelKey("DATA PRELIEVO"), "field_18");
   map.set(normalizeExcelKey("UTILIZZATO PER COMM MM"), "field_19");
+  map.set(normalizeExcelKey("LOTTO"), "IdentLotto"); // colonna Excel si chiama "LOTTO"
   map.set(normalizeExcelKey("IDENTLOTTO"), "IdentLotto");
   map.set(normalizeExcelKey("IDENT LOTTO"), "IdentLotto");
   map.set(normalizeExcelKey("LOTTO PROGRESSIVO"), "LottoProgressivo");
@@ -4135,7 +4136,6 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
   const [newLotCodiceSam, setNewLotCodiceSam] = useState("");
   const [lotSaveStatus, setLotSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [lotSaveMessage, setLotSaveMessage] = useState<string | null>(null);
-  const RESET_VALUE = 0;
 
   const service = useMemo(() => {
     if (!siteId) return null;
@@ -4351,6 +4351,19 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
       return trimmed ? trimmed : null;
     };
 
+    // Preserva il tipo nativo restituito da Graph: le colonne numeriche di
+    // SharePoint (P., Q.tà, Lungh., Ø Est., SP, Prezzo, ...) tornano come number
+    // e vanno rispedite come number, non come stringa, altrimenti SharePoint
+    // rifiuta la POST con "General exception while processing". I testi restano
+    // testi e i booleani booleani.
+    const normalizeScalarValue = (val: unknown): unknown => {
+      if (val === null || val === undefined) return null;
+      if (typeof val === "number") return Number.isFinite(val) ? val : null;
+      if (typeof val === "boolean") return val;
+      const trimmed = String(val).trim();
+      return trimmed ? trimmed : null;
+    };
+
     const ordineValue = normalizeTextValue(ordine !== undefined ? ordine : (sourceFields as any).field_2);
     const dataOrdineValue = dataOrdine !== undefined ? dataOrdine : normalizeDateValue((sourceFields as any).field_3);
     const codiceSamValue = normalizeTextValue(codiceSam !== undefined ? codiceSam : (sourceFields as any).field_1);
@@ -4413,12 +4426,20 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
         return;
       }
 
-      // Reset specific fields for new lot
+      // NON inviare le giacenze (field_16 Giacenza Amm., field_17 Giacenza,
+      // field_19 Utilizzato per comm.) alla creazione del lotto. Su questa lista
+      // sono colonne che rifiutano il valore inviato (tipo testo o calcolate):
+      // inserirle fa fallire la POST con "General exception while processing".
+      // Un nuovo lotto parte senza giacenza — proprio come gli articoli che si
+      // creano correttamente, il cui item di origine non porta queste chiavi.
       if (key === "field_16" || key === "field_17" || key === "field_19") {
-        payload[key] = RESET_VALUE;
         return;
       }
-      if (key === "field_18") {
+      // field_12 (DATA CONSEGNA) e field_18 (DATA PRELIEVO) sono colonne data:
+      // un nuovo lotto non ha ancora consegna/prelievo, quindi le resettiamo a
+      // null. Evita anche di inviare una data come testo grezzo alla colonna
+      // DateTime di SharePoint (causa di "General exception while processing").
+      if (key === "field_12" || key === "field_18") {
         payload[key] = null;
         return;
       }
@@ -4428,7 +4449,7 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
         return;
       }
 
-      payload[key] = normalizeTextValue(value);
+      payload[key] = normalizeScalarValue(value);
     });
 
     if (!("field_14" in payload)) payload.field_14 = normalizeTextValue(colata);

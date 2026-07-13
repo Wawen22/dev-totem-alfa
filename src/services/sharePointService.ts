@@ -59,7 +59,43 @@ export class SharePointService {
 
       return { id: response.id, fields: response.fields };
     } catch (err: any) {
-      const msg = err?.body?.error?.message || err?.message || "Errore creazione elemento";
+      // Il GraphError espone il corpo della risposta in `err.body` (di solito una
+      // stringa JSON). Lo interpretiamo per estrarre codice/messaggio/dettagli e
+      // logghiamo l'errore completo insieme ai campi inviati per diagnosticare i
+      // rifiuti di tipo colonna (es. "General exception while processing").
+      let parsedBody: any = err?.body;
+      if (typeof parsedBody === "string") {
+        try {
+          parsedBody = JSON.parse(parsedBody);
+        } catch {
+          /* body non JSON: lasciamo la stringa originale */
+        }
+      }
+      const graphError = parsedBody?.error;
+      const innerMsg =
+        graphError?.message ||
+        parsedBody?.["odata.error"]?.message?.value ||
+        err?.message;
+      // Riepilogo tipo di ogni campo inviato (utile per capire quale colonna
+      // SharePoint rifiuta: es. una data/numero/lookup con tipo inatteso).
+      const fieldTypes = Object.fromEntries(
+        Object.entries(fields as Record<string, unknown>).map(([k, v]) => [
+          k,
+          v === null ? "null" : Array.isArray(v) ? "array" : typeof v,
+        ])
+      );
+      console.error("Errore createItem SharePoint", {
+        listId,
+        statusCode: err?.statusCode,
+        code: graphError?.code || err?.code,
+        message: innerMsg,
+        innerError: graphError?.innerError,
+        body: parsedBody,
+        fieldTypes,
+        fieldsJson: JSON.stringify(fields),
+        fields,
+      });
+      const msg = innerMsg || "Errore creazione elemento";
       throw new Error(msg);
     }
   }
