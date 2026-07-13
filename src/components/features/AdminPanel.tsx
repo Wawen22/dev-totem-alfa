@@ -74,7 +74,7 @@ type AdminPanelProps = {
     onProgress?: (msg: string) => void
   ) => Promise<SyncResult>;
   onSyncFromExcel?: (
-    listKind: Extract<ListKind, "FORGIATI" | "TUBI">,
+    listKind: Extract<ListKind, "FORGIATI" | "TUBI" | "TUBO-MECCANICO">,
     onProgress?: (msg: string) => void
   ) => Promise<SyncResult>;
 };
@@ -2118,7 +2118,7 @@ export function AdminPanel({
 
   const EXCEL_LISTS: ListKind[] = ["FORGIATI", "TUBI", "TUBO-MECCANICO", "SPARK-GUPS", "FILO-FLUSSO"];
   const hasExcel = EXCEL_LISTS.includes(activeList);
-  const showBidirectionalSyncActions = activeList === "TUBI" || activeList === "FORGIATI";
+  const showBidirectionalSyncActions = activeList === "TUBI" || activeList === "FORGIATI" || activeList === "TUBO-MECCANICO";
 
   const handleSyncExcel = useCallback(async () => {
     if (!onSyncExcel) return;
@@ -2134,7 +2134,7 @@ export function AdminPanel({
   }, [onSyncExcel, activeList]);
 
   const handleSyncFromExcel = useCallback(async () => {
-    if (!onSyncFromExcel || (activeList !== "TUBI" && activeList !== "FORGIATI")) return;
+    if (!onSyncFromExcel || (activeList !== "TUBI" && activeList !== "FORGIATI" && activeList !== "TUBO-MECCANICO")) return;
     setSyncStatus("syncing");
     setSyncMessage("Avvio sincronizzazione Excel -> SharePoint...");
     setSyncDetails(null);

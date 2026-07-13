@@ -910,6 +910,29 @@ const FORGIATI_SHAREPOINT_NUMERIC_FIELDS = [
 
 const FORGIATI_SHAREPOINT_DATE_FIELDS = ["field_2", "field_11", "field_23"] as const;
 
+const TUBO_MECCANICO_SHAREPOINT_TEXT_FIELDS = [
+  "field_1",
+  "field_4",
+  "field_10",
+  "field_11",
+  "field_13",
+  "field_14",
+] as const;
+
+const TUBO_MECCANICO_SHAREPOINT_NUMERIC_FIELDS = [
+  "field_5",
+  "field_6",
+  "field_7",
+  "field_8",
+  "field_9",
+  "field_15",
+  "field_16",
+  "field_17",
+  "field_19",
+] as const;
+
+const TUBO_MECCANICO_SHAREPOINT_DATE_FIELDS = ["field_3", "field_12", "field_18"] as const;
+
 const normalizeTrimmedValue = (value: unknown): string | null => {
   if (value === null || value === undefined) return null;
   const trimmed = String(value).trim();
@@ -1102,6 +1125,126 @@ const buildTubiFieldsFieldStateMap = (excelColumns: string[], fields: Record<str
     });
   });
   return map;
+};
+
+const getResolvedTuboMeccanicoIdentLotto = (
+  item: SharePointListItem<Record<string, unknown>>,
+  progressiveMap: Map<string, string>
+) =>
+  formatLottoProg(
+    progressiveMap.get(item.id) ||
+      ((item.fields as Record<string, unknown>).LottoProgressivo as string | undefined) ||
+      "A"
+  );
+
+const getTuboMeccanicoExcelFieldKey = (columnName: string) =>
+  tuboMeccanicoExcelColumnFieldMap.get(normalizeExcelKey(columnName || "")) || null;
+
+const isTuboMeccanicoNonBusinessCompareField = (fieldKey: string | null) =>
+  fieldKey === "IdentLotto" ||
+  fieldKey === "LottoProgressivo" ||
+  fieldKey === "Modified" ||
+  fieldKey === "Created";
+
+const formatTuboMeccanicoSyncDisplayValue = (fieldKey: string | null, value: unknown) => {
+  if (value === null || value === undefined || value === "") return "-";
+  if (fieldKey && TUBO_MECCANICO_DATE_FIELDS.has(fieldKey)) {
+    const t = getTimeValue(value);
+    if (!t) return "-";
+    return new Date(t).toLocaleDateString("it-IT");
+  }
+  if (typeof value === "boolean") return value ? "Si" : "No";
+  const normalized = normalizeTrimmedValue(value);
+  return normalized || "-";
+};
+
+const buildTuboMeccanicoFieldLabelMap = (excelColumns: string[]) => {
+  const map = new Map<string, string>();
+  excelColumns.forEach((columnName) => {
+    const fieldKey = getTuboMeccanicoExcelFieldKey(columnName);
+    if (!fieldKey || isTuboMeccanicoNonBusinessCompareField(fieldKey) || map.has(fieldKey)) return;
+    map.set(fieldKey, String(columnName || fieldKey).replace(/\s+/g, " ").trim());
+  });
+  return map;
+};
+
+const buildTuboMeccanicoWorkbookFieldStateMap = (excelColumns: string[], rowValues: unknown[]) => {
+  const map = new Map<string, TubiSyncFieldState>();
+  excelColumns.forEach((columnName, index) => {
+    const fieldKey = getTuboMeccanicoExcelFieldKey(columnName);
+    if (!fieldKey || isTuboMeccanicoNonBusinessCompareField(fieldKey)) return;
+    const rawValue = rowValues[index] ?? null;
+    map.set(fieldKey, {
+      compare: normalizeComparableCellValue(
+        toExcelCellValueForDateFields(TUBO_MECCANICO_DATE_FIELDS, fieldKey, rawValue)
+      ),
+      display: formatTuboMeccanicoSyncDisplayValue(fieldKey, rawValue),
+    });
+  });
+  return map;
+};
+
+const buildTuboMeccanicoFieldsFieldStateMap = (
+  excelColumns: string[],
+  fields: Record<string, unknown>
+) => {
+  const map = new Map<string, TubiSyncFieldState>();
+  excelColumns.forEach((columnName) => {
+    const fieldKey = getTuboMeccanicoExcelFieldKey(columnName);
+    if (!fieldKey || isTuboMeccanicoNonBusinessCompareField(fieldKey)) return;
+    const rawValue = fields[fieldKey] ?? null;
+    map.set(fieldKey, {
+      compare: normalizeComparableCellValue(
+        toExcelCellValueForDateFields(TUBO_MECCANICO_DATE_FIELDS, fieldKey, rawValue)
+      ),
+      display: formatTuboMeccanicoSyncDisplayValue(fieldKey, rawValue),
+    });
+  });
+  return map;
+};
+
+const buildTuboMeccanicoLottoIdentityKey = (title: string, identLotto?: string | null) =>
+  `${normalizeExcelKey(title || "")}::lotto::${normalizeExcelKey(
+    formatLottoProg(identLotto || "A")
+  )}`;
+
+const buildTuboMeccanicoPayloadFromExcelRow = (excelColumns: string[], rowValues: unknown[]) => {
+  const rawByField = new Map<string, unknown>();
+  excelColumns.forEach((columnName, index) => {
+    const fieldKey = getTuboMeccanicoExcelFieldKey(columnName);
+    if (!fieldKey) return;
+    rawByField.set(fieldKey, rowValues[index] ?? null);
+  });
+
+  const title = normalizeTrimmedValue(rawByField.get("Title"));
+  if (!title) return null;
+
+  const identRaw =
+    normalizeTrimmedValue(rawByField.get("IdentLotto")) ||
+    normalizeTrimmedValue(rawByField.get("LottoProgressivo")) ||
+    "A";
+  const identLotto = formatLottoProg(extractProgLetter(identRaw) || identRaw);
+  const fields: Record<string, unknown> = {
+    Title: title,
+  };
+
+  TUBO_MECCANICO_SHAREPOINT_TEXT_FIELDS.forEach((fieldKey) => {
+    fields[fieldKey] = normalizeWorkbookScalarValue(rawByField.get(fieldKey));
+  });
+  TUBO_MECCANICO_SHAREPOINT_NUMERIC_FIELDS.forEach((fieldKey) => {
+    fields[fieldKey] = normalizeWorkbookNumberValue(rawByField.get(fieldKey));
+  });
+  TUBO_MECCANICO_SHAREPOINT_DATE_FIELDS.forEach((fieldKey) => {
+    fields[fieldKey] = normalizeDateValue(rawByField.get(fieldKey));
+  });
+
+  return {
+    key: buildTuboMeccanicoLottoIdentityKey(title, identLotto),
+    title,
+    identLotto,
+    colata: normalizeTrimmedValue(rawByField.get("field_14")),
+    fields,
+  };
 };
 
 const getResolvedForgiatiIdentLotto = (
@@ -4280,16 +4423,6 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
     [progressiveMap]
   );
 
-  const existingColate = useMemo(() => {
-    const set = new Set<string>();
-    if (!lotSelection) return set;
-    lotSelection.items.forEach((itm) => {
-      const val = toStr((itm.fields as any).field_14).trim().toLowerCase();
-      if (val) set.add(val);
-    });
-    return set;
-  }, [lotSelection]);
-
   const selectedItemsCount = Object.keys(selectedItems).length;
 
   useEffect(() => {
@@ -4469,13 +4602,6 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
 
     const normalized = newLotColata.trim();
     if (!normalized) return;
-    const normalizedLower = normalized.toLowerCase();
-    if (existingColate.has(normalizedLower)) {
-      setLotSaveStatus("error");
-      setLotSaveMessage("Inserisci un N° colata diverso dai lotti esistenti.");
-      return;
-    }
-
     const baseItem = lotSelection.items[0];
     if (!baseItem) return;
 
@@ -4589,9 +4715,7 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
   };
 
   const normalizedNewLot = newLotColata.trim();
-  const normalizedNewLotLower = normalizedNewLot.toLowerCase();
-  const isDuplicateLot = normalizedNewLot.length > 0 && existingColate.has(normalizedNewLotLower);
-  const canCreateLot = Boolean(normalizedNewLot) && !isDuplicateLot && lotSaveStatus !== "saving";
+  const canCreateLot = Boolean(normalizedNewLot) && lotSaveStatus !== "saving";
   const isMultiLotSelection = Boolean(lotSelection && lotSelection.items.length > 1);
 
   const handleApplyLotSelection = () => {
@@ -4883,7 +5007,7 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
                       setLotSaveStatus("idle");
                       setLotSaveMessage(null);
                     }}
-                    placeholder="Inserisci un valore diverso dai lotti esistenti"
+                    placeholder="Inserisci il numero colata"
                   />
                 </label>
                 <label className="field">
@@ -4934,9 +5058,6 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
                   {lotSaveStatus === "saving" ? "Creo..." : "Crea lotto"}
                 </button>
               </div>
-              {newLotColata && isDuplicateLot && (
-                <p className="muted" style={{ marginTop: 6 }}>Valore già presente tra le colate esistenti.</p>
-              )}
               {lotSaveMessage && (
                 <div className={`alert ${lotSaveStatus === "success" ? "success" : lotSaveStatus === "error" ? "error" : "warning"}`} style={{ marginTop: 10 }}>
                   {lotSaveMessage}
@@ -6079,6 +6200,73 @@ function AuthenticatedShell() {
     tubiExcelDriveNameEnv,
   ]);
 
+  const resolveTuboMeccanicoExcelContext = useCallback(async () => {
+    if (!sharepointService) {
+      throw new Error("Configurazione SharePoint mancante.");
+    }
+
+    const resolvedPath =
+      tuboMeccanicoExcelPath ||
+      (tuboMeccanicoExcelFolder && tuboMeccanicoExcelFilename
+        ? `${tuboMeccanicoExcelFolder}/${tuboMeccanicoExcelFilename}`
+        : "");
+    if (!resolvedPath || !tuboMeccanicoExcelTable) {
+      throw new Error("Percorso Excel o tabella TUBO-MECCANICO non configurati.");
+    }
+
+    let resolvedDriveId = tuboMeccanicoExcelDriveIdRef.current;
+    if (!resolvedDriveId && tuboMeccanicoExcelDriveNameEnv) {
+      resolvedDriveId = await sharepointService.getDriveIdByName(tuboMeccanicoExcelDriveNameEnv);
+      tuboMeccanicoExcelDriveIdRef.current = resolvedDriveId;
+    }
+    if (!resolvedDriveId && tuboMeccanicoExcelDriveNameEnv) {
+      throw new Error(`Libreria "${tuboMeccanicoExcelDriveNameEnv}" non trovata`);
+    }
+
+    const driveItem = await sharepointService.getDriveItemByPath(
+      resolvedPath,
+      resolvedDriveId || undefined
+    );
+    const columns = await sharepointService.listWorkbookTableColumnsByItemId(
+      driveItem.id,
+      tuboMeccanicoExcelTable,
+      resolvedDriveId || undefined
+    );
+    const rows = await sharepointService.listWorkbookTableRowsByItemId(
+      driveItem.id,
+      tuboMeccanicoExcelTable,
+      resolvedDriveId || undefined
+    );
+
+    let dataBodyRange: { address: string; rowCount?: number; columnCount?: number } | null = null;
+    try {
+      dataBodyRange = await sharepointService.getWorkbookTableDataBodyRangeByItemId(
+        driveItem.id,
+        tuboMeccanicoExcelTable,
+        resolvedDriveId || undefined
+      );
+    } catch (err) {
+      if (rows.length > 0) {
+        throw err;
+      }
+    }
+
+    return {
+      driveId: resolvedDriveId || undefined,
+      driveItem,
+      columns,
+      rows,
+      dataBodyRange,
+    };
+  }, [
+    sharepointService,
+    tuboMeccanicoExcelPath,
+    tuboMeccanicoExcelFolder,
+    tuboMeccanicoExcelFilename,
+    tuboMeccanicoExcelTable,
+    tuboMeccanicoExcelDriveNameEnv,
+  ]);
+
   const handleSyncForgiatiSharePointToExcel = useCallback(async (
     onProgress?: SyncProgressHandler
   ): Promise<SyncResult> => {
@@ -7153,15 +7341,278 @@ function AuthenticatedShell() {
     resolveForgiatiExcelContext,
   ]);
 
+  const handleSyncTuboMeccanicoExcelToSharePoint = useCallback(async (
+    onProgress?: SyncProgressHandler
+  ): Promise<SyncResult> => {
+    if (!sharepointService) {
+      return { success: false, message: "Configurazione SharePoint mancante." };
+    }
+    if (!tuboMeccanicoListId) {
+      return { success: false, message: "List ID TUBO-MECCANICO non configurato." };
+    }
+
+    try {
+      onProgress?.("Caricamento righe TUBO-MECCANICO da Excel...");
+      const { columns, rows, dataBodyRange, driveId, driveItem } =
+        await resolveTuboMeccanicoExcelContext();
+      const spItems = await sharepointService.listItems<Record<string, unknown>>(tuboMeccanicoListId);
+      const progressiveMap = buildProgressiveMapForGroupedItems(spItems);
+      const fieldLabelMap = buildTuboMeccanicoFieldLabelMap(columns);
+      const spIndex = new Map<
+        string,
+        Array<{
+          item: SharePointListItem<Record<string, unknown>>;
+          comparableFieldMap: Map<string, TubiSyncFieldState>;
+        }>
+      >();
+
+      spItems.forEach((item) => {
+        const fields = (item.fields || {}) as Record<string, unknown>;
+        const title = normalizeTrimmedValue(fields.Title);
+        if (!title) return;
+        const identLotto = getResolvedTuboMeccanicoIdentLotto(item, progressiveMap);
+        const key = buildTuboMeccanicoLottoIdentityKey(title, identLotto);
+        const current = spIndex.get(key) || [];
+        current.push({
+          item,
+          comparableFieldMap: buildTuboMeccanicoFieldsFieldStateMap(columns, {
+            ...fields,
+            IdentLotto: identLotto,
+          }),
+        });
+        spIndex.set(key, current);
+      });
+
+      let skipped = 0;
+      let duplicateExcelRows = 0;
+      const duplicateLabels: SyncDetailItem[] = [];
+      const outsideTableLabels: SyncDetailItem[] = [];
+      const seenExcelKeys = new Set<string>();
+
+      if (dataBodyRange?.address) {
+        const belowTableRange = buildRangeAddressBelowTable(dataBodyRange.address, 15);
+        if (belowTableRange) {
+          try {
+            const belowValues = await sharepointService.getWorkbookRangeValuesByAddress(
+              driveItem.id,
+              belowTableRange.sheetName,
+              belowTableRange.address,
+              {},
+              driveId
+            );
+            belowValues.forEach((rowValues) => {
+              const parsed = buildTuboMeccanicoPayloadFromExcelRow(columns, rowValues);
+              if (!parsed) return;
+              outsideTableLabels.push(
+                buildTubiSyncDetailItem({
+                  title: parsed.title,
+                  colata: parsed.colata,
+                  identLotto: parsed.identLotto,
+                  detail: "Riga valorizzata fuori dalla tabella Excel: non viene sincronizzata",
+                })
+              );
+            });
+          } catch (outsideErr) {
+            console.warn("Impossibile controllare righe fuori tabella TUBO-MECCANICO", outsideErr);
+          }
+        }
+      }
+
+      const excelRecords = rows.reduce<Array<{
+        key: string;
+        title: string;
+        identLotto: string;
+        colata: string | null;
+        fields: Record<string, unknown>;
+        comparableFieldMap: Map<string, TubiSyncFieldState>;
+      }>>((acc, row) => {
+        const parsed = buildTuboMeccanicoPayloadFromExcelRow(columns, row.values?.[0] || []);
+        if (!parsed) {
+          skipped++;
+          return acc;
+        }
+        if (seenExcelKeys.has(parsed.key)) {
+          duplicateExcelRows++;
+          duplicateLabels.push(
+            buildTubiSyncDetailItem({
+              title: parsed.title,
+              colata: parsed.colata,
+              identLotto: parsed.identLotto,
+              detail: "Chiave duplicata in Excel",
+            })
+          );
+          return acc;
+        }
+        seenExcelKeys.add(parsed.key);
+        acc.push({
+          ...parsed,
+          comparableFieldMap: buildTuboMeccanicoWorkbookFieldStateMap(
+            columns,
+            row.values?.[0] || []
+          ),
+        });
+        return acc;
+      }, []);
+
+      let updated = 0;
+      let created = 0;
+      let unchanged = 0;
+      const usedItemIds = new Set<string>();
+      const updatedLabels: SyncDetailItem[] = [];
+      const createdLabels: SyncDetailItem[] = [];
+      const unchangedLabels: SyncDetailItem[] = [];
+      const skippedLabels: SyncDetailItem[] = [];
+
+      for (let i = 0; i < excelRecords.length; i++) {
+        const record = excelRecords[i];
+        try {
+          const matches = (spIndex.get(record.key) || []).filter(
+            (candidate) => !usedItemIds.has(candidate.item.id)
+          );
+
+          if (matches.length > 1) {
+            skipped++;
+            skippedLabels.push(
+              buildTubiSyncDetailItem({
+                title: record.title,
+                colata: record.colata,
+                identLotto: record.identLotto,
+                detail: "Match SharePoint ambiguo",
+              })
+            );
+            continue;
+          }
+
+          if (matches.length === 0) {
+            const createdItem = await sharepointService.createItem<Record<string, unknown>>(
+              tuboMeccanicoListId,
+              record.fields
+            );
+            usedItemIds.add(createdItem.id);
+            const current = spIndex.get(record.key) || [];
+            current.push({
+              item: createdItem,
+              comparableFieldMap: buildTuboMeccanicoFieldsFieldStateMap(columns, {
+                ...(createdItem.fields || record.fields),
+                IdentLotto: record.identLotto,
+              }),
+            });
+            spIndex.set(record.key, current);
+            created++;
+            createdLabels.push(
+              buildTubiSyncDetailItem({
+                title: record.title,
+                colata: record.colata,
+                identLotto: record.identLotto,
+                detail: "Nuovo articolo creato in SharePoint",
+              })
+            );
+          } else {
+            const currentRecord = matches[0];
+            usedItemIds.add(currentRecord.item.id);
+            const changedFields = diffComparableTubiFieldMaps(
+              currentRecord.comparableFieldMap,
+              record.comparableFieldMap,
+              fieldLabelMap
+            );
+            if (changedFields.length === 0) {
+              unchanged++;
+              unchangedLabels.push(
+                buildTubiSyncDetailItem({
+                  title: record.title,
+                  colata: record.colata,
+                  identLotto: record.identLotto,
+                  detail: "Nessuna differenza rilevata",
+                })
+              );
+            } else {
+              await sharepointService.updateItem<Record<string, unknown>>(
+                tuboMeccanicoListId,
+                currentRecord.item.id,
+                record.fields
+              );
+              currentRecord.comparableFieldMap = record.comparableFieldMap;
+              updated++;
+              updatedLabels.push(
+                buildTubiSyncDetailItem({
+                  title: record.title,
+                  colata: record.colata,
+                  identLotto: record.identLotto,
+                  detail: `${changedFields.length} campi aggiornati`,
+                  changes: changedFields,
+                })
+              );
+            }
+          }
+        } catch (rowErr: any) {
+          const message = rowErr?.message || "Errore SharePoint in creazione/aggiornamento";
+          console.error("Errore sync TUBO-MECCANICO Excel -> SharePoint su record", {
+            title: record.title,
+            identLotto: record.identLotto,
+            colata: record.colata,
+            fields: record.fields,
+            error: rowErr,
+          });
+          skipped++;
+          skippedLabels.push(
+            buildTubiSyncDetailItem({
+              title: record.title,
+              colata: record.colata,
+              identLotto: record.identLotto,
+              detail: message,
+            })
+          );
+        }
+
+        if ((i + 1) % 10 === 0) {
+          onProgress?.(
+            `Excel -> SharePoint TUBO-MECCANICO: ${updated} aggiornati, ${created} nuovi, ${unchanged} invariati (${i + 1}/${excelRecords.length})...`
+          );
+        }
+      }
+
+      clearCacheKeys(["tubo-meccanico", "admin-tubo-meccanico"]);
+
+      return {
+        success: true,
+        message: `Sincronizzazione TUBO-MECCANICO Excel -> SharePoint completata. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
+        details: buildSyncDetailSections([
+          { key: "updated", label: "Aggiornati", items: updatedLabels },
+          { key: "created", label: "Creati", items: createdLabels },
+          { key: "unchanged", label: "Invariati", items: unchangedLabels },
+          { key: "skipped", label: "Saltati", items: [...skippedLabels, ...outsideTableLabels] },
+          { key: "duplicates", label: "Duplicati Excel ignorati", items: duplicateLabels },
+        ]),
+      };
+    } catch (err: any) {
+      console.error("Errore sync TUBO-MECCANICO Excel -> SharePoint", err);
+      return {
+        success: false,
+        message: `Errore sync TUBO-MECCANICO Excel -> SharePoint: ${err?.message || "errore sconosciuto"}`,
+      };
+    }
+  }, [
+    sharepointService,
+    tuboMeccanicoListId,
+    resolveTuboMeccanicoExcelContext,
+  ]);
+
   const handleSyncFromExcel = useCallback(async (
-    listKind: "FORGIATI" | "TUBI",
+    listKind: "FORGIATI" | "TUBI" | "TUBO-MECCANICO",
     onProgress?: SyncProgressHandler
   ): Promise<SyncResult> => {
     if (listKind === "FORGIATI") {
       return handleSyncForgiatiExcelToSharePoint(onProgress);
     }
+    if (listKind === "TUBO-MECCANICO") {
+      return handleSyncTuboMeccanicoExcelToSharePoint(onProgress);
+    }
     return handleSyncTubiExcelToSharePoint(onProgress);
-  }, [handleSyncForgiatiExcelToSharePoint, handleSyncTubiExcelToSharePoint]);
+  }, [
+    handleSyncForgiatiExcelToSharePoint,
+    handleSyncTubiExcelToSharePoint,
+    handleSyncTuboMeccanicoExcelToSharePoint,
+  ]);
 
   const handleSyncExcel = useCallback(async (
     listKind: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO",
