@@ -48,7 +48,10 @@ export class SharePointService {
 
       const request = client.api(requestPath);
       const response = requestPath === initialPath
-        ? await request.expand("fields").top(999).orderby("createdDateTime desc").get()
+        // Evitiamo $orderby lato SharePoint: sulle liste grandi può forzare una
+        // scansione oltre la list view threshold. I consumatori ordinano già i
+        // record localmente quando l'ordine è significativo.
+        ? await request.expand("fields").top(999).get()
         : await request.get();
       const items = (response.value || []).map((item: any) => ({
         id: item.id,
