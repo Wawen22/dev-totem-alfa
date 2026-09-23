@@ -7098,6 +7098,23 @@ function AuthenticatedShell() {
       onProgress?.("Caricamento righe FORGIATI da Excel...");
       const { columns, rows, dataBodyRange, driveId, driveItem } = await resolveForgiatiExcelContext();
       const spItems = await sharepointService.listItems<Record<string, unknown>>(forgiatiListId);
+      const sharePointColumns = await sharepointService.listColumns(forgiatiListId);
+      const sharePointColumnNames = new Set(sharePointColumns.map((column) => column.name));
+      const requiredSyncColumns = [
+        "Title",
+        "IdentLotto",
+        ...FORGIATI_SHAREPOINT_TEXT_FIELDS,
+        ...FORGIATI_SHAREPOINT_NUMERIC_FIELDS,
+        ...FORGIATI_SHAREPOINT_DATE_FIELDS,
+      ];
+      const missingSyncColumns = Array.from(new Set(requiredSyncColumns)).filter(
+        (fieldName) => !sharePointColumnNames.has(fieldName)
+      );
+      if (missingSyncColumns.length > 0) {
+        throw new Error(
+          `Colonne SharePoint mancanti o con nome interno diverso: ${missingSyncColumns.join(", ")}`
+        );
+      }
       const progressiveMap = buildProgressiveMapForGroupedItems(spItems);
       const fieldLabelMap = buildForgiatiFieldLabelMap(columns);
       const spIndex = new Map<
@@ -7203,6 +7220,7 @@ function AuthenticatedShell() {
       const createdLabels: SyncDetailItem[] = [];
       const unchangedLabels: SyncDetailItem[] = [];
       const skippedLabels: SyncDetailItem[] = [];
+      let consecutiveWriteErrors = 0;
 
       for (let i = 0; i < excelRecords.length; i++) {
         const record = excelRecords[i];
@@ -7263,6 +7281,7 @@ function AuthenticatedShell() {
                 detail: "Nuovo articolo creato in SharePoint",
               })
             );
+            consecutiveWriteErrors = 0;
           } else {
             const currentRecord = matches[0];
             usedItemIds.add(currentRecord.item.id);
@@ -7294,6 +7313,7 @@ function AuthenticatedShell() {
                     detail: "Identificativo lotto allineato",
                   })
                 );
+                consecutiveWriteErrors = 0;
               } else {
                 unchanged++;
                 unchangedLabels.push(
@@ -7332,6 +7352,12 @@ function AuthenticatedShell() {
               detail: message,
             })
           );
+          consecutiveWriteErrors += 1;
+          if (consecutiveWriteErrors >= 3) {
+            throw new Error(
+              `Sincronizzazione interrotta dopo 3 errori SharePoint consecutivi. Ultimo record: ${record.title} (${record.identLotto}). ${message}`
+            );
+          }
           continue;
         }
 

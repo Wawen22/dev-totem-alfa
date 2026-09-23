@@ -55,10 +55,16 @@ export class SharePointService {
   async createItem<TFields extends Record<string, unknown>>(listId: string, fields: TFields): Promise<SharePointListItem<TFields>> {
     if (!listId) throw new Error("listId mancante");
     const client = await this.getClient();
+    // In creazione SharePoint non ha bisogno dei campi vuoti. Alcuni tipi di
+    // colonna restituiscono un generico HTTP 500 quando ricevono null, mentre
+    // l'omissione mantiene correttamente il valore predefinito della lista.
+    const createFields = Object.fromEntries(
+      Object.entries(fields).filter(([, value]) => value !== null && value !== undefined)
+    ) as TFields;
     try {
       const response = await client
         .api(`/sites/${this.siteId}/lists/${listId}/items`)
-        .post({ fields });
+        .post({ fields: createFields });
 
       return { id: response.id, fields: response.fields };
     } catch (err: any) {
@@ -82,7 +88,7 @@ export class SharePointService {
       // Riepilogo tipo di ogni campo inviato (utile per capire quale colonna
       // SharePoint rifiuta: es. una data/numero/lookup con tipo inatteso).
       const fieldTypes = Object.fromEntries(
-        Object.entries(fields as Record<string, unknown>).map(([k, v]) => [
+        Object.entries(createFields as Record<string, unknown>).map(([k, v]) => [
           k,
           v === null ? "null" : Array.isArray(v) ? "array" : typeof v,
         ])
@@ -95,8 +101,8 @@ export class SharePointService {
         innerError: graphError?.innerError,
         body: parsedBody,
         fieldTypes,
-        fieldsJson: JSON.stringify(fields),
-        fields,
+        fieldsJson: JSON.stringify(createFields),
+        fields: createFields,
       });
       const msg = innerMsg || "Errore creazione elemento";
       throw new Error(msg);
