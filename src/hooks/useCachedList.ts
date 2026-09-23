@@ -4,11 +4,14 @@ import { SharePointListItem } from "../types/sharepoint";
 
 // Cache globale che persiste finché l'app non viene ricaricata (F5)
 const globalCache: Record<string, { data: any[]; timestamp: number }> = {};
+const cacheAliases: Record<string, string> = {};
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minuti di validità cache default
 
 export function clearCacheKeys(keys: string[]): void {
   keys.forEach((key) => {
     delete globalCache[key];
+    const aliasedKey = cacheAliases[key];
+    if (aliasedKey) delete globalCache[aliasedKey];
   });
 }
 
@@ -33,7 +36,12 @@ export function useCachedList<T = any>(
       }
 
       // 1. Controllo Cache (se non forziamo l'aggiornamento)
-      const cached = globalCache[listNameKey];
+      // The same SharePoint list can be rendered by the operational and admin
+      // panels. Cache by its immutable list ID so the two views can never show
+      // different snapshots of the same data.
+      const cacheKey = listId || listNameKey;
+      cacheAliases[listNameKey] = cacheKey;
+      const cached = globalCache[cacheKey];
       const now = Date.now();
 
       if (!forceRefresh && cached && (now - cached.timestamp < CACHE_DURATION)) {
@@ -52,7 +60,7 @@ export function useCachedList<T = any>(
         const result = await service.listItems<T>(listId);
         
         // 3. Aggiornamento Cache
-        globalCache[listNameKey] = {
+        globalCache[cacheKey] = {
           data: result,
           timestamp: Date.now(),
         };

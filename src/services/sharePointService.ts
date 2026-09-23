@@ -15,38 +15,41 @@ export class SharePointService {
     if (!listId) throw new Error("listId mancante");
     const client = await this.getClient();
     let allItems: SharePointListItem<TFields>[] = [];
-    
-    // Initial request with max page size (999)
-    let nextLink: string | undefined = undefined;
-    
-    // First call
-    let response = await client
-      .api(`/sites/${this.siteId}/lists/${listId}/items`)
-      .expand("fields")
-      .top(999) 
-      .orderby("createdDateTime desc")
-      .get();
+    const initialPath = `/sites/${this.siteId}/lists/${listId}/items`;
+    let requestPath: string | undefined = initialPath;
+    const visitedPages = new Set<string>();
+    let pageCount = 0;
 
-    while (response) {
+    // Graph returns an opaque, complete @odata.nextLink. Never recreate it or
+    // reapply query options: doing so can skip older pages of a large list.
+    while (requestPath) {
+      if (visitedPages.has(requestPath)) {
+        throw new Error(`Paginazione Graph ciclica rilevata per la lista ${listId}`);
+      }
+      visitedPages.add(requestPath);
+
+      const request = client.api(requestPath);
+      const response = requestPath === initialPath
+        ? await request.expand("fields").top(999).orderby("createdDateTime desc").get()
+        : await request.get();
       const items = (response.value || []).map((item: any) => ({
         id: item.id,
         fields: item.fields,
       }));
       allItems = allItems.concat(items);
-
-      nextLink = response["@odata.nextLink"];
-      if (nextLink) {
-        response = await client.api(nextLink).get();
-      } else {
-        response = null;
-      }
+      pageCount += 1;
+      requestPath = typeof response["@odata.nextLink"] === "string"
+        ? response["@odata.nextLink"]
+        : undefined;
     }
 
     // Deduplicate by ID to ensure clean data
     const uniqueItems = new Map<string, SharePointListItem<TFields>>();
     allItems.forEach(item => uniqueItems.set(item.id, item));
     
-    return Array.from(uniqueItems.values());
+    const result = Array.from(uniqueItems.values());
+    console.info(`[GRAPH] Lista ${listId}: ${result.length} elementi su ${pageCount} pagina/e`);
+    return result;
   }
 
   async createItem<TFields extends Record<string, unknown>>(listId: string, fields: TFields): Promise<SharePointListItem<TFields>> {

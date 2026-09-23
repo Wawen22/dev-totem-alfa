@@ -109,7 +109,7 @@ const FORGIATI_FIELDS: FieldConfig[] = [
   { key: "field_20", label: "Grezzo - Sgrossato" },
   { key: "field_26", label: "Data/ora modifica", type: "date", writable: false },
   { key: "CodiceSAM", label: "Codice SAM" },
-  { key: "LottoProgressivo", label: "Lotto Progressivo", writable: false },
+  { key: "IdentLotto", label: "Ident. Lotto", writable: false },
 ];
 
 const TUBI_FIELDS: FieldConfig[] = [
@@ -143,7 +143,7 @@ const TUBI_FIELDS: FieldConfig[] = [
   { key: "field_24", label: "Acquistato dal Curatore" },
   { key: "field_26", label: "Esubero", writable: false },
   { key: "field_27", label: "RITARDO" },
-  { key: "LottoProgressivo", label: "Lotto Progressivo", writable: false },
+  { key: "IdentLotto", label: "Ident. Lotto", writable: false },
 ];
 
 const ORING_HNBR_FIELDS: FieldConfig[] = [
@@ -228,7 +228,7 @@ const TUBO_MECCANICO_FIELDS: FieldConfig[] = [
   { key: "field_17", label: "Giacenza (mm)" },
   { key: "field_18", label: "Data Prelievo", type: "date" },
   { key: "field_19", label: "Utilizzato per comm. mm" },
-  { key: "LottoProgressivo", label: "Lotto Progressivo", writable: false },
+  { key: "IdentLotto", label: "Ident. Lotto", writable: false },
 ];
 
 const FILO_FLUSSO_FIELDS: FieldConfig[] = [
@@ -349,6 +349,13 @@ const toNumberOrNull = (val?: string): number | null => {
 const formatLottoProg = (val: string | undefined | null) => {
   const str = val ? String(val) : "";
   return str ? str.toUpperCase() : "A";
+};
+
+const getPersistedLottoProg = (fields: Record<string, unknown>): string | null => {
+  const identMatch = String(fields.IdentLotto ?? "").trim().match(/[a-z]/i);
+  if (identMatch) return identMatch[0];
+  const legacyMatch = String(fields.LottoProgressivo ?? "").trim().match(/[a-z]/i);
+  return legacyMatch ? legacyMatch[0] : null;
 };
 
 const normalizeExcelKey = (value: string) =>
@@ -930,8 +937,8 @@ const buildFormFromItem = (
   fields.forEach((field) => {
     if (field.key === "IdentLotto") {
       const raw =
-        (item?.fields as Record<string, unknown> | undefined)?.LottoProgressivo ??
-        (item?.fields as Record<string, unknown> | undefined)?.IdentLotto;
+        (item?.fields as Record<string, unknown> | undefined)?.IdentLotto ??
+        (item?.fields as Record<string, unknown> | undefined)?.LottoProgressivo;
       form[field.key] = toStr(raw);
       return;
     }
@@ -1310,7 +1317,9 @@ export function AdminPanel({
       const sorted = [...group.items].sort((a, b) => getCreatedKey(a) - getCreatedKey(b));
       const used = new Set<string>();
       sorted.forEach((item) => {
-        const existing = normalizeLetter((item.fields as Record<string, unknown>).LottoProgressivo as string | undefined);
+        const existing = normalizeLetter(
+          getPersistedLottoProg(item.fields as Record<string, unknown>) || undefined
+        );
         let letter = existing;
         if (!letter || used.has(letter)) {
           let code = "a".charCodeAt(0);
@@ -1379,7 +1388,9 @@ export function AdminPanel({
       const sorted = [...group.items].sort((a, b) => getCreatedKey(a) - getCreatedKey(b));
       const used = new Set<string>();
       sorted.forEach((item) => {
-        const existing = normalizeLetter((item.fields as Record<string, unknown>).LottoProgressivo as string | undefined);
+        const existing = normalizeLetter(
+          getPersistedLottoProg(item.fields as Record<string, unknown>) || undefined
+        );
         let letter = existing;
         if (!letter || used.has(letter)) {
           let code = "a".charCodeAt(0);
@@ -1425,7 +1436,9 @@ export function AdminPanel({
       const sorted = [...group.items].sort((a, b) => getCreatedKey(a) - getCreatedKey(b));
       const used = new Set<string>();
       sorted.forEach((item) => {
-        const existing = normalizeLetter((item.fields as Record<string, unknown>).LottoProgressivo as string | undefined);
+        const existing = normalizeLetter(
+          getPersistedLottoProg(item.fields as Record<string, unknown>) || undefined
+        );
         let letter = existing;
         if (!letter || used.has(letter)) {
           let code = "a".charCodeAt(0);
@@ -1516,6 +1529,19 @@ export function AdminPanel({
       setUpdateMessage("Il campo Title è obbligatorio");
       return;
     }
+    const currentItem = filteredItems.find((item) => item.id === selectedId) || null;
+    if (currentItem && (activeList === "FORGIATI" || activeList === "TUBI" || activeList === "TUBO-MECCANICO")) {
+      const progressiveMap = activeList === "FORGIATI"
+        ? forgiatiProgressiveMap
+        : activeList === "TUBO-MECCANICO"
+        ? tuboMeccanicoProgressiveMap
+        : tubiProgressiveMap;
+      payload.IdentLotto = formatLottoProg(
+        getPersistedLottoProg(currentItem.fields as Record<string, unknown>) ||
+          progressiveMap.get(currentItem.id) ||
+          "A"
+      );
+    }
 
     setUpdateStatus("saving");
     setUpdateMessage(null);
@@ -1562,9 +1588,8 @@ export function AdminPanel({
             throw new Error("Percorso Excel o tabella non configurati");
           }
 
-          const currentItem = filteredItems.find((item) => item.id === selectedId) || null;
           const identRaw =
-            (currentItem?.fields as any)?.LottoProgressivo ||
+            (currentItem?.fields && getPersistedLottoProg(currentItem.fields as Record<string, unknown>)) ||
             (currentItem?.id
               ? isForgiati
                 ? forgiatiProgressiveMap.get(currentItem.id)
@@ -1687,6 +1712,9 @@ export function AdminPanel({
     filoFlussoExcelTable,
     filoFlussoExcelDriveId,
     filoFlussoExcelDriveNameEnv,
+    tubiProgressiveMap,
+    forgiatiProgressiveMap,
+    tuboMeccanicoProgressiveMap,
   ]);
 
   const handleDelete = useCallback(async (item: SharePointListItem<Record<string, unknown>>) => {
@@ -1706,7 +1734,7 @@ export function AdminPanel({
     let lottoHint = "";
     if (activeList === "FORGIATI" || activeList === "TUBI" || activeList === "TUBO-MECCANICO") {
       const identRaw =
-        (fields as any)?.LottoProgressivo ||
+        getPersistedLottoProg(fields) ||
         (item.id
           ? activeList === "FORGIATI"
             ? forgiatiProgressiveMap.get(item.id)
@@ -1771,7 +1799,7 @@ export function AdminPanel({
           }
 
           const identRaw =
-            (fields as any)?.LottoProgressivo ||
+            getPersistedLottoProg(fields) ||
             (item.id
               ? isForgiati
                 ? forgiatiProgressiveMap.get(item.id)
@@ -1924,6 +1952,24 @@ export function AdminPanel({
       return;
     }
 
+    if (activeList === "FORGIATI" || activeList === "TUBI" || activeList === "TUBO-MECCANICO") {
+      const baseItems = activeList === "FORGIATI"
+        ? forgiatiItems
+        : activeList === "TUBO-MECCANICO"
+        ? tuboMeccanicoItems
+        : tubiItems;
+      const progressiveMap = activeList === "FORGIATI"
+        ? forgiatiProgressiveMap
+        : activeList === "TUBO-MECCANICO"
+        ? tuboMeccanicoProgressiveMap
+        : tubiProgressiveMap;
+      const sameTitle = baseItems.filter((item) =>
+        normalizeExcelKey(toStr((item.fields as Record<string, unknown>).Title)) ===
+        normalizeExcelKey(toStr(payload.Title))
+      );
+      payload.IdentLotto = formatLottoProg(getNextLottoProg(sameTitle, progressiveMap));
+    }
+
     setCreateStatus("saving");
     setCreateMessage(null);
 
@@ -1992,7 +2038,9 @@ export function AdminPanel({
               normalizeExcelKey(toStr((item.fields as Record<string, unknown>).Title)) ===
               normalizeExcelKey(titleValue)
             );
-            const nextProg = formatLottoProg(getNextLottoProg(sameTitle, map));
+            const nextProg = formatLottoProg(
+              toStr(payload.IdentLotto) || getNextLottoProg(sameTitle, map)
+            );
             const excelFields = {
               ...payload,
               IdentLotto: nextProg,

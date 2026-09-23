@@ -847,6 +847,14 @@ const extractProgLetter = (val: string | undefined | null): string | null => {
   return match ? match[0] : null;
 };
 
+// IdentLotto is the physical column shared by Excel and SharePoint.  Older
+// records can still contain the temporary LottoProgressivo field (or neither),
+// so keep the fallback only for reading legacy data; never use it as the source
+// of truth for newly created/synchronised lots.
+const getPersistedLottoProg = (fields: Record<string, unknown>): string | null =>
+  extractProgLetter(toStr(fields.IdentLotto)) ||
+  extractProgLetter(toStr(fields.LottoProgressivo));
+
 const TUBI_SHAREPOINT_TEXT_FIELDS = [
   "CodiceSAM",
   "field_1",
@@ -994,7 +1002,9 @@ const buildProgressiveMapForGroupedItems = <T extends SharePointListItem<Record<
     const sorted = [...groupItems].sort((a, b) => getCreatedKey(a) - getCreatedKey(b));
     const used = new Set<string>();
     sorted.forEach((item) => {
-      const existing = normalizeLetter((item.fields as Record<string, unknown>).LottoProgressivo as string | undefined);
+      const existing = normalizeLetter(
+        getPersistedLottoProg(item.fields as Record<string, unknown>) || undefined
+      );
       let letter = existing;
       if (!letter || used.has(letter)) {
         let code = "a".charCodeAt(0);
@@ -1014,7 +1024,11 @@ const buildProgressiveMapForGroupedItems = <T extends SharePointListItem<Record<
 const getResolvedTubiIdentLotto = (
   item: SharePointListItem<Record<string, unknown>>,
   progressiveMap: Map<string, string>
-) => formatLottoProg(progressiveMap.get(item.id) || (item.fields as Record<string, unknown>).LottoProgressivo as string | undefined || "A");
+) => formatLottoProg(
+  getPersistedLottoProg(item.fields as Record<string, unknown>) ||
+    progressiveMap.get(item.id) ||
+    "A"
+);
 
 const getResolvedTubiColata = (fields: Record<string, unknown>) =>
   normalizeTrimmedValue(fields.field_18);
@@ -1132,8 +1146,8 @@ const getResolvedTuboMeccanicoIdentLotto = (
   progressiveMap: Map<string, string>
 ) =>
   formatLottoProg(
-    progressiveMap.get(item.id) ||
-      ((item.fields as Record<string, unknown>).LottoProgressivo as string | undefined) ||
+    getPersistedLottoProg(item.fields as Record<string, unknown>) ||
+      progressiveMap.get(item.id) ||
       "A"
   );
 
@@ -1226,6 +1240,7 @@ const buildTuboMeccanicoPayloadFromExcelRow = (excelColumns: string[], rowValues
   const identLotto = formatLottoProg(extractProgLetter(identRaw) || identRaw);
   const fields: Record<string, unknown> = {
     Title: title,
+    IdentLotto: identLotto,
   };
 
   TUBO_MECCANICO_SHAREPOINT_TEXT_FIELDS.forEach((fieldKey) => {
@@ -1252,8 +1267,8 @@ const getResolvedForgiatiIdentLotto = (
   progressiveMap: Map<string, string>
 ) =>
   formatLottoProg(
-    progressiveMap.get(item.id) ||
-      ((item.fields as Record<string, unknown>).LottoProgressivo as string | undefined) ||
+    getPersistedLottoProg(item.fields as Record<string, unknown>) ||
+      progressiveMap.get(item.id) ||
       "A"
   );
 
@@ -1343,6 +1358,7 @@ const buildForgiatiPayloadFromExcelRow = (excelColumns: string[], rowValues: unk
   const identLotto = formatLottoProg(extractProgLetter(identRaw) || identRaw);
   const fields: Record<string, unknown> = {
     Title: title,
+    IdentLotto: identLotto,
   };
 
   FORGIATI_SHAREPOINT_TEXT_FIELDS.forEach((fieldKey) => {
@@ -1443,6 +1459,7 @@ const buildTubiPayloadFromExcelRow = (excelColumns: string[], rowValues: unknown
   const colata = normalizeTrimmedValue(rawByField.get("field_18"));
   const fields: Record<string, unknown> = {
     Title: title,
+    IdentLotto: identLotto,
   };
 
   TUBI_SHAREPOINT_TEXT_FIELDS.forEach((fieldKey) => {
@@ -1809,7 +1826,9 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
       const used = new Set<string>();
 
       sorted.forEach((item) => {
-        const existing = normalizeLetter((item.fields as any).LottoProgressivo);
+        const existing = normalizeLetter(
+          getPersistedLottoProg(item.fields as Record<string, unknown>) || undefined
+        );
         let letter = existing;
         if (!letter || used.has(letter)) {
           let code = "a".charCodeAt(0);
@@ -2114,6 +2133,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
         noteReset: NOTE_RESET_VALUE,
         dataConsegnaReset: null,
       });
+      payload.IdentLotto = newLotProg;
       await service.createItem<Record<string, unknown>>(listId, payload);
       let excelError: string | null = null;
       const resolvedPath = forgiatiExcelPath || (forgiatiExcelFolder && forgiatiExcelFilename ? `${forgiatiExcelFolder}/${forgiatiExcelFilename}` : "");
@@ -3443,7 +3463,9 @@ function TubiPanel
       const used = new Set<string>();
 
       sorted.forEach((item) => {
-        const existing = normalizeLetter((item.fields as any).LottoProgressivo);
+        const existing = normalizeLetter(
+          getPersistedLottoProg(item.fields as Record<string, unknown>) || undefined
+        );
         let letter = existing;
         if (!letter || used.has(letter)) {
           let code = "a".charCodeAt(0);
@@ -3729,6 +3751,7 @@ function TubiPanel
       const newLotProg = formatLottoProg(
         getNextLottoProg(lotSelection.items, tubiProgressiveMap)
       );
+      payload.IdentLotto = newLotProg;
       await service.createItem<Record<string, unknown>>(listId, payload);
       let excelError: string | null = null;
       const resolvedPath = tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : "");
@@ -4352,7 +4375,9 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
       const used = new Set<string>();
 
       sorted.forEach((item) => {
-        const existing = normalizeLetter((item.fields as any).LottoProgressivo);
+        const existing = normalizeLetter(
+          getPersistedLottoProg(item.fields as Record<string, unknown>) || undefined
+        );
         let letter = existing;
         if (!letter || used.has(letter)) {
           let code = "a".charCodeAt(0);
@@ -4619,6 +4644,7 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
         dataOrdine: dataOrdineInput ? toIsoOrNull(dataOrdineInput) : undefined,
         codiceSam: newLotCodiceSam.trim() ? newLotCodiceSam : undefined,
       });
+      payload.IdentLotto = newLotProg;
       await service.createItem<Record<string, unknown>>(listId, payload);
       let excelError: string | null = null;
       const resolvedPath = excelPath || (excelFolder && excelFilename ? `${excelFolder}/${excelFilename}` : "");
@@ -7029,15 +7055,39 @@ function AuthenticatedShell() {
           );
 
           if (changedFields.length === 0) {
-            unchanged++;
-            unchangedLabels.push(
-              buildTubiSyncDetailItem({
-                title: record.title,
-                colata: record.colata,
-                identLotto: record.identLotto,
-                detail: "Nessuna differenza rilevata",
-              })
+            const storedIdentLotto = normalizeTrimmedValue(
+              (currentRecord.item.fields as Record<string, unknown>).IdentLotto
             );
+            if (normalizeExcelKey(storedIdentLotto || "") !== normalizeExcelKey(record.identLotto)) {
+              await sharepointService.updateItem<Record<string, unknown>>(
+                tubiListId,
+                currentRecord.item.id,
+                { IdentLotto: record.identLotto }
+              );
+              currentRecord.item.fields = {
+                ...currentRecord.item.fields,
+                IdentLotto: record.identLotto,
+              };
+              updated++;
+              updatedLabels.push(
+                buildTubiSyncDetailItem({
+                  title: record.title,
+                  colata: record.colata,
+                  identLotto: record.identLotto,
+                  detail: "Identificativo lotto allineato",
+                })
+              );
+            } else {
+              unchanged++;
+              unchangedLabels.push(
+                buildTubiSyncDetailItem({
+                  title: record.title,
+                  colata: record.colata,
+                  identLotto: record.identLotto,
+                  detail: "Nessuna differenza rilevata",
+                })
+              );
+            }
           } else {
             await sharepointService.updateItem<Record<string, unknown>>(tubiListId, currentRecord.item.id, record.fields);
             currentRecord.fields = {
@@ -7259,15 +7309,39 @@ function AuthenticatedShell() {
               fieldLabelMap
             );
             if (changedFields.length === 0) {
-              unchanged++;
-              unchangedLabels.push(
-                buildTubiSyncDetailItem({
-                  title: record.title,
-                  colata: record.colata,
-                  identLotto: record.identLotto,
-                  detail: "Nessuna differenza rilevata",
-                })
+              const storedIdentLotto = normalizeTrimmedValue(
+                (currentRecord.item.fields as Record<string, unknown>).IdentLotto
               );
+              if (normalizeExcelKey(storedIdentLotto || "") !== normalizeExcelKey(record.identLotto)) {
+                await sharepointService.updateItem<Record<string, unknown>>(
+                  forgiatiListId,
+                  currentRecord.item.id,
+                  { IdentLotto: record.identLotto }
+                );
+                currentRecord.item.fields = {
+                  ...currentRecord.item.fields,
+                  IdentLotto: record.identLotto,
+                };
+                updated++;
+                updatedLabels.push(
+                  buildTubiSyncDetailItem({
+                    title: record.title,
+                    colata: record.colata,
+                    identLotto: record.identLotto,
+                    detail: "Identificativo lotto allineato",
+                  })
+                );
+              } else {
+                unchanged++;
+                unchangedLabels.push(
+                  buildTubiSyncDetailItem({
+                    title: record.title,
+                    colata: record.colata,
+                    identLotto: record.identLotto,
+                    detail: "Nessuna differenza rilevata",
+                  })
+                );
+              }
             } else {
               await sharepointService.updateItem<Record<string, unknown>>(
                 forgiatiListId,
@@ -7516,15 +7590,39 @@ function AuthenticatedShell() {
               fieldLabelMap
             );
             if (changedFields.length === 0) {
-              unchanged++;
-              unchangedLabels.push(
-                buildTubiSyncDetailItem({
-                  title: record.title,
-                  colata: record.colata,
-                  identLotto: record.identLotto,
-                  detail: "Nessuna differenza rilevata",
-                })
+              const storedIdentLotto = normalizeTrimmedValue(
+                (currentRecord.item.fields as Record<string, unknown>).IdentLotto
               );
+              if (normalizeExcelKey(storedIdentLotto || "") !== normalizeExcelKey(record.identLotto)) {
+                await sharepointService.updateItem<Record<string, unknown>>(
+                  tuboMeccanicoListId,
+                  currentRecord.item.id,
+                  { IdentLotto: record.identLotto }
+                );
+                currentRecord.item.fields = {
+                  ...currentRecord.item.fields,
+                  IdentLotto: record.identLotto,
+                };
+                updated++;
+                updatedLabels.push(
+                  buildTubiSyncDetailItem({
+                    title: record.title,
+                    colata: record.colata,
+                    identLotto: record.identLotto,
+                    detail: "Identificativo lotto allineato",
+                  })
+                );
+              } else {
+                unchanged++;
+                unchangedLabels.push(
+                  buildTubiSyncDetailItem({
+                    title: record.title,
+                    colata: record.colata,
+                    identLotto: record.identLotto,
+                    detail: "Nessuna differenza rilevata",
+                  })
+                );
+              }
             } else {
               await sharepointService.updateItem<Record<string, unknown>>(
                 tuboMeccanicoListId,
@@ -7758,7 +7856,7 @@ function AuthenticatedShell() {
 
           let matchOpts: any;
           if (cfg.matchKey === "identLotto") {
-            const identLotto = formatLottoProg(fields.LottoProgressivo as string | undefined);
+            const identLotto = formatLottoProg(getPersistedLottoProg(fields) || "A");
             matchOpts = { codice: title, identLotto };
           } else {
             const lotto = String(fields[cfg.matchLottoField!] || "");
@@ -7993,7 +8091,11 @@ function AuthenticatedShell() {
             }
 
             for (const update of forgiatiUpdates) {
-              const identLotto = formatLottoProg(update.item.lottoProg || (update.item.fields as any)?.LottoProgressivo || "A");
+              const identLotto = formatLottoProg(
+                update.item.lottoProg ||
+                  getPersistedLottoProg(update.item.fields as Record<string, unknown>) ||
+                  "A"
+              );
               const rowIndex = findForgiatiExcelRowIndex(rows, columns, {
                 codice: update.item.title,
                 identLotto,
