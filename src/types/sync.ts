@@ -1,4 +1,10 @@
-export type SyncDetailKey = "updated" | "created" | "unchanged" | "skipped" | "duplicates";
+export type SyncDetailKey =
+  | "updated"
+  | "created"
+  | "unchanged"
+  | "skipped"
+  | "duplicates"
+  | "sharepoint-only";
 
 export type SyncFieldChange = {
   field: string;

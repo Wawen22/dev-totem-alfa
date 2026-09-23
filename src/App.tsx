@@ -7462,17 +7462,35 @@ function AuthenticatedShell() {
         }
       }
 
+      // Report di riconciliazione: non eliminiamo automaticamente gli item che
+      // non hanno trovato una riga Excel, perché possono essere dati storici o
+      // duplicati da verificare prima di qualsiasi operazione distruttiva.
+      const sharePointOnlyLabels = spItems
+        .filter((item) => !usedItemIds.has(item.id))
+        .map((item) => {
+          const fields = (item.fields || {}) as Record<string, unknown>;
+          const title = normalizeTrimmedValue(fields.Title) || "(senza codice)";
+          const identLotto = getResolvedForgiatiIdentLotto(item, progressiveMap);
+          return buildTubiSyncDetailItem({
+            title,
+            colata: normalizeTrimmedValue(fields.field_13),
+            identLotto,
+            detail: `Presente solo in SharePoint o duplicato (ID ${item.id}): nessuna eliminazione eseguita`,
+          });
+        });
+
       clearCacheKeys(["forgiati", "admin-forgiati"]);
 
       return {
-        success: skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0,
-        message: `Sincronizzazione FORGIATI Excel -> SharePoint ${skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0 ? "completata" : "parziale: verificare i record saltati"}. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
+        success: skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0 && sharePointOnlyLabels.length === 0,
+        message: `Sincronizzazione FORGIATI Excel -> SharePoint ${skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0 && sharePointOnlyLabels.length === 0 ? "completata" : "parziale: verificare il dettaglio"}. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati Excel ignorati ${duplicateExcelRows}, non associati SharePoint ${sharePointOnlyLabels.length}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
         details: buildSyncDetailSections([
           { key: "updated", label: "Aggiornati", items: updatedLabels },
           { key: "created", label: "Creati", items: createdLabels },
           { key: "unchanged", label: "Invariati", items: unchangedLabels },
           { key: "skipped", label: "Saltati", items: [...skippedLabels, ...outsideTableLabels] },
           { key: "duplicates", label: "Duplicati Excel ignorati", items: duplicateLabels },
+          { key: "sharepoint-only", label: "Solo SharePoint / duplicati", items: sharePointOnlyLabels },
         ]),
       };
     } catch (err: any) {
