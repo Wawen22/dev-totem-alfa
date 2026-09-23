@@ -2228,7 +2228,7 @@ export function AdminPanel({
     if (!service || !activeListId || !syncCleanupPlan || syncCleanupPlan.safeDelete.length === 0) return;
     const candidates = syncCleanupPlan.safeDelete;
     const confirmed = window.confirm(
-      `Saranno eliminati ${candidates.length} elementi SharePoint duplicati con la stessa chiave e gli stessi valori. Gli elementi con dati diversi o senza codice non saranno eliminati. Continuare?`
+      `Saranno eliminati ${candidates.length} elementi SharePoint classificati come duplicati identici, copie parziali senza valori discordanti o elementi completamente vuoti. I conflitti resteranno protetti. Continuare?`
     );
     if (!confirmed) return;
 
@@ -2265,7 +2265,7 @@ export function AdminPanel({
     setSyncMessage(
       failed.length > 0
         ? `Pulizia parziale: ${deleted} elementi eliminati, ${failed.length} non eliminati. Riesegui la verifica.`
-        : `Pulizia completata: ${deleted} duplicati identici eliminati. Riesegui Aggiorna Totem da Excel per il controllo finale.`
+        : `Pulizia completata: ${deleted} elementi SharePoint sicuri eliminati. Riesegui Aggiorna Totem da Excel per il controllo finale.`
     );
   }, [service, activeListId, syncCleanupPlan, activeList, activeRefresh]);
 
@@ -2709,9 +2709,9 @@ export function AdminPanel({
                 <div className="alert warning" style={{ marginBottom: 12 }}>
                   <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
                     <div>
-                      <strong>{syncCleanupPlan.safeDelete.length} duplicati identici eliminabili automaticamente.</strong>
+                      <strong>{syncCleanupPlan.safeDelete.length} elementi eliminabili automaticamente.</strong>
                       <div style={{ marginTop: 4 }}>
-                        Verrà conservato un elemento per ogni chiave. Altri {syncCleanupPlan.requiresReview} elementi restano protetti.
+                        Duplicati identici, copie parziali non discordanti ed elementi vuoti. Altri {syncCleanupPlan.requiresReview} elementi restano protetti.
                       </div>
                     </div>
                     <button

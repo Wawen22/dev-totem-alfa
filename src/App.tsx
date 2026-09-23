@@ -7481,7 +7481,11 @@ function AuthenticatedShell() {
 
       const safeDeleteById = new Map<
         string,
-        { itemId: string; label: string; reason: "identical-duplicate" }
+        {
+          itemId: string;
+          label: string;
+          reason: "identical-duplicate" | "incomplete-duplicate" | "empty-item";
+        }
       >();
       const resolvedDuplicateKeeperIds = new Set<string>();
       const comparableSignature = (fieldMap: Map<string, TubiSyncFieldState>) =>
@@ -7510,6 +7514,64 @@ function AuthenticatedShell() {
             reason: "identical-duplicate",
           });
         });
+      });
+
+      // Se una delle copie coincide esattamente con Excel, sono eliminabili
+      // anche le copie parziali che contengono soltanto valori uguali a Excel
+      // e campi mancanti. Qualunque valore discordante mantiene il record
+      // protetto per evitare perdita di modifiche fatte dal Totem.
+      excelRecords.forEach((record) => {
+        const matches = spIndex.get(record.key) || [];
+        if (matches.length < 2) return;
+        const excelSignature = comparableSignature(record.comparableFieldMap);
+        const exactMatches = matches.filter(
+          (match) => comparableSignature(match.comparableFieldMap) === excelSignature
+        );
+        if (exactMatches.length === 0) return;
+        const keeper = [...exactMatches].sort((left, right) => {
+          const leftId = Number(left.item.id);
+          const rightId = Number(right.item.id);
+          if (Number.isFinite(leftId) && Number.isFinite(rightId)) return leftId - rightId;
+          return left.item.id.localeCompare(right.item.id);
+        })[0];
+        resolvedDuplicateKeeperIds.add(keeper.item.id);
+
+        matches.forEach((match) => {
+          if (match.item.id === keeper.item.id) return;
+          const isNonConflictingSubset = Array.from(match.comparableFieldMap.entries()).every(
+            ([fieldName, state]) => {
+              const excelValue = record.comparableFieldMap.get(fieldName)?.compare || "";
+              return state.compare === "" || state.compare === excelValue;
+            }
+          );
+          if (isNonConflictingSubset) {
+            safeDeleteById.set(match.item.id, {
+              itemId: match.item.id,
+              label: record.key,
+              reason: "incomplete-duplicate",
+            });
+          }
+        });
+      });
+
+      const managedBusinessFields = Array.from(new Set([
+        ...FORGIATI_SHAREPOINT_TEXT_FIELDS,
+        ...FORGIATI_SHAREPOINT_NUMERIC_FIELDS,
+        ...FORGIATI_SHAREPOINT_DATE_FIELDS,
+      ]));
+      spItems.forEach((item) => {
+        const fields = (item.fields || {}) as Record<string, unknown>;
+        if (normalizeTrimmedValue(fields.Title)) return;
+        const hasManagedBusinessData = managedBusinessFields.some(
+          (fieldName) => normalizeTrimmedValue(fields[fieldName]) !== null
+        );
+        if (!hasManagedBusinessData) {
+          safeDeleteById.set(item.id, {
+            itemId: item.id,
+            label: `(elemento vuoto) [ID ${item.id}]`,
+            reason: "empty-item",
+          });
+        }
       });
 
       const safeDelete = Array.from(safeDeleteById.values());

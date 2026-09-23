@@ -29,7 +29,7 @@ export type SyncDetailSection = {
 export type SyncCleanupCandidate = {
   itemId: string;
   label: string;
-  reason: "identical-duplicate";
+  reason: "identical-duplicate" | "incomplete-duplicate" | "empty-item";
 };
 
 export type SyncCleanupPlan = {
