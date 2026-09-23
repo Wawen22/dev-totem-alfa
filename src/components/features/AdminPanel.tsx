@@ -2192,9 +2192,8 @@ export function AdminPanel({
     setSyncStatus(result.success ? "success" : "error");
     setSyncMessage(result.message);
     setSyncDetails(result.details || null);
-    if (result.success) {
-      activeRefresh();
-    }
+    // A partial sync may still have created new SharePoint items.
+    activeRefresh();
   }, [onSyncFromExcel, activeList, activeRefresh]);
 
   const syncSummary = useMemo(
@@ -2332,6 +2331,7 @@ export function AdminPanel({
               className="btn admin-sync-btn admin-sync-btn--sp"
               type="button"
               onClick={handleSyncExcel}
+              disabled={syncStatus === "syncing"}
               title={`Aggiorna la tabella Excel ${activeList} usando i dati presenti in SharePoint`}
             >
               <span className="admin-sync-btn__icon" aria-hidden="true">↘</span>
@@ -2346,6 +2346,7 @@ export function AdminPanel({
               className="btn admin-sync-btn admin-sync-btn--excel"
               type="button"
               onClick={handleSyncFromExcel}
+              disabled={syncStatus === "syncing"}
               title={`Aggiorna SharePoint ${activeList} usando i dati presenti nel file Excel`}
             >
               <span className="admin-sync-btn__icon" aria-hidden="true">↗</span>

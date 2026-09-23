@@ -6390,9 +6390,7 @@ function AuthenticatedShell() {
           };
           const nextRowValues = buildForgiatiExcelRow(columns, nextFields);
           const nextComparableFieldMap = buildForgiatiFieldsFieldStateMap(columns, nextFields);
-          const matches = (excelIndex.get(key) || []).filter(
-            (record) => !usedRowIndexes.has(record.rowIndex)
-          );
+          const matches = excelIndex.get(key) || [];
 
           if (matches.length > 1) {
             skipped++;
@@ -6404,6 +6402,12 @@ function AuthenticatedShell() {
                 detail: "Match Excel ambiguo",
               })
             );
+            continue;
+          }
+
+          if (matches.length === 1 && usedRowIndexes.has(matches[0].rowIndex)) {
+            skipped++;
+            skippedLabels.push(buildTubiSyncDetailItem({ title, colata, identLotto, detail: "Chiave lotto duplicata in SharePoint" }));
             continue;
           }
 
@@ -6479,43 +6483,12 @@ function AuthenticatedShell() {
                 })
               );
             } else {
-              const rowRange = buildRowRangeAddress(
-                dataBodyRange!.address,
-                currentRecord.rowIndex,
-                rows.length
-              );
-              if (!rowRange) {
-                skipped++;
-                skippedLabels.push(
-                  buildTubiSyncDetailItem({
-                    title,
-                    colata,
-                    identLotto,
-                    detail: "Impossibile risolvere la riga Excel",
-                  })
-                );
-                continue;
-              }
-              await sharepointService.updateWorkbookRangeByAddress(
-                driveItem.id,
-                rowRange.sheetName,
-                rowRange.address,
-                [nextRowValues],
-                { sessionId },
-                driveId
-              );
-              upsertWorkbookRowCache(rows, currentRecord.rowIndex, nextRowValues);
-              currentRecord.comparableFieldMap = nextComparableFieldMap;
-              updated++;
-              updatedLabels.push(
-                buildTubiSyncDetailItem({
-                  title,
-                  colata,
-                  identLotto,
-                  detail: `${changedFields.length} campi aggiornati`,
-                  changes: changedFields,
-                })
-              );
+              skipped++;
+              skippedLabels.push(buildTubiSyncDetailItem({
+                title, colata, identLotto,
+                detail: "Conflitto Excel / Totem: valori diversi, nessuna sovrascrittura",
+                changes: changedFields,
+              }));
             }
           }
 
@@ -6534,8 +6507,8 @@ function AuthenticatedShell() {
       }
 
       return {
-        success: true,
-        message: `Sincronizzazione FORGIATI SharePoint -> Excel completata. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}.`,
+        success: skipped === 0,
+        message: `Sincronizzazione FORGIATI SharePoint -> Excel ${skipped === 0 ? "completata" : "parziale: verificare i record saltati"}. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}.`,
         details: buildSyncDetailSections([
           { key: "updated", label: "Aggiornati", items: updatedLabels },
           { key: "created", label: "Creati", items: createdLabels },
@@ -6660,7 +6633,9 @@ function AuthenticatedShell() {
             bolla: getResolvedTubiBolla(fields),
             ordine: getResolvedTubiOrdine(fields),
           });
-          const matchResult = findUniqueTubiMatch(matchKeys, excelIndex, (record) => !usedRowIndexes.has(record.rowIndex));
+          const matchResult = findUniqueTubiMatch(
+            [buildTubiLottoIdentityKey(title, identLotto)], excelIndex, () => true
+          );
 
           if (!matchResult.match && matchResult.ambiguous) {
             skipped++;
@@ -6672,6 +6647,12 @@ function AuthenticatedShell() {
                 detail: "Match Excel ambiguo",
               })
             );
+            continue;
+          }
+
+          if (matchResult.match && usedRowIndexes.has(matchResult.match.rowIndex)) {
+            skipped++;
+            skippedLabels.push(buildTubiSyncDetailItem({ title, colata, identLotto, detail: "Chiave lotto duplicata in SharePoint" }));
             continue;
           }
 
@@ -6759,43 +6740,12 @@ function AuthenticatedShell() {
                 })
               );
             } else {
-              const rowRange = buildRowRangeAddress(dataBodyRange!.address, currentRecord.rowIndex, rows.length);
-              if (!rowRange) {
-                skipped++;
-                skippedLabels.push(
-                  buildTubiSyncDetailItem({
-                    title,
-                    colata,
-                    identLotto,
-                    detail: "Impossibile risolvere la riga Excel",
-                  })
-                );
-                continue;
-              }
-              await sharepointService.updateWorkbookRangeByAddress(
-                driveItem.id,
-                rowRange.sheetName,
-                rowRange.address,
-                [nextRowValues],
-                { sessionId },
-                driveId
-              );
-              upsertWorkbookRowCache(rows, currentRecord.rowIndex, nextRowValues);
-              currentRecord.fields = {
-                ...currentRecord.fields,
-                ...excelFields,
-              };
-              currentRecord.comparableFieldMap = nextComparableFieldMap;
-              updated++;
-              updatedLabels.push(
-                buildTubiSyncDetailItem({
-                  title,
-                  colata,
-                  identLotto,
-                  detail: `${changedFields.length} campi aggiornati`,
-                  changes: changedFields,
-                })
-              );
+              skipped++;
+              skippedLabels.push(buildTubiSyncDetailItem({
+                title, colata, identLotto,
+                detail: "Conflitto Excel / Totem: valori diversi, nessuna sovrascrittura",
+                changes: changedFields,
+              }));
             }
           }
 
@@ -6814,8 +6764,8 @@ function AuthenticatedShell() {
       }
 
       return {
-        success: true,
-        message: `Sincronizzazione TUBI SharePoint -> Excel completata. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}.`,
+        success: skipped === 0,
+        message: `Sincronizzazione TUBI SharePoint -> Excel ${skipped === 0 ? "completata" : "parziale: verificare i record saltati"}. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}.`,
         details: buildSyncDetailSections([
           { key: "updated", label: "Aggiornati", items: updatedLabels },
           { key: "created", label: "Creati", items: createdLabels },
@@ -6887,17 +6837,18 @@ function AuthenticatedShell() {
         return acc;
       }, []);
       const spIndex = indexTubiRecordsByMatchKey(spRecords, (record) => record.matchKeys);
-      const spLottoIndex = new Map<string, (typeof spRecords)[number]>();
+      const spLottoIndex = new Map<string, typeof spRecords>();
       spRecords.forEach((record) => {
-        if (!spLottoIndex.has(record.lottoIdentityKey)) {
-          spLottoIndex.set(record.lottoIdentityKey, record);
-        }
+        const sameLot = spLottoIndex.get(record.lottoIdentityKey) || [];
+        sameLot.push(record);
+        spLottoIndex.set(record.lottoIdentityKey, sameLot);
       });
 
       let skipped = 0;
       let duplicateExcelRows = 0;
       const duplicateLabels: SyncDetailItem[] = [];
       const seenExcelKeys = new Set<string>();
+      const duplicateExcelKeys = new Set<string>();
       const outsideTableLabels: SyncDetailItem[] = [];
 
       if (dataBodyRange?.address) {
@@ -6952,6 +6903,7 @@ function AuthenticatedShell() {
         const primaryMatchKey = buildTubiLottoIdentityKey(parsed.title, parsed.identLotto);
         if (seenExcelKeys.has(primaryMatchKey)) {
           duplicateExcelRows++;
+          duplicateExcelKeys.add(primaryMatchKey);
           duplicateLabels.push(
             buildTubiSyncDetailItem({
               title: parsed.title,
@@ -6990,31 +6942,35 @@ function AuthenticatedShell() {
 
       for (let i = 0; i < excelRecords.length; i++) {
         const record = excelRecords[i];
-        const lottoMatch = spLottoIndex.get(record.lottoIdentityKey);
-        const strongMatch = findUniqueTubiMatch(
-          record.matchKeys,
-          spIndex,
-          (candidate) => !usedItemIds.has(candidate.item.id)
-        );
-        const shouldCreateNewLot = !lottoMatch;
-        const currentRecord =
-          shouldCreateNewLot
-            ? null
-            : strongMatch.match || (lottoMatch && !usedItemIds.has(lottoMatch.item.id) ? lottoMatch : null);
+        if (duplicateExcelKeys.has(record.lottoIdentityKey)) {
+          skipped++;
+          skippedLabels.push(buildTubiSyncDetailItem({
+            title: record.title, colata: record.colata, identLotto: record.identLotto,
+            detail: "Chiave lotto duplicata in Excel: nessuna riga importata",
+          }));
+          continue;
+        }
+        const lottoMatches = spLottoIndex.get(record.lottoIdentityKey) || [];
+        if (lottoMatches.length > 1) {
+          skipped++;
+          skippedLabels.push(buildTubiSyncDetailItem({
+            title: record.title, colata: record.colata, identLotto: record.identLotto,
+            detail: "Chiave lotto duplicata in SharePoint: correzione manuale necessaria",
+          }));
+          continue;
+        }
+        const currentRecord = lottoMatches[0] || null;
+
+        if (currentRecord && usedItemIds.has(currentRecord.item.id)) {
+          skipped++;
+          skippedLabels.push(buildTubiSyncDetailItem({
+            title: record.title, colata: record.colata, identLotto: record.identLotto,
+            detail: "Chiave lotto già associata a un'altra riga Excel",
+          }));
+          continue;
+        }
 
         if (!currentRecord) {
-          if (!shouldCreateNewLot && strongMatch.ambiguous) {
-            skipped++;
-            skippedLabels.push(
-              buildTubiSyncDetailItem({
-                title: record.title,
-                colata: record.colata,
-                identLotto: record.identLotto,
-                detail: "Match SharePoint ambiguo",
-              })
-            );
-            continue;
-          }
           const createdItem = await sharepointService.createItem<Record<string, unknown>>(tubiListId, record.fields);
           const createdRecord = {
             item: createdItem,
@@ -7036,7 +6992,7 @@ function AuthenticatedShell() {
             current.push(createdRecord);
             spIndex.set(key, current);
           });
-          spLottoIndex.set(createdRecord.lottoIdentityKey, createdRecord);
+          spLottoIndex.set(createdRecord.lottoIdentityKey, [createdRecord]);
           created++;
           createdLabels.push(
             buildTubiSyncDetailItem({
@@ -7089,22 +7045,12 @@ function AuthenticatedShell() {
               );
             }
           } else {
-            await sharepointService.updateItem<Record<string, unknown>>(tubiListId, currentRecord.item.id, record.fields);
-            currentRecord.fields = {
-              ...currentRecord.fields,
-              ...record.fields,
-            };
-            currentRecord.comparableFieldMap = record.comparableFieldMap;
-            updated++;
-            updatedLabels.push(
-              buildTubiSyncDetailItem({
-                title: record.title,
-                colata: record.colata,
-                identLotto: record.identLotto,
-                detail: `${changedFields.length} campi aggiornati`,
-                changes: changedFields,
-              })
-            );
+            skipped++;
+            skippedLabels.push(buildTubiSyncDetailItem({
+              title: record.title, colata: record.colata, identLotto: record.identLotto,
+              detail: "Conflitto Excel / Totem: valori diversi, nessuna sovrascrittura",
+              changes: changedFields,
+            }));
           }
         }
 
@@ -7118,8 +7064,8 @@ function AuthenticatedShell() {
       clearCacheKeys(["tubi"]);
 
       return {
-        success: true,
-        message: `Sincronizzazione TUBI Excel -> SharePoint completata. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
+        success: skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0,
+        message: `Sincronizzazione TUBI Excel -> SharePoint ${skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0 ? "completata" : "parziale: verificare i record saltati"}. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
         details: buildSyncDetailSections([
           { key: "updated", label: "Aggiornati", items: updatedLabels },
           { key: "created", label: "Creati", items: createdLabels },
@@ -7184,6 +7130,7 @@ function AuthenticatedShell() {
       const duplicateLabels: SyncDetailItem[] = [];
       const outsideTableLabels: SyncDetailItem[] = [];
       const seenExcelKeys = new Set<string>();
+      const duplicateExcelKeys = new Set<string>();
 
       if (dataBodyRange?.address) {
         const belowTableRange = buildRangeAddressBelowTable(dataBodyRange.address, 15);
@@ -7229,6 +7176,7 @@ function AuthenticatedShell() {
         }
         if (seenExcelKeys.has(parsed.key)) {
           duplicateExcelRows++;
+          duplicateExcelKeys.add(parsed.key);
           duplicateLabels.push(
             buildTubiSyncDetailItem({
               title: parsed.title,
@@ -7258,10 +7206,16 @@ function AuthenticatedShell() {
 
       for (let i = 0; i < excelRecords.length; i++) {
         const record = excelRecords[i];
+        if (duplicateExcelKeys.has(record.key)) {
+          skipped++;
+          skippedLabels.push(buildTubiSyncDetailItem({
+            title: record.title, colata: record.colata, identLotto: record.identLotto,
+            detail: "Chiave lotto duplicata in Excel: nessuna riga importata",
+          }));
+          continue;
+        }
         try {
-          const matches = (spIndex.get(record.key) || []).filter(
-            (candidate) => !usedItemIds.has(candidate.item.id)
-          );
+          const matches = spIndex.get(record.key) || [];
 
           if (matches.length > 1) {
             skipped++;
@@ -7273,6 +7227,15 @@ function AuthenticatedShell() {
                 detail: "Match SharePoint ambiguo",
               })
             );
+            continue;
+          }
+
+          if (matches.length === 1 && usedItemIds.has(matches[0].item.id)) {
+            skipped++;
+            skippedLabels.push(buildTubiSyncDetailItem({
+              title: record.title, colata: record.colata, identLotto: record.identLotto,
+              detail: "Chiave lotto già associata a un'altra riga Excel",
+            }));
             continue;
           }
 
@@ -7343,22 +7306,12 @@ function AuthenticatedShell() {
                 );
               }
             } else {
-              await sharepointService.updateItem<Record<string, unknown>>(
-                forgiatiListId,
-                currentRecord.item.id,
-                record.fields
-              );
-              currentRecord.comparableFieldMap = record.comparableFieldMap;
-              updated++;
-              updatedLabels.push(
-                buildTubiSyncDetailItem({
-                  title: record.title,
-                  colata: record.colata,
-                  identLotto: record.identLotto,
-                  detail: `${changedFields.length} campi aggiornati`,
-                  changes: changedFields,
-                })
-              );
+              skipped++;
+              skippedLabels.push(buildTubiSyncDetailItem({
+                title: record.title, colata: record.colata, identLotto: record.identLotto,
+                detail: "Conflitto Excel / Totem: valori diversi, nessuna sovrascrittura",
+                changes: changedFields,
+              }));
             }
           }
         } catch (rowErr: any) {
@@ -7392,8 +7345,8 @@ function AuthenticatedShell() {
       clearCacheKeys(["forgiati", "admin-forgiati"]);
 
       return {
-        success: true,
-        message: `Sincronizzazione FORGIATI Excel -> SharePoint completata. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
+        success: skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0,
+        message: `Sincronizzazione FORGIATI Excel -> SharePoint ${skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0 ? "completata" : "parziale: verificare i record saltati"}. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
         details: buildSyncDetailSections([
           { key: "updated", label: "Aggiornati", items: updatedLabels },
           { key: "created", label: "Creati", items: createdLabels },
@@ -7462,6 +7415,7 @@ function AuthenticatedShell() {
       const duplicateLabels: SyncDetailItem[] = [];
       const outsideTableLabels: SyncDetailItem[] = [];
       const seenExcelKeys = new Set<string>();
+      const duplicateExcelKeys = new Set<string>();
 
       if (dataBodyRange?.address) {
         const belowTableRange = buildRangeAddressBelowTable(dataBodyRange.address, 15);
@@ -7507,6 +7461,7 @@ function AuthenticatedShell() {
         }
         if (seenExcelKeys.has(parsed.key)) {
           duplicateExcelRows++;
+          duplicateExcelKeys.add(parsed.key);
           duplicateLabels.push(
             buildTubiSyncDetailItem({
               title: parsed.title,
@@ -7539,10 +7494,16 @@ function AuthenticatedShell() {
 
       for (let i = 0; i < excelRecords.length; i++) {
         const record = excelRecords[i];
+        if (duplicateExcelKeys.has(record.key)) {
+          skipped++;
+          skippedLabels.push(buildTubiSyncDetailItem({
+            title: record.title, colata: record.colata, identLotto: record.identLotto,
+            detail: "Chiave lotto duplicata in Excel: nessuna riga importata",
+          }));
+          continue;
+        }
         try {
-          const matches = (spIndex.get(record.key) || []).filter(
-            (candidate) => !usedItemIds.has(candidate.item.id)
-          );
+          const matches = spIndex.get(record.key) || [];
 
           if (matches.length > 1) {
             skipped++;
@@ -7554,6 +7515,15 @@ function AuthenticatedShell() {
                 detail: "Match SharePoint ambiguo",
               })
             );
+            continue;
+          }
+
+          if (matches.length === 1 && usedItemIds.has(matches[0].item.id)) {
+            skipped++;
+            skippedLabels.push(buildTubiSyncDetailItem({
+              title: record.title, colata: record.colata, identLotto: record.identLotto,
+              detail: "Chiave lotto già associata a un'altra riga Excel",
+            }));
             continue;
           }
 
@@ -7624,22 +7594,12 @@ function AuthenticatedShell() {
                 );
               }
             } else {
-              await sharepointService.updateItem<Record<string, unknown>>(
-                tuboMeccanicoListId,
-                currentRecord.item.id,
-                record.fields
-              );
-              currentRecord.comparableFieldMap = record.comparableFieldMap;
-              updated++;
-              updatedLabels.push(
-                buildTubiSyncDetailItem({
-                  title: record.title,
-                  colata: record.colata,
-                  identLotto: record.identLotto,
-                  detail: `${changedFields.length} campi aggiornati`,
-                  changes: changedFields,
-                })
-              );
+              skipped++;
+              skippedLabels.push(buildTubiSyncDetailItem({
+                title: record.title, colata: record.colata, identLotto: record.identLotto,
+                detail: "Conflitto Excel / Totem: valori diversi, nessuna sovrascrittura",
+                changes: changedFields,
+              }));
             }
           }
         } catch (rowErr: any) {
@@ -7672,8 +7632,8 @@ function AuthenticatedShell() {
       clearCacheKeys(["tubo-meccanico", "admin-tubo-meccanico"]);
 
       return {
-        success: true,
-        message: `Sincronizzazione TUBO-MECCANICO Excel -> SharePoint completata. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
+        success: skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0,
+        message: `Sincronizzazione TUBO-MECCANICO Excel -> SharePoint ${skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0 ? "completata" : "parziale: verificare i record saltati"}. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
         details: buildSyncDetailSections([
           { key: "updated", label: "Aggiornati", items: updatedLabels },
           { key: "created", label: "Creati", items: createdLabels },
@@ -7721,6 +7681,12 @@ function AuthenticatedShell() {
     }
     if (listKind === "TUBI") {
       return handleSyncTubiSharePointToExcel(onProgress);
+    }
+    if (listKind === "TUBO-MECCANICO") {
+      return {
+        success: false,
+        message: "Aggiorna Excel da Totem per TUBO-MECCANICO è sospeso: il vecchio flusso sovrascriveva l'intera riga Excel. Le modifiche del Totem continuano a essere salvate su entrambe le fonti.",
+      };
     }
     if (!sharepointService) {
       return { success: false, message: "Configurazione SharePoint mancante." };
