@@ -33,6 +33,26 @@ type SyncLogTableRow = {
   searchText: string;
 };
 
+const SYNC_LOG_PAGE_SIZE = 100;
+
+const getSyncLogStatusLabel = (key: SyncDetailSection["key"]) => {
+  switch (key) {
+    case "updated": return "Aggiornato";
+    case "created": return "Creato";
+    case "unchanged": return "Invariato";
+    case "duplicates": return "Duplicato Excel";
+    case "sharepoint-only": return "Solo SharePoint";
+    default: return "Saltato";
+  }
+};
+
+const getSyncLogStatusStyle = (key: SyncDetailSection["key"]): React.CSSProperties => {
+  if (key === "created") return { background: "#dcfce7", color: "#166534", borderColor: "#86efac" };
+  if (key === "updated") return { background: "#dbeafe", color: "#1d4ed8", borderColor: "#93c5fd" };
+  if (key === "unchanged") return { background: "#f1f5f9", color: "#475569", borderColor: "#cbd5e1" };
+  return { background: "#fff7ed", color: "#c2410c", borderColor: "#fdba74" };
+};
+
 const parseSyncLogLabel = (value: string) => {
   const labelPart = String(value || "").trim();
   const match = labelPart.match(/^(.*?)\s*\[(colata|lotto)\s+([^\]]+)\]$/i);
@@ -1212,6 +1232,8 @@ export function AdminPanel({
   const [syncDetails, setSyncDetails] = useState<SyncDetailSection[] | null>(null);
   const [isSyncLogOpen, setIsSyncLogOpen] = useState(false);
   const [syncLogSearch, setSyncLogSearch] = useState("");
+  const [syncLogSection, setSyncLogSection] = useState<SyncDetailSection["key"] | "all">("all");
+  const [syncLogPage, setSyncLogPage] = useState(1);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -2209,17 +2231,14 @@ export function AdminPanel({
   const syncDetailRows = useMemo<SyncLogTableRow[]>(
     () =>
       (syncDetails || [])
-        .filter((section) => section.key === "updated" || section.key === "created")
         .flatMap((section) =>
           section.items.map((item, index) => {
             const parsed = normalizeSyncLogItem(item);
-            const detail =
-              parsed.detail ||
-              (section.key === "created" ? "Nuovo articolo inserito" : "Articolo aggiornato");
+            const detail = parsed.detail || section.label;
 
             return {
               key: `${section.key}-${index}-${item.label}`,
-              status: section.key === "updated" ? "Aggiornato" : "Creato",
+              status: getSyncLogStatusLabel(section.key),
               statusKey: section.key,
               code: parsed.code,
               reference: parsed.reference,
@@ -2242,9 +2261,26 @@ export function AdminPanel({
 
   const filteredSyncDetailRows = useMemo(() => {
     const term = syncLogSearch.trim().toLowerCase();
-    if (!term) return syncDetailRows;
-    return syncDetailRows.filter((row) => row.searchText.includes(term));
-  }, [syncDetailRows, syncLogSearch]);
+    return syncDetailRows.filter(
+      (row) =>
+        (syncLogSection === "all" || row.statusKey === syncLogSection) &&
+        (!term || row.searchText.includes(term))
+    );
+  }, [syncDetailRows, syncLogSearch, syncLogSection]);
+
+  const syncLogTotalPages = Math.max(
+    1,
+    Math.ceil(filteredSyncDetailRows.length / SYNC_LOG_PAGE_SIZE)
+  );
+  const currentSyncLogPage = Math.min(syncLogPage, syncLogTotalPages);
+  const visibleSyncDetailRows = filteredSyncDetailRows.slice(
+    (currentSyncLogPage - 1) * SYNC_LOG_PAGE_SIZE,
+    currentSyncLogPage * SYNC_LOG_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setSyncLogPage(1);
+  }, [syncLogSearch, syncLogSection, syncDetails]);
 
   const renderField = (field: FieldConfig, form: FormState, onChange: (key: string, val: string) => void) => {
     const isDateField = field.type === "date";
@@ -2401,6 +2437,8 @@ export function AdminPanel({
                 title="Apri dettaglio sincronizzazione"
                 onClick={() => {
                   setSyncLogSearch("");
+                  setSyncLogSection("all");
+                  setSyncLogPage(1);
                   setIsSyncLogOpen(true);
                 }}
               >
@@ -2608,22 +2646,36 @@ export function AdminPanel({
             <div className="modal__header">
               <div>
                 <p className="eyebrow" style={{ marginBottom: 4 }}>Dettaglio sincronizzazione</p>
-                <h3 style={{ margin: 0 }}>Log aggiornamenti {activeList}</h3>
+                <h3 style={{ margin: 0 }}>Dettaglio sincronizzazione {activeList}</h3>
                 <p className="muted" style={{ margin: "6px 0 0" }}>
-                  Sono mostrati solo gli articoli creati o aggiornati.
+                  Consulta aggiornamenti, conflitti, duplicati e record presenti solo in SharePoint.
                 </p>
               </div>
               <button className="icon-btn" aria-label="Chiudi" onClick={() => setIsSyncLogOpen(false)} type="button">✕</button>
             </div>
             <div className="modal__body">
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
+                <button
+                  className="pill ghost"
+                  type="button"
+                  onClick={() => setSyncLogSection("all")}
+                  style={syncLogSection === "all" ? { borderColor: "#2563eb", color: "#1d4ed8" } : undefined}
+                >
+                  Tutti: {syncDetailRows.length}
+                </button>
                 {syncSummary.map((item) => (
-                  <span key={item.key} className="pill ghost">
+                  <button
+                    key={item.key}
+                    className="pill ghost"
+                    type="button"
+                    onClick={() => setSyncLogSection(item.key)}
+                    style={syncLogSection === item.key ? { borderColor: "#2563eb", color: "#1d4ed8" } : undefined}
+                  >
                     {item.label}: {item.count}
-                  </span>
+                  </button>
                 ))}
                 <span className="pill ghost" style={{ background: "#f8fafc" }}>
-                  Mostrati nel log: {syncDetailRows.length}
+                  Risultati: {filteredSyncDetailRows.length}
                 </span>
               </div>
               <div className="admin-search" style={{ marginBottom: 12 }}>
@@ -2637,6 +2689,29 @@ export function AdminPanel({
                   onChange={(e) => setSyncLogSearch(e.target.value)}
                 />
               </div>
+              {syncLogTotalPages > 1 && (
+                <div className="admin-pager" style={{ marginBottom: 12, justifyContent: "flex-end" }}>
+                  <button
+                    className="icon-btn"
+                    type="button"
+                    aria-label="Pagina precedente del log"
+                    disabled={currentSyncLogPage === 1}
+                    onClick={() => setSyncLogPage((page) => Math.max(1, page - 1))}
+                  >
+                    ←
+                  </button>
+                  <span>{currentSyncLogPage} / {syncLogTotalPages}</span>
+                  <button
+                    className="icon-btn"
+                    type="button"
+                    aria-label="Pagina successiva del log"
+                    disabled={currentSyncLogPage === syncLogTotalPages}
+                    onClick={() => setSyncLogPage((page) => Math.min(syncLogTotalPages, page + 1))}
+                  >
+                    →
+                  </button>
+                </div>
+              )}
               <div className="table-scroll modal-table">
                 <table className="inventory-table">
                   <thead>
@@ -2655,16 +2730,12 @@ export function AdminPanel({
                         </td>
                       </tr>
                     )}
-                    {filteredSyncDetailRows.map((row) => (
+                    {visibleSyncDetailRows.map((row) => (
                       <tr key={row.key}>
                         <td>
                           <span
                             className="pill ghost"
-                            style={
-                              row.statusKey === "created"
-                                ? { background: "#dcfce7", color: "#166534", borderColor: "#86efac" }
-                                : { background: "#dbeafe", color: "#1d4ed8", borderColor: "#93c5fd" }
-                            }
+                            style={getSyncLogStatusStyle(row.statusKey)}
                           >
                             {row.status}
                           </span>
