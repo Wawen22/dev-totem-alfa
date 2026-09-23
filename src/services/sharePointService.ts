@@ -1,6 +1,24 @@
 import { Client } from "@microsoft/microsoft-graph-client";
 import { SharePointListItem } from "../types/sharepoint";
 
+export type SharePointColumnDefinition = {
+  name: string;
+  displayName?: string;
+  columnGroup?: string;
+  hidden?: boolean;
+  readOnly?: boolean;
+  required?: boolean;
+  boolean?: Record<string, unknown>;
+  calculated?: Record<string, unknown>;
+  choice?: { choices?: string[]; allowTextEntry?: boolean };
+  currency?: Record<string, unknown>;
+  dateTime?: Record<string, unknown>;
+  lookup?: Record<string, unknown>;
+  number?: Record<string, unknown>;
+  personOrGroup?: Record<string, unknown>;
+  text?: { maxLength?: number };
+};
+
 export class SharePointService {
   private siteId: string;
 
@@ -128,12 +146,12 @@ export class SharePointService {
       .delete();
   }
 
-  async listColumns(listId: string): Promise<Array<{ name: string; displayName?: string; columnGroup?: string }>> {
+  async listColumns(listId: string): Promise<SharePointColumnDefinition[]> {
     if (!listId) throw new Error("listId mancante");
     const client = await this.getClient();
     const response = await client
       .api(`/sites/${this.siteId}/lists/${listId}/columns`)
-      .select("name,displayName,columnGroup")
+      .top(999)
       .get();
 
     return response.value || [];

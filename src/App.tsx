@@ -3,7 +3,7 @@ import { AuthenticatedTemplate, UnauthenticatedTemplate, useMsal, MsalProvider }
 import { EventType, PublicClientApplication } from "@azure/msal-browser";
 import { msalConfig, loginRequest } from "./auth/authConfig";
 import { useAuthenticatedGraphClient } from "./hooks/useAuthenticatedGraphClient";
-import { SharePointService } from "./services/sharePointService";
+import { SharePointColumnDefinition, SharePointService } from "./services/sharePointService";
 import { forgiatiColumns, ForgiatoColumn } from "./config/forgiatiColumns";
 import { tubiColumns } from "./config/tubiColumns";
 import { oringHnbrColumns } from "./config/oringHnbrColumns";
@@ -963,6 +963,96 @@ const normalizeDateValue = (value: unknown): string | null => {
   const t = getTimeValue(value);
   if (!t) return null;
   return new Date(t).toISOString();
+};
+
+const prepareFieldsForSharePointCreate = (
+  fields: Record<string, unknown>,
+  columns: SharePointColumnDefinition[]
+) => {
+  const columnByName = new Map(columns.map((column) => [column.name, column]));
+  const prepared: Record<string, unknown> = {};
+
+  Object.entries(fields).forEach(([fieldName, value]) => {
+    if (value === null || value === undefined || value === "") return;
+    const column = columnByName.get(fieldName);
+    if (!column) {
+      throw new Error(`Colonna SharePoint non trovata: ${fieldName}`);
+    }
+    if (column.readOnly || column.calculated) return;
+    if (column.lookup || column.personOrGroup) {
+      throw new Error(
+        `La colonna ${column.displayName || fieldName} richiede un valore SharePoint speciale`
+      );
+    }
+    if (column.number || column.currency) {
+      const numericValue = typeof value === "number"
+        ? value
+        : toNumberOrNull(String(value));
+      if (numericValue === null || !Number.isFinite(numericValue)) {
+        throw new Error(
+          `Valore non numerico per ${column.displayName || fieldName}: ${String(value)}`
+        );
+      }
+      prepared[fieldName] = numericValue;
+      return;
+    }
+    if (column.dateTime) {
+      const dateValue = normalizeDateValue(value);
+      if (!dateValue) {
+        throw new Error(
+          `Data non valida per ${column.displayName || fieldName}: ${String(value)}`
+        );
+      }
+      prepared[fieldName] = dateValue;
+      return;
+    }
+    if (column.boolean) {
+      prepared[fieldName] = typeof value === "boolean"
+        ? value
+        : ["1", "true", "si", "sì", "yes"].includes(String(value).trim().toLowerCase());
+      return;
+    }
+    if (column.text || column.choice) {
+      const textValue = String(value);
+      if (column.text?.maxLength && textValue.length > column.text.maxLength) {
+        throw new Error(
+          `Valore troppo lungo per ${column.displayName || fieldName}: massimo ${column.text.maxLength} caratteri`
+        );
+      }
+      if (
+        column.choice?.choices?.length &&
+        !column.choice.allowTextEntry &&
+        !column.choice.choices.some(
+          (choice) => choice.toLocaleLowerCase("it") === textValue.toLocaleLowerCase("it")
+        )
+      ) {
+        throw new Error(
+          `Valore non ammesso per ${column.displayName || fieldName}: ${textValue}`
+        );
+      }
+      prepared[fieldName] = textValue;
+      return;
+    }
+    prepared[fieldName] = value;
+  });
+
+  const missingRequiredColumns = columns.filter(
+    (column) =>
+      column.required &&
+      !column.hidden &&
+      !column.readOnly &&
+      !column.calculated &&
+      (prepared[column.name] === undefined || prepared[column.name] === null || prepared[column.name] === "")
+  );
+  if (missingRequiredColumns.length > 0) {
+    throw new Error(
+      `Campi SharePoint obbligatori mancanti: ${missingRequiredColumns
+        .map((column) => column.displayName || column.name)
+        .join(", ")}`
+    );
+  }
+
+  return prepared;
 };
 
 const buildTubiSyncKey = (title: string, identLotto?: string | null, colata?: string | null) => {
@@ -7258,16 +7348,20 @@ function AuthenticatedShell() {
           }
 
           if (matches.length === 0) {
+            const createFields = prepareFieldsForSharePointCreate(
+              record.fields,
+              sharePointColumns
+            );
             const createdItem = await sharepointService.createItem<Record<string, unknown>>(
               forgiatiListId,
-              record.fields
+              createFields
             );
             usedItemIds.add(createdItem.id);
             const current = spIndex.get(record.key) || [];
             current.push({
               item: createdItem,
               comparableFieldMap: buildForgiatiFieldsFieldStateMap(columns, {
-                ...(createdItem.fields || record.fields),
+                ...(createdItem.fields || createFields),
                 IdentLotto: record.identLotto,
               }),
             });
