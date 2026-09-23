@@ -4,7 +4,7 @@ import { SharePointService } from "../../services/sharePointService";
 import { useCachedList, clearCacheKeys } from "../../hooks/useCachedList";
 import { formatSharePointDate } from "../../utils/dateUtils";
 import { SharePointListItem } from "../../types/sharepoint";
-import { SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "../../types/sync";
+import { SyncCleanupPlan, SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "../../types/sync";
 
 type ListKind = "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO";
 
@@ -1230,6 +1230,8 @@ export function AdminPanel({
   const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "success" | "error">("idle");
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncDetails, setSyncDetails] = useState<SyncDetailSection[] | null>(null);
+  const [syncCleanupPlan, setSyncCleanupPlan] = useState<SyncCleanupPlan | null>(null);
+  const [cleanupStatus, setCleanupStatus] = useState<"idle" | "deleting">("idle");
   const [isSyncLogOpen, setIsSyncLogOpen] = useState(false);
   const [syncLogSearch, setSyncLogSearch] = useState("");
   const [syncLogSection, setSyncLogSection] = useState<SyncDetailSection["key"] | "all">("all");
@@ -2195,12 +2197,14 @@ export function AdminPanel({
     setSyncStatus("syncing");
     setSyncMessage("Avvio sincronizzazione...");
     setSyncDetails(null);
+    setSyncCleanupPlan(null);
     setIsSyncLogOpen(false);
     setSyncLogSearch("");
     const result = await onSyncExcel(activeList, (msg) => setSyncMessage(msg));
     setSyncStatus(result.success ? "success" : "error");
     setSyncMessage(result.message);
     setSyncDetails(result.details || null);
+    setSyncCleanupPlan(result.cleanupPlan || null);
   }, [onSyncExcel, activeList]);
 
   const handleSyncFromExcel = useCallback(async () => {
@@ -2208,15 +2212,62 @@ export function AdminPanel({
     setSyncStatus("syncing");
     setSyncMessage("Avvio sincronizzazione Excel -> SharePoint...");
     setSyncDetails(null);
+    setSyncCleanupPlan(null);
     setIsSyncLogOpen(false);
     setSyncLogSearch("");
     const result = await onSyncFromExcel(activeList, (msg) => setSyncMessage(msg));
     setSyncStatus(result.success ? "success" : "error");
     setSyncMessage(result.message);
     setSyncDetails(result.details || null);
+    setSyncCleanupPlan(result.cleanupPlan || null);
     // A partial sync may still have created new SharePoint items.
     activeRefresh();
   }, [onSyncFromExcel, activeList, activeRefresh]);
+
+  const handleSafeDuplicateCleanup = useCallback(async () => {
+    if (!service || !activeListId || !syncCleanupPlan || syncCleanupPlan.safeDelete.length === 0) return;
+    const candidates = syncCleanupPlan.safeDelete;
+    const confirmed = window.confirm(
+      `Saranno eliminati ${candidates.length} elementi SharePoint duplicati con la stessa chiave e gli stessi valori. Gli elementi con dati diversi o senza codice non saranno eliminati. Continuare?`
+    );
+    if (!confirmed) return;
+
+    setCleanupStatus("deleting");
+    let deleted = 0;
+    const failed: typeof candidates = [];
+    const batchSize = 5;
+
+    for (let index = 0; index < candidates.length; index += batchSize) {
+      const batch = candidates.slice(index, index + batchSize);
+      const results = await Promise.allSettled(
+        batch.map((candidate) => service.deleteItem(activeListId, candidate.itemId))
+      );
+      results.forEach((result, resultIndex) => {
+        if (result.status === "fulfilled") deleted += 1;
+        else failed.push(batch[resultIndex]);
+      });
+      setSyncMessage(
+        `Pulizia duplicati sicuri: ${deleted} eliminati, ${failed.length} errori (${Math.min(index + batch.length, candidates.length)}/${candidates.length})...`
+      );
+    }
+
+    clearCacheKeys(getCacheKeysForList(activeList));
+    activeRefresh();
+    setCleanupStatus("idle");
+    setIsSyncLogOpen(false);
+    setSyncDetails(null);
+    setSyncCleanupPlan(
+      failed.length > 0
+        ? { ...syncCleanupPlan, safeDelete: failed }
+        : null
+    );
+    setSyncStatus(failed.length > 0 ? "error" : "success");
+    setSyncMessage(
+      failed.length > 0
+        ? `Pulizia parziale: ${deleted} elementi eliminati, ${failed.length} non eliminati. Riesegui la verifica.`
+        : `Pulizia completata: ${deleted} duplicati identici eliminati. Riesegui Aggiorna Totem da Excel per il controllo finale.`
+    );
+  }, [service, activeListId, syncCleanupPlan, activeList, activeRefresh]);
 
   const syncSummary = useMemo(
     () =>
@@ -2654,6 +2705,28 @@ export function AdminPanel({
               <button className="icon-btn" aria-label="Chiudi" onClick={() => setIsSyncLogOpen(false)} type="button">✕</button>
             </div>
             <div className="modal__body">
+              {syncCleanupPlan && (
+                <div className="alert warning" style={{ marginBottom: 12 }}>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+                    <div>
+                      <strong>{syncCleanupPlan.safeDelete.length} duplicati identici eliminabili automaticamente.</strong>
+                      <div style={{ marginTop: 4 }}>
+                        Verrà conservato un elemento per ogni chiave. Altri {syncCleanupPlan.requiresReview} elementi restano protetti.
+                      </div>
+                    </div>
+                    <button
+                      className="btn danger-ghost"
+                      type="button"
+                      disabled={cleanupStatus === "deleting" || syncCleanupPlan.safeDelete.length === 0}
+                      onClick={handleSafeDuplicateCleanup}
+                    >
+                      {cleanupStatus === "deleting"
+                        ? "Pulizia in corso..."
+                        : `Elimina ${syncCleanupPlan.safeDelete.length} duplicati sicuri`}
+                    </button>
+                  </div>
+                </div>
+              )}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
                 <button
                   className="pill ghost"

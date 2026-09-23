@@ -7479,6 +7479,47 @@ function AuthenticatedShell() {
           });
         });
 
+      const safeDeleteById = new Map<
+        string,
+        { itemId: string; label: string; reason: "identical-duplicate" }
+      >();
+      const resolvedDuplicateKeeperIds = new Set<string>();
+      const comparableSignature = (fieldMap: Map<string, TubiSyncFieldState>) =>
+        Array.from(fieldMap.entries())
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([fieldName, state]) => `${fieldName}:${state.compare}`)
+          .join("|");
+
+      spIndex.forEach((matches, key) => {
+        if (matches.length < 2) return;
+        const signatures = new Set(
+          matches.map((match) => comparableSignature(match.comparableFieldMap))
+        );
+        if (signatures.size !== 1) return;
+        const sortedMatches = [...matches].sort((left, right) => {
+          const leftId = Number(left.item.id);
+          const rightId = Number(right.item.id);
+          if (Number.isFinite(leftId) && Number.isFinite(rightId)) return leftId - rightId;
+          return left.item.id.localeCompare(right.item.id);
+        });
+        resolvedDuplicateKeeperIds.add(sortedMatches[0].item.id);
+        sortedMatches.slice(1).forEach((match) => {
+          safeDeleteById.set(match.item.id, {
+            itemId: match.item.id,
+            label: key,
+            reason: "identical-duplicate",
+          });
+        });
+      });
+
+      const safeDelete = Array.from(safeDeleteById.values());
+      const requiresReview = spItems.filter(
+        (item) =>
+          !usedItemIds.has(item.id) &&
+          !safeDeleteById.has(item.id) &&
+          !resolvedDuplicateKeeperIds.has(item.id)
+      ).length;
+
       clearCacheKeys(["forgiati", "admin-forgiati"]);
 
       return {
@@ -7492,6 +7533,11 @@ function AuthenticatedShell() {
           { key: "duplicates", label: "Duplicati Excel ignorati", items: duplicateLabels },
           { key: "sharepoint-only", label: "Solo SharePoint / duplicati", items: sharePointOnlyLabels },
         ]),
+        cleanupPlan: {
+          listKind: "FORGIATI",
+          safeDelete,
+          requiresReview,
+        },
       };
     } catch (err: any) {
       console.error("Errore sync FORGIATI Excel -> SharePoint", err);

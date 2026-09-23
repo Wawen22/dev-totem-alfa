@@ -26,8 +26,21 @@ export type SyncDetailSection = {
   items: SyncDetailItem[];
 };
 
+export type SyncCleanupCandidate = {
+  itemId: string;
+  label: string;
+  reason: "identical-duplicate";
+};
+
+export type SyncCleanupPlan = {
+  listKind: "FORGIATI";
+  safeDelete: SyncCleanupCandidate[];
+  requiresReview: number;
+};
+
 export type SyncResult = {
   success: boolean;
   message: string;
   details?: SyncDetailSection[];
+  cleanupPlan?: SyncCleanupPlan;
 };
