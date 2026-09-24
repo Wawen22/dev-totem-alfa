@@ -6888,6 +6888,22 @@ function AuthenticatedShell() {
       onProgress?.("Caricamento righe TUBI da Excel...");
       const { columns, rows, dataBodyRange, driveId, driveItem } = await resolveTubiExcelContext();
       const spItems = await sharepointService.listItems<Record<string, unknown>>(tubiListId);
+      const sharePointColumns = await sharepointService.listColumns(tubiListId);
+      const sharePointColumnNames = new Set(sharePointColumns.map((column) => column.name));
+      const requiredSyncColumns = [
+        "Title",
+        "IdentLotto",
+        ...TUBI_SHAREPOINT_TEXT_FIELDS,
+        ...TUBI_SHAREPOINT_DATE_FIELDS,
+      ];
+      const missingSyncColumns = Array.from(new Set(requiredSyncColumns)).filter(
+        (fieldName) => !sharePointColumnNames.has(fieldName)
+      );
+      if (missingSyncColumns.length > 0) {
+        throw new Error(
+          `Colonne SharePoint TUBI mancanti o con nome interno diverso: ${missingSyncColumns.join(", ")}`
+        );
+      }
       const progressiveMap = buildProgressiveMapForGroupedItems(spItems);
       const fieldLabelMap = buildTubiFieldLabelMap(columns);
       const spRecords = spItems.reduce<Array<{
@@ -7061,17 +7077,24 @@ function AuthenticatedShell() {
         }
 
         if (!currentRecord) {
-          const createdItem = await sharepointService.createItem<Record<string, unknown>>(tubiListId, record.fields);
+          const createFields = prepareFieldsForSharePointCreate(
+            record.fields,
+            sharePointColumns
+          );
+          const createdItem = await sharepointService.createItem<Record<string, unknown>>(
+            tubiListId,
+            createFields
+          );
           const createdRecord = {
             item: createdItem,
             title: record.title,
             identLotto: record.identLotto,
             colata: record.colata,
-            fields: createdItem.fields || record.fields,
+            fields: createdItem.fields || createFields,
             matchKeys: record.matchKeys,
             lottoIdentityKey: record.lottoIdentityKey,
             comparableFieldMap: buildTubiFieldsFieldStateMap(columns, {
-              ...(createdItem.fields || record.fields),
+              ...(createdItem.fields || createFields),
               IdentLotto: record.identLotto,
             }),
           };
@@ -7151,18 +7174,134 @@ function AuthenticatedShell() {
         }
       }
 
-      clearCacheKeys(["tubi"]);
+      const sharePointOnlyLabels = spItems
+        .filter((item) => !usedItemIds.has(item.id))
+        .map((item) => {
+          const fields = (item.fields || {}) as Record<string, unknown>;
+          const title = normalizeTrimmedValue(fields.Title) || "(senza codice)";
+          return buildTubiSyncDetailItem({
+            title,
+            colata: getResolvedTubiColata(fields),
+            identLotto: getResolvedTubiIdentLotto(item, progressiveMap),
+            detail: `Presente solo in SharePoint o duplicato (ID ${item.id}): nessuna eliminazione eseguita`,
+          });
+        });
+
+      const safeDeleteById = new Map<
+        string,
+        {
+          itemId: string;
+          label: string;
+          reason: "identical-duplicate" | "incomplete-duplicate" | "empty-item";
+        }
+      >();
+      const resolvedDuplicateKeeperIds = new Set<string>();
+      const comparableSignature = (fieldMap: Map<string, TubiSyncFieldState>) =>
+        Array.from(fieldMap.entries())
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([fieldName, state]) => `${fieldName}:${state.compare}`)
+          .join("|");
+
+      spLottoIndex.forEach((matches, key) => {
+        if (matches.length < 2) return;
+        const signatures = new Set(
+          matches.map((match) => comparableSignature(match.comparableFieldMap))
+        );
+        if (signatures.size !== 1) return;
+        const sortedMatches = [...matches].sort((left, right) => {
+          const leftId = Number(left.item.id);
+          const rightId = Number(right.item.id);
+          if (Number.isFinite(leftId) && Number.isFinite(rightId)) return leftId - rightId;
+          return left.item.id.localeCompare(right.item.id);
+        });
+        resolvedDuplicateKeeperIds.add(sortedMatches[0].item.id);
+        sortedMatches.slice(1).forEach((match) => {
+          safeDeleteById.set(match.item.id, {
+            itemId: match.item.id,
+            label: key,
+            reason: "identical-duplicate",
+          });
+        });
+      });
+
+      excelRecords.forEach((record) => {
+        const matches = spLottoIndex.get(record.lottoIdentityKey) || [];
+        if (matches.length < 2) return;
+        const excelSignature = comparableSignature(record.comparableFieldMap);
+        const exactMatches = matches.filter(
+          (match) => comparableSignature(match.comparableFieldMap) === excelSignature
+        );
+        if (exactMatches.length === 0) return;
+        const keeper = [...exactMatches].sort((left, right) => {
+          const leftId = Number(left.item.id);
+          const rightId = Number(right.item.id);
+          if (Number.isFinite(leftId) && Number.isFinite(rightId)) return leftId - rightId;
+          return left.item.id.localeCompare(right.item.id);
+        })[0];
+        resolvedDuplicateKeeperIds.add(keeper.item.id);
+        matches.forEach((match) => {
+          if (match.item.id === keeper.item.id) return;
+          const isNonConflictingSubset = Array.from(match.comparableFieldMap.entries()).every(
+            ([fieldName, state]) => {
+              const excelValue = record.comparableFieldMap.get(fieldName)?.compare || "";
+              return state.compare === "" || state.compare === excelValue;
+            }
+          );
+          if (isNonConflictingSubset) {
+            safeDeleteById.set(match.item.id, {
+              itemId: match.item.id,
+              label: record.lottoIdentityKey,
+              reason: "incomplete-duplicate",
+            });
+          }
+        });
+      });
+
+      const managedBusinessFields = Array.from(new Set([
+        ...TUBI_SHAREPOINT_TEXT_FIELDS,
+        ...TUBI_SHAREPOINT_DATE_FIELDS,
+      ]));
+      spItems.forEach((item) => {
+        const fields = (item.fields || {}) as Record<string, unknown>;
+        if (normalizeTrimmedValue(fields.Title)) return;
+        const hasManagedBusinessData = managedBusinessFields.some(
+          (fieldName) => normalizeTrimmedValue(fields[fieldName]) !== null
+        );
+        if (!hasManagedBusinessData) {
+          safeDeleteById.set(item.id, {
+            itemId: item.id,
+            label: `(elemento vuoto) [ID ${item.id}]`,
+            reason: "empty-item",
+          });
+        }
+      });
+
+      const safeDelete = Array.from(safeDeleteById.values());
+      const requiresReview = spItems.filter(
+        (item) =>
+          !usedItemIds.has(item.id) &&
+          !safeDeleteById.has(item.id) &&
+          !resolvedDuplicateKeeperIds.has(item.id)
+      ).length;
+
+      clearCacheKeys(["tubi", "admin-tubi"]);
 
       return {
-        success: skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0,
-        message: `Sincronizzazione TUBI Excel -> SharePoint ${skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0 ? "completata" : "parziale: verificare i record saltati"}. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
+        success: skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0 && sharePointOnlyLabels.length === 0,
+        message: `Sincronizzazione TUBI Excel -> SharePoint ${skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0 && sharePointOnlyLabels.length === 0 ? "completata" : "parziale: verificare il dettaglio"}. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati Excel ignorati ${duplicateExcelRows}, non associati SharePoint ${sharePointOnlyLabels.length}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
         details: buildSyncDetailSections([
           { key: "updated", label: "Aggiornati", items: updatedLabels },
           { key: "created", label: "Creati", items: createdLabels },
           { key: "unchanged", label: "Invariati", items: unchangedLabels },
           { key: "skipped", label: "Saltati", items: [...skippedLabels, ...outsideTableLabels] },
           { key: "duplicates", label: "Duplicati Excel ignorati", items: duplicateLabels },
+          { key: "sharepoint-only", label: "Solo SharePoint / duplicati", items: sharePointOnlyLabels },
         ]),
+        cleanupPlan: {
+          listKind: "TUBI",
+          safeDelete,
+          requiresReview,
+        },
       };
     } catch (err: any) {
       console.error("Errore sync TUBI Excel -> SharePoint", err);

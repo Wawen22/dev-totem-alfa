@@ -33,7 +33,7 @@ export type SyncCleanupCandidate = {
 };
 
 export type SyncCleanupPlan = {
-  listKind: "FORGIATI";
+  listKind: "FORGIATI" | "TUBI";
   safeDelete: SyncCleanupCandidate[];
   requiresReview: number;
 };

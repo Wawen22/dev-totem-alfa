@@ -1312,6 +1312,14 @@ export function AdminPanel({
       : refreshOringNbr;
   const fieldSet = getFieldSet(activeList);
 
+  useEffect(() => {
+    setSyncDetails(null);
+    setSyncCleanupPlan(null);
+    setIsSyncLogOpen(false);
+    setSyncMessage(null);
+    setSyncStatus("idle");
+  }, [activeList]);
+
   const tubiGroupedRows = useMemo(() => {
     const map = new Map<string, SharePointListItem<Record<string, unknown>>[]>();
     (tubiItems || []).forEach((item) => {
@@ -2225,7 +2233,13 @@ export function AdminPanel({
   }, [onSyncFromExcel, activeList, activeRefresh]);
 
   const handleSafeDuplicateCleanup = useCallback(async () => {
-    if (!service || !activeListId || !syncCleanupPlan || syncCleanupPlan.safeDelete.length === 0) return;
+    if (
+      !service ||
+      !activeListId ||
+      !syncCleanupPlan ||
+      syncCleanupPlan.listKind !== activeList ||
+      syncCleanupPlan.safeDelete.length === 0
+    ) return;
     const candidates = syncCleanupPlan.safeDelete;
     const confirmed = window.confirm(
       `Saranno eliminati ${candidates.length} elementi SharePoint classificati come duplicati identici, copie parziali senza valori discordanti o elementi completamente vuoti. I conflitti resteranno protetti. Continuare?`
