@@ -336,7 +336,7 @@ const tubiExcelColumnFieldMap = (() => {
   map.set(normalizeExcelKey("GIACENZAMM NON TAGLIATO"), "field_20");
   map.set(normalizeExcelKey("DATA ULTIMO PRELIEVO"), "field_21");
   map.set(normalizeExcelKey("PREZZO KGMT"), "field_22");
-  map.set(normalizeExcelKey("PREZZO METRO"), "field_22");
+  map.set(normalizeExcelKey("PREZZO METRO"), "field_23");
   map.set(normalizeExcelKey("ACQUISTATO DAL CURATORE"), "field_24");
   map.set(normalizeExcelKey("NO COMMESSA"), "field_25");
   map.set(normalizeExcelKey("N COMMESSA"), "field_25");
@@ -7263,6 +7263,7 @@ function AuthenticatedShell() {
       const createdLabels: SyncDetailItem[] = [];
       const unchangedLabels: SyncDetailItem[] = [];
       const skippedLabels: SyncDetailItem[] = [];
+      let consecutiveWriteErrors = 0;
 
       for (let i = 0; i < excelRecords.length; i++) {
         const record = excelRecords[i];
@@ -7274,114 +7275,141 @@ function AuthenticatedShell() {
           }));
           continue;
         }
-        const lottoMatches = spLottoIndex.get(record.lottoIdentityKey) || [];
-        if (lottoMatches.length > 1) {
-          skipped++;
-          skippedLabels.push(buildTubiSyncDetailItem({
-            title: record.title, colata: record.colata, identLotto: record.identLotto,
-            detail: "Chiave lotto duplicata in SharePoint: correzione manuale necessaria",
-          }));
-          continue;
-        }
-        const currentRecord = lottoMatches[0] || null;
+        try {
+          const lottoMatches = spLottoIndex.get(record.lottoIdentityKey) || [];
+          if (lottoMatches.length > 1) {
+            skipped++;
+            skippedLabels.push(buildTubiSyncDetailItem({
+              title: record.title, colata: record.colata, identLotto: record.identLotto,
+              detail: "Chiave lotto duplicata in SharePoint: correzione manuale necessaria",
+            }));
+            continue;
+          }
+          const currentRecord = lottoMatches[0] || null;
 
-        if (currentRecord && usedItemIds.has(currentRecord.item.id)) {
-          skipped++;
-          skippedLabels.push(buildTubiSyncDetailItem({
-            title: record.title, colata: record.colata, identLotto: record.identLotto,
-            detail: "Chiave lotto già associata a un'altra riga Excel",
-          }));
-          continue;
-        }
+          if (currentRecord && usedItemIds.has(currentRecord.item.id)) {
+            skipped++;
+            skippedLabels.push(buildTubiSyncDetailItem({
+              title: record.title, colata: record.colata, identLotto: record.identLotto,
+              detail: "Chiave lotto già associata a un'altra riga Excel",
+            }));
+            continue;
+          }
 
-        if (!currentRecord) {
-          const createFields = prepareFieldsForSharePointCreate(
-            record.fields,
-            sharePointColumns
-          );
-          const createdItem = await sharepointService.createItem<Record<string, unknown>>(
-            tubiListId,
-            createFields
-          );
-          const createdRecord = {
-            item: createdItem,
+          if (!currentRecord) {
+            const createFields = prepareFieldsForSharePointCreate(
+              record.fields,
+              sharePointColumns
+            );
+            const createdItem = await sharepointService.createItem<Record<string, unknown>>(
+              tubiListId,
+              createFields
+            );
+            const createdRecord = {
+              item: createdItem,
+              title: record.title,
+              identLotto: record.identLotto,
+              colata: record.colata,
+              fields: createdItem.fields || createFields,
+              matchKeys: record.matchKeys,
+              lottoIdentityKey: record.lottoIdentityKey,
+              comparableFieldMap: buildTubiFieldsFieldStateMap(columns, {
+                ...(createdItem.fields || createFields),
+                IdentLotto: record.identLotto,
+              }),
+            };
+            usedItemIds.add(createdItem.id);
+            spRecords.push(createdRecord);
+            createdRecord.matchKeys.forEach((key) => {
+              const current = spIndex.get(key) || [];
+              current.push(createdRecord);
+              spIndex.set(key, current);
+            });
+            spLottoIndex.set(createdRecord.lottoIdentityKey, [createdRecord]);
+            created++;
+            createdLabels.push(
+              buildTubiSyncDetailItem({
+                title: record.title,
+                colata: record.colata,
+                identLotto: record.identLotto,
+                detail: "Nuovo articolo creato in SharePoint",
+              })
+            );
+          } else {
+            usedItemIds.add(currentRecord.item.id);
+            const changedFields = diffComparableTubiFieldMaps(
+              currentRecord.comparableFieldMap,
+              record.comparableFieldMap,
+              fieldLabelMap
+            );
+
+            if (changedFields.length === 0) {
+              const storedIdentLotto = normalizeTrimmedValue(
+                (currentRecord.item.fields as Record<string, unknown>).IdentLotto
+              );
+              if (normalizeExcelKey(storedIdentLotto || "") !== normalizeExcelKey(record.identLotto)) {
+                await sharepointService.updateItem<Record<string, unknown>>(
+                  tubiListId,
+                  currentRecord.item.id,
+                  { IdentLotto: record.identLotto }
+                );
+                currentRecord.item.fields = {
+                  ...currentRecord.item.fields,
+                  IdentLotto: record.identLotto,
+                };
+                updated++;
+                updatedLabels.push(
+                  buildTubiSyncDetailItem({
+                    title: record.title,
+                    colata: record.colata,
+                    identLotto: record.identLotto,
+                    detail: "Identificativo lotto allineato",
+                  })
+                );
+              } else {
+                unchanged++;
+                unchangedLabels.push(
+                  buildTubiSyncDetailItem({
+                    title: record.title,
+                    colata: record.colata,
+                    identLotto: record.identLotto,
+                    detail: "Nessuna differenza rilevata",
+                  })
+                );
+              }
+            } else {
+              skipped++;
+              skippedLabels.push(buildTubiSyncDetailItem({
+                title: record.title, colata: record.colata, identLotto: record.identLotto,
+                detail: "Conflitto Excel / Totem: valori diversi, nessuna sovrascrittura",
+                changes: changedFields,
+              }));
+            }
+          }
+          consecutiveWriteErrors = recordWriteOutcome(consecutiveWriteErrors, true);
+        } catch (rowErr: any) {
+          const message = rowErr?.message || "Errore SharePoint in creazione/aggiornamento";
+          console.error("Errore sync TUBI Excel -> SharePoint su record", {
             title: record.title,
             identLotto: record.identLotto,
             colata: record.colata,
-            fields: createdItem.fields || createFields,
-            matchKeys: record.matchKeys,
-            lottoIdentityKey: record.lottoIdentityKey,
-            comparableFieldMap: buildTubiFieldsFieldStateMap(columns, {
-              ...(createdItem.fields || createFields),
-              IdentLotto: record.identLotto,
-            }),
-          };
-          usedItemIds.add(createdItem.id);
-          spRecords.push(createdRecord);
-          createdRecord.matchKeys.forEach((key) => {
-            const current = spIndex.get(key) || [];
-            current.push(createdRecord);
-            spIndex.set(key, current);
+            fields: record.fields,
+            error: rowErr,
           });
-          spLottoIndex.set(createdRecord.lottoIdentityKey, [createdRecord]);
-          created++;
-          createdLabels.push(
+          skipped++;
+          skippedLabels.push(
             buildTubiSyncDetailItem({
               title: record.title,
               colata: record.colata,
               identLotto: record.identLotto,
-              detail: "Nuovo articolo creato in SharePoint",
+              detail: message,
             })
           );
-        } else {
-          usedItemIds.add(currentRecord.item.id);
-          const changedFields = diffComparableTubiFieldMaps(
-            currentRecord.comparableFieldMap,
-            record.comparableFieldMap,
-            fieldLabelMap
-          );
-
-          if (changedFields.length === 0) {
-            const storedIdentLotto = normalizeTrimmedValue(
-              (currentRecord.item.fields as Record<string, unknown>).IdentLotto
+          consecutiveWriteErrors = recordWriteOutcome(consecutiveWriteErrors, false);
+          if (consecutiveWriteErrors >= MAX_CONSECUTIVE_SYNC_WRITE_FAILURES) {
+            throw new Error(
+              `Sincronizzazione interrotta dopo ${MAX_CONSECUTIVE_SYNC_WRITE_FAILURES} errori SharePoint consecutivi. Ultimo record: ${record.title} (${record.identLotto}). ${message}`
             );
-            if (normalizeExcelKey(storedIdentLotto || "") !== normalizeExcelKey(record.identLotto)) {
-              await sharepointService.updateItem<Record<string, unknown>>(
-                tubiListId,
-                currentRecord.item.id,
-                { IdentLotto: record.identLotto }
-              );
-              currentRecord.item.fields = {
-                ...currentRecord.item.fields,
-                IdentLotto: record.identLotto,
-              };
-              updated++;
-              updatedLabels.push(
-                buildTubiSyncDetailItem({
-                  title: record.title,
-                  colata: record.colata,
-                  identLotto: record.identLotto,
-                  detail: "Identificativo lotto allineato",
-                })
-              );
-            } else {
-              unchanged++;
-              unchangedLabels.push(
-                buildTubiSyncDetailItem({
-                  title: record.title,
-                  colata: record.colata,
-                  identLotto: record.identLotto,
-                  detail: "Nessuna differenza rilevata",
-                })
-              );
-            }
-          } else {
-            skipped++;
-            skippedLabels.push(buildTubiSyncDetailItem({
-              title: record.title, colata: record.colata, identLotto: record.identLotto,
-              detail: "Conflitto Excel / Totem: valori diversi, nessuna sovrascrittura",
-              changes: changedFields,
-            }));
           }
         }
 

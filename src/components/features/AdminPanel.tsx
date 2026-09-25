@@ -481,7 +481,7 @@ const buildTubiExcelColumnMap = () => {
   map.set(normalizeExcelKey("GIACENZAMM NON TAGLIATO"), "field_20");
   map.set(normalizeExcelKey("DATA ULTIMO PRELIEVO"), "field_21");
   map.set(normalizeExcelKey("PREZZO KGMT"), "field_22");
-  map.set(normalizeExcelKey("PREZZO METRO"), "field_22");
+  map.set(normalizeExcelKey("PREZZO METRO"), "field_23");
   map.set(normalizeExcelKey("ACQUISTATO DAL CURATORE"), "field_24");
   map.set(normalizeExcelKey("NO COMMESSA"), "field_25");
   map.set(normalizeExcelKey("N COMMESSA"), "field_25");
