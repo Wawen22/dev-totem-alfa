@@ -2391,8 +2391,9 @@ export function AdminPanel({
     setSyncMessage(result.message);
     setSyncDetails(result.details || null);
     setSyncCleanupPlan(result.cleanupPlan || null);
-    // A partial sync may still have created new SharePoint items.
-    activeRefresh();
+    // Aspetta il nuovo caricamento: altrimenti il form può conservare il
+    // vecchio snapshot mentre la sincronizzazione ha già scritto SharePoint.
+    await activeRefresh();
   }, [onSyncFromExcel, activeList, activeRefresh]);
 
   const handleSafeDuplicateCleanup = useCallback(async () => {
