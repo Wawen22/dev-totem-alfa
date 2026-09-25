@@ -11,6 +11,7 @@ import { oringNbrColumns } from "./config/oringNbrColumns";
 import { sparkGupsColumns } from "./config/sparkGupsColumns";
 import { filoFlussoColumns } from "./config/filoFlussoColumns";
 import { tuboMeccanicoColumns } from "./config/tuboMeccanicoColumns";
+import { flangeColumns } from "./config/flangeColumns";
 import { SharePointListItem } from "./types/sharepoint";
 import { SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "./types/sync";
 import { formatSharePointDate } from "./utils/dateUtils";
@@ -44,11 +45,12 @@ msalInstance
 type ForgiatoItem = SharePointListItem<Record<string, unknown>>;
 type TubiItem = SharePointListItem<Record<string, unknown>>;
 type TuboMeccanicoItem = SharePointListItem<Record<string, unknown>>;
+type FlangeItem = SharePointListItem<Record<string, unknown>>;
 type FiloFlussoItem = SharePointListItem<Record<string, unknown>>;
 
 type CartItem = {
   key: string;
-  source: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO";
+  source: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO" | "FLANGE";
   itemId: string;
   title: string;
   bolla?: unknown;
@@ -1823,6 +1825,102 @@ interface SelectionStateProps {
   selectedItems: Record<string, CartItem>;
   onToggle: (item: CartItem, isSelected: boolean) => void;
   selectionLimitReached: boolean;
+}
+
+function FlangePanel() {
+  const getClient = useAuthenticatedGraphClient();
+  const siteId = import.meta.env.VITE_SHAREPOINT_SITE_ID;
+  const listId = import.meta.env.VITE_FLANGE_LIST_ID;
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+
+  const service = useMemo(() => (siteId ? new SharePointService(getClient, siteId) : null), [getClient, siteId]);
+  const { data: rawRows, loading, error, refresh } = useCachedList<Record<string, unknown>>(service, listId, "flange");
+
+  const rows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const filtered = rawRows.filter((item) => {
+      const fields = item.fields as Record<string, unknown>;
+      if (!toStr(fields.Title).trim()) return false;
+      if (!term) return true;
+      return flangeColumns.some((column) => toStr(fields[column.field]).toLowerCase().includes(term));
+    });
+    return filtered.sort((left, right) =>
+      compareTubiTitle(toStr((left.fields as Record<string, unknown>).Title), toStr((right.fields as Record<string, unknown>).Title))
+    );
+  }, [rawRows, search]);
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const visibleRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  useEffect(() => setPage(1), [search, pageSize]);
+
+  if (!listId) {
+    return <div className="panel"><div className="panel-content"><div className="alert warning">Configura <code>VITE_FLANGE_LIST_ID</code> per visualizzare le flange.</div></div></div>;
+  }
+
+  return (
+    <div className="panel inventory-panel">
+      <div className="panel-content">
+        <div className="section-heading" style={{ marginBottom: 12 }}>
+          <div>
+            <p className="eyebrow" style={{ marginBottom: 4 }}>Magazzino</p>
+            <h2 style={{ margin: 0 }}>11_FLANGE</h2>
+          </div>
+          <div className="action-row">
+            <input
+              type="search"
+              placeholder="Cerca codice, lotto, ordine, bolla..."
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            <button className="btn secondary" onClick={refresh} disabled={loading} type="button">
+              {loading ? "Aggiorno..." : "Aggiorna"}
+            </button>
+          </div>
+        </div>
+        {error && <div className="alert error">{error}</div>}
+        <div className="muted" style={{ marginBottom: 10 }}>{rows.length} flange trovate</div>
+        <div className="table-scroll">
+          <table className="inventory-table">
+            <thead>
+              <tr>
+                {flangeColumns.filter((column) => !column.hidden).map((column) => <th key={column.field}>{column.label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((item: FlangeItem) => {
+                const fields = item.fields as Record<string, unknown>;
+                return (
+                  <tr key={item.id}>
+                    {flangeColumns.filter((column) => !column.hidden).map((column) => (
+                      <td key={column.field}>
+                        {column.type === "date" ? formatSharePointDate(fields[column.field]) : toStr(fields[column.field])}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+              {!loading && visibleRows.length === 0 && <tr><td colSpan={flangeColumns.length}>Nessuna flangia trovata.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <div className="pagination-controls" style={{ marginTop: 12 }}>
+          <label className="field" style={{ maxWidth: 130 }}>
+            <span>Per pagina</span>
+            <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}>
+              {[50, 100, 200].map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </label>
+          <button className="btn secondary" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={currentPage === 1} type="button">←</button>
+          <span>{currentPage} / {totalPages}</span>
+          <button className="btn secondary" onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={currentPage === totalPages} type="button">→</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: SelectionStateProps) {
@@ -5976,8 +6074,8 @@ function NavigationTabs({
   activeTab,
   onTabChange,
 }: {
-  activeTab: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso";
-  onTabChange: (id: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso") => void;
+  activeTab: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso" | "flange";
+  onTabChange: (id: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso" | "flange") => void;
 }) {
   const tabs = [
     { id: "forgiati", label: "1_FORGIATI", enabled: true },
@@ -5987,6 +6085,7 @@ function NavigationTabs({
     { id: "tubo-meccanico", label: "4_TUBO-MECCANICO", enabled: true },
     { id: "spark-gups", label: "6_SPARK GUPS", enabled: true },
     { id: "filo-flusso", label: "9_FILO&FLUSSO", enabled: true },
+    { id: "flange", label: "11_FLANGE", enabled: true },
   ] as const;
 
   return (
@@ -6044,6 +6143,7 @@ function AuthenticatedShell() {
   const sparkGupsExcelDriveNameEnv = (import.meta.env.VITE_SPARK_GUPS_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
   const sparkGupsExcelDriveIdRef = useRef<string | null>(sparkGupsExcelDriveIdEnv || null);
   const filoFlussoListId = import.meta.env.VITE_FILO_FLUSSO_LIST_ID;
+  const flangeListId = import.meta.env.VITE_FLANGE_LIST_ID;
   const filoFlussoExcelPath = (import.meta.env.VITE_FILO_FLUSSO_EXCEL_PATH || "").trim();
   const filoFlussoExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
   const filoFlussoExcelFilename = (import.meta.env.VITE_SP_FILO_FLUSSO_FILENAME || import.meta.env.VITE_FILO_FLUSSO_EXCEL_FILE || "").trim();
@@ -6058,7 +6158,7 @@ function AuthenticatedShell() {
   }, [getClient, siteId]);
   const flowService = useMemo(() => new PowerAutomateService(), []);
   const [view, setView] = useState<'dashboard' | 'inventory' | 'update-stock' | 'website' | 'docs' | 'videos' | 'admin'>('dashboard');
-  const [activeTab, setActiveTab] = useState<"forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso">("forgiati");
+  const [activeTab, setActiveTab] = useState<"forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso" | "flange">("forgiati");
   const [cartItems, setCartItems] = useState<Record<string, CartItem>>({});
   const [selectionMessage, setSelectionMessage] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, EditableItemState>>({});
@@ -9050,6 +9150,8 @@ function AuthenticatedShell() {
         return <SparkGupsPanel {...selectionProps} />;
       case "filo-flusso":
         return <FiloFlussoPanel {...selectionProps} />;
+      case "flange":
+        return <FlangePanel />;
       default:
         return <ForgiatiPanel {...selectionProps} />;
     }
@@ -9186,6 +9288,7 @@ function AuthenticatedShell() {
               sparkGupsListId={sparkGupsListId}
               tuboMeccanicoListId={tuboMeccanicoListId}
               filoFlussoListId={filoFlussoListId}
+              flangeListId={flangeListId}
               onSyncExcel={handleSyncExcel}
               onSyncFromExcel={handleSyncFromExcel}
             />

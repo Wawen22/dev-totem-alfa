@@ -1,0 +1,17 @@
+{
+  "redirectPort": 43123,
+  "clients": [
+    {
+      "id": "alfa",
+      "label": "Alfa",
+      "tenantId": "REPLACE-WITH-ALFA-DIRECTORY-TENANT-ID",
+      "clientId": "REPLACE-WITH-ALFA-APPLICATION-CLIENT-ID",
+      "scopes": [
+        "User.Read",
+        "Files.ReadWrite",
+        "Sites.ReadWrite.All",
+        "Sites.Manage.All"
+      ]
+    }
+  ]
+}

@@ -6,7 +6,7 @@ import { formatSharePointDate } from "../../utils/dateUtils";
 import { SharePointListItem } from "../../types/sharepoint";
 import { SyncCleanupPlan, SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "../../types/sync";
 
-type ListKind = "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO";
+type ListKind = "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO" | "FLANGE";
 
 type FieldType = "text" | "number" | "decimal" | "date" | "textarea";
 
@@ -89,6 +89,7 @@ type AdminPanelProps = {
   sparkGupsListId?: string;
   tuboMeccanicoListId?: string;
   filoFlussoListId?: string;
+  flangeListId?: string;
   onSyncExcel?: (
     listKind: ListKind,
     onProgress?: (msg: string) => void
@@ -245,6 +246,32 @@ const TUBO_MECCANICO_FIELDS: FieldConfig[] = [
   { key: "field_18", label: "Data Prelievo", type: "date" },
   { key: "field_19", label: "Utilizzato per comm. mm" },
   { key: "IdentLotto", label: "Ident. Lotto", writable: false },
+];
+
+const FLANGE_FIELDS: FieldConfig[] = [
+  { key: "Title", label: "CODICE", required: true, placeholder: "Es. FLCA001" },
+  { key: "IdentLotto", label: "LOTTO" },
+  { key: "CodiceSAM", label: "CODICE SAM" },
+  { key: "NumeroOrdine", label: "N° ORDINE" },
+  { key: "DataOrdine", label: "DATA OD", type: "date" },
+  { key: "Fornitore", label: "FORNITORE" },
+  { key: "Quantita", label: "Q.tà.", type: "number" },
+  { key: "DN", label: "DN", type: "decimal" },
+  { key: "SP", label: "SP", type: "decimal" },
+  { key: "Grado1", label: "GRADO 1" },
+  { key: "Grado2", label: "GRADO 2" },
+  { key: "Norma", label: "NORMA" },
+  { key: "Classe", label: "CLASSE" },
+  { key: "Tipo", label: "TYPE" },
+  { key: "NumeroBolla", label: "N° Bolla" },
+  { key: "DataConsegna", label: "DATA CONSEGNA", type: "date" },
+  { key: "NumeroCertificato", label: "N° CERT." },
+  { key: "NumeroColata", label: "N° COLATA" },
+  { key: "PrezzoCad", label: "PREZZO CAD", type: "decimal" },
+  { key: "GiacenzaMm", label: "GIACENZA (mm)", type: "decimal" },
+  { key: "Commessa", label: "COMMESSA" },
+  { key: "PrezzoEuroKg", label: "Prezzo €/Kg", type: "decimal" },
+  { key: "Commessa2", label: "COMMESSA2" },
 ];
 
 const FILO_FLUSSO_FIELDS: FieldConfig[] = [
@@ -1010,6 +1037,7 @@ const LIST_OPTIONS: { kind: ListKind; label: string }[] = [
   { kind: "TUBO-MECCANICO", label: "4_TUBO-MECCANICO" },
   { kind: "SPARK-GUPS", label: "6_SPARK GUPS" },
   { kind: "FILO-FLUSSO", label: "9_FILO&FLUSSO" },
+  { kind: "FLANGE", label: "11_FLANGE" },
 ];
 
 const getFieldSet = (kind: ListKind) => {
@@ -1019,6 +1047,7 @@ const getFieldSet = (kind: ListKind) => {
   if (kind === "ORING-HNBR") return ORING_HNBR_FIELDS;
   if (kind === "SPARK-GUPS") return SPARK_GUPS_FIELDS;
   if (kind === "FILO-FLUSSO") return FILO_FLUSSO_FIELDS;
+  if (kind === "FLANGE") return FLANGE_FIELDS;
   return ORING_NBR_FIELDS;
 };
 
@@ -1029,6 +1058,7 @@ const getListNoun = (kind: ListKind) => {
   if (kind === "ORING-HNBR") return "oring HNBR";
   if (kind === "SPARK-GUPS") return "spark gups";
   if (kind === "FILO-FLUSSO") return "filo & flusso";
+  if (kind === "FLANGE") return "flangia";
   return "oring NBR";
 };
 
@@ -1039,6 +1069,7 @@ const getCacheKeysForList = (kind: ListKind) => {
   if (kind === "ORING-HNBR") return ["oring-hnbr", "admin-oring-hnbr"];
   if (kind === "SPARK-GUPS") return ["spark-gups", "admin-spark-gups"];
   if (kind === "FILO-FLUSSO") return ["filo-flusso", "admin-filo-flusso"];
+  if (kind === "FLANGE") return ["flange", "admin-flange"];
   return ["oring-nbr", "admin-oring-nbr"];
 };
 
@@ -1049,6 +1080,7 @@ const getSortDateKey = (kind: ListKind) => {
   if (kind === "ORING-HNBR") return "field_19";
   if (kind === "SPARK-GUPS") return "field_5";
   if (kind === "FILO-FLUSSO") return "Title";
+  if (kind === "FLANGE") return "DataOrdine";
   return "field_17";
 };
 
@@ -1059,6 +1091,7 @@ const getSearchKeys = (kind: ListKind) => {
   if (kind === "ORING-HNBR") return ["Title", "field_18", "field_12", "field_2"];
   if (kind === "SPARK-GUPS") return ["Title", "field_1", "field_4", "field_8"];
   if (kind === "FILO-FLUSSO") return ["Title", "field_1", "field_2", "field_3"];
+  if (kind === "FLANGE") return ["Title", "IdentLotto", "CodiceSAM", "NumeroOrdine", "NumeroBolla", "NumeroColata", "Commessa", "Commessa2"];
   return ["Title", "field_11", "field_1"];
 };
 
@@ -1113,6 +1146,14 @@ const getSummaryMeta = (
       { label: "Giacenza", value: toStr(fields.field_9) || "-" },
     ];
   }
+  if (kind === "FLANGE") {
+    return [
+      { label: "Lotto", value: toStr(fields.IdentLotto) || "-" },
+      { label: "Ordine", value: toStr(fields.NumeroOrdine) || "-" },
+      { label: "Giacenza", value: toStr(fields.GiacenzaMm) || "-" },
+      { label: "Commessa", value: toStr(fields.Commessa) || "-" },
+    ];
+  }
   return [
     { label: "Commessa", value: toStr(fields.field_11) || "-" },
     { label: "Prenotazione", value: toStr(fields.field_15) || "-" },
@@ -1129,6 +1170,7 @@ export function AdminPanel({
   sparkGupsListId,
   tuboMeccanicoListId,
   filoFlussoListId,
+  flangeListId,
   onSyncExcel,
   onSyncFromExcel,
 }: AdminPanelProps) {
@@ -1223,6 +1265,12 @@ export function AdminPanel({
     refresh: refreshFiloFlusso,
   } = useCachedList<Record<string, unknown>>(service, filoFlussoListId, "admin-filo-flusso");
 
+  const { data: flangeItems, loading: flangeLoading, error: flangeError, refresh: refreshFlange } = useCachedList<Record<string, unknown>>(
+    service,
+    flangeListId,
+    "admin-flange"
+  );
+
   const [activeList, setActiveList] = useState<ListKind>("FORGIATI");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1261,6 +1309,8 @@ export function AdminPanel({
       ? sparkGupsItems
       : activeList === "FILO-FLUSSO"
       ? filoFlussoItems
+      : activeList === "FLANGE"
+      ? flangeItems
       : oringNbrItems;
   const activeLoading =
     activeList === "FORGIATI"
@@ -1275,6 +1325,8 @@ export function AdminPanel({
       ? sparkGupsLoading
       : activeList === "FILO-FLUSSO"
       ? filoFlussoLoading
+      : activeList === "FLANGE"
+      ? flangeLoading
       : oringNbrLoading;
   const activeError =
     activeList === "FORGIATI"
@@ -1289,6 +1341,8 @@ export function AdminPanel({
       ? sparkGupsError
       : activeList === "FILO-FLUSSO"
       ? filoFlussoError
+      : activeList === "FLANGE"
+      ? flangeError
       : oringNbrError;
   const activeListId =
     activeList === "FORGIATI"
@@ -1303,6 +1357,8 @@ export function AdminPanel({
       ? sparkGupsListId
       : activeList === "FILO-FLUSSO"
       ? filoFlussoListId
+      : activeList === "FLANGE"
+      ? flangeListId
       : oringNbrListId;
   const activeRefresh =
     activeList === "FORGIATI"
@@ -1317,6 +1373,8 @@ export function AdminPanel({
       ? refreshSparkGups
       : activeList === "FILO-FLUSSO"
       ? refreshFiloFlusso
+      : activeList === "FLANGE"
+      ? refreshFlange
       : refreshOringNbr;
   const fieldSet = getFieldSet(activeList);
 

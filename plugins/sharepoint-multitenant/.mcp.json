@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sharepoint_multitenant": {
+      "command": "node",
+      "args": ["${pluginRoot}/dist/index.js"]
+    }
+  }
+}

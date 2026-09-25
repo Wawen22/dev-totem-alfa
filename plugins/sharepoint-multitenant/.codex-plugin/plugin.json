@@ -1,0 +1,26 @@
+{
+  "name": "sharepoint-multitenant",
+  "version": "0.1.0+codex.20260925103922",
+  "description": "Local multi-tenant Microsoft Graph tools for SharePoint and Excel.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Sharepoint Multitenant",
+    "shortDescription": "Work safely across SharePoint customer tenants.",
+    "longDescription": "A local MCP for connecting separate Microsoft Entra tenants and working with SharePoint libraries, Excel tables, and SharePoint lists.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Connect my Microsoft tenant and list its document libraries.",
+      "Read an Excel table from a SharePoint document library.",
+      "Show the change and ask me to confirm before adding an Excel column."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}
