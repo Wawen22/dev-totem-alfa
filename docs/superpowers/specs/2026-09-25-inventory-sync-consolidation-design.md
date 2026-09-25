@@ -89,9 +89,9 @@ Un magazzino entra nello stato **Consolidato** solo dopo: build riuscita, test a
 | 2026-09-25 | FLANGE | Flusso Excel -> Totem e refresh vista verificati dall'utente | completato | Excel cloud deve essere salvato/sincronizzato prima dell'azione |
 | 2026-09-25 | TUBI | Revisione statica del flusso protetto | verificato | validazione schema, conflitti, duplicati e report già presenti |
 | 2026-09-25 | FORGIATI | Revisione statica del flusso protetto | verificato | validazione schema, conflitti, duplicati e report già presenti |
-| 2026-09-25 | TUBO MECCANICO | Consolidamento tecnico commit `d09dff6` | in verifica utente | preflight schema, stop dopo 3 errori consecutivi e report record solo SharePoint aggiunti; build e 5 test automatici verdi |
+| 2026-09-25 | TUBO MECCANICO | Consolidamento tecnico commit `d09dff6` | completato | preflight schema, stop dopo 3 errori consecutivi e report record solo SharePoint aggiunti; test utente riuscito |
 | 2026-09-25 | TUBO MECCANICO | Correzione schema SharePoint approvata | completato | lista Alfa `4_TUBO-MECCANICO`: creata colonna testo `IdentLotto`, nome visibile `LOTTO`; nessun record modificato |
-| 2026-09-25 | TUBO MECCANICO | Ripristino Excel-autorevole approvato | in verifica utente | le differenze su chiave univoca aggiornano SharePoint; PATCH limitato alle colonne realmente presenti nell'Excel, senza eliminazioni |
+| 2026-09-25 | TUBO MECCANICO | Ripristino Excel-autorevole commit `efcdfd8` | completato | differenze su chiave univoca aggiornate da Excel; PATCH limitato alle colonne realmente presenti; test utente riuscito |
 | 2026-09-25 | Tutti | Bonifica iniziale SharePoint da Excel | non avviata | richiederà conferma per ciascun magazzino |
 
 ## Criteri di accettazione per ciascun magazzino
