@@ -8366,9 +8366,24 @@ function AuthenticatedShell() {
         sharepointService.listItems<Record<string, unknown>>(flangeListId),
         sharepointService.listColumns(flangeListId),
       ]);
+      const requiredSyncColumns = [
+        "Title",
+        "IdentLotto",
+        ...flangeColumns
+          .filter((column) => column.field !== "Modified")
+          .map((column) => column.field),
+      ];
+      const missingSyncColumns = getMissingRequiredColumns(
+        sharePointColumns.map((column) => column.name),
+        requiredSyncColumns
+      );
+      if (missingSyncColumns.length > 0) {
+        throw new Error(
+          `Colonne SharePoint FLANGE mancanti o con nome interno diverso: ${missingSyncColumns.join(", ")}`
+        );
+      }
 
       const byExactKey = new Map<string, SharePointListItem<Record<string, unknown>>[]>();
-      const byCode = new Map<string, SharePointListItem<Record<string, unknown>>[]>();
       const keyFor = (title: unknown, lotto: unknown) =>
         `${normalizeExcelKey(String(title ?? ""))}::${normalizeExcelKey(String(lotto ?? ""))}`;
       existingItems.forEach((item) => {
@@ -8377,61 +8392,145 @@ function AuthenticatedShell() {
         if (!code) return;
         const exact = keyFor(fields.Title, fields.IdentLotto);
         byExactKey.set(exact, [...(byExactKey.get(exact) || []), item]);
-        byCode.set(code, [...(byCode.get(code) || []), item]);
       });
 
-      let updated = 0;
-      let created = 0;
-      let skipped = 0;
-      const updatedItems: SyncDetailItem[] = [];
-      const createdItems: SyncDetailItem[] = [];
+      const excelRecords: Array<{
+        rowIndex: number;
+        code: string;
+        lotto: string;
+        key: string;
+        fields: Record<string, unknown>;
+      }> = [];
       const skippedItems: SyncDetailItem[] = [];
+      const excelKeyCounts = new Map<string, number>();
 
-      for (let index = 0; index < rows.length; index++) {
-        const fields = buildFlangePayloadFromExcelRow(columns, rows[index].values?.[0] || []);
+      rows.forEach((row, index) => {
+        const fields = buildFlangePayloadFromExcelRow(columns, row.values?.[0] || []);
         if (!fields) {
-          skipped++;
           skippedItems.push(buildGenericSyncDetailItem(`Riga Excel ${index + 1}`, "CODICE vuoto"));
-          continue;
+          return;
         }
         const code = toStr(fields.Title);
         const lotto = toStr(fields.IdentLotto);
-        const exactMatches = byExactKey.get(keyFor(code, lotto)) || [];
-        const codeMatches = byCode.get(normalizeExcelKey(code)) || [];
-        const match = exactMatches.length === 1
-          ? exactMatches[0]
-          : exactMatches.length === 0 && codeMatches.length === 1
-          ? codeMatches[0]
-          : null;
-        if ((exactMatches.length > 1) || (!match && codeMatches.length > 1)) {
+        if (!lotto) {
+          skippedItems.push(buildGenericSyncDetailItem(code, "LOTTO vuoto: chiave CODICE + LOTTO non valida"));
+          return;
+        }
+        const key = keyFor(code, lotto);
+        excelRecords.push({ rowIndex: index, code, lotto, key, fields });
+        excelKeyCounts.set(key, (excelKeyCounts.get(key) || 0) + 1);
+      });
+      const duplicateExcelKeys = new Set(
+        Array.from(excelKeyCounts.entries())
+          .filter(([, count]) => count > 1)
+          .map(([key]) => key)
+      );
+
+      let updated = 0;
+      let created = 0;
+      let skipped = skippedItems.length;
+      let duplicateExcelRows = 0;
+      const updatedItems: SyncDetailItem[] = [];
+      const createdItems: SyncDetailItem[] = [];
+      const duplicateItems: SyncDetailItem[] = [];
+      const usedItemIds = new Set<string>();
+      let consecutiveWriteErrors = 0;
+
+      for (let index = 0; index < excelRecords.length; index++) {
+        const record = excelRecords[index];
+        if (duplicateExcelKeys.has(record.key)) {
+          duplicateExcelRows++;
           skipped++;
-          skippedItems.push(buildGenericSyncDetailItem(code, "Record con CODICE/LOTTO ambiguo: nessuna sovrascrittura"));
+          duplicateItems.push(
+            buildGenericSyncDetailItem(
+              record.code,
+              `Chiave CODICE + LOTTO duplicata in Excel (lotto ${record.lotto}): nessuna riga importata`
+            )
+          );
           continue;
         }
-        if (match) {
-          await sharepointService.updateItem<Record<string, unknown>>(flangeListId, match.id, fields);
-          updated++;
-          updatedItems.push(buildGenericSyncDetailItem(code, `Aggiornato da Excel${lotto ? ` (lotto ${lotto})` : ""}`));
-        } else {
-          const createFields = prepareFieldsForSharePointCreate(fields, sharePointColumns);
-          const item = await sharepointService.createItem<Record<string, unknown>>(flangeListId, createFields);
-          created++;
-          createdItems.push(buildGenericSyncDetailItem(code, `Creato da Excel${lotto ? ` (lotto ${lotto})` : ""}`));
-          const exact = keyFor(fields.Title, fields.IdentLotto);
-          byExactKey.set(exact, [...(byExactKey.get(exact) || []), item]);
-          const normalizedCode = normalizeExcelKey(code);
-          byCode.set(normalizedCode, [...(byCode.get(normalizedCode) || []), item]);
+        try {
+          const exactMatches = byExactKey.get(record.key) || [];
+          if (exactMatches.length > 1) {
+            skipped++;
+            skippedItems.push(
+              buildGenericSyncDetailItem(
+                record.code,
+                `Match SharePoint ambiguo per CODICE + LOTTO (lotto ${record.lotto}): nessuna sovrascrittura`
+              )
+            );
+            continue;
+          }
+          if (exactMatches.length === 1 && usedItemIds.has(exactMatches[0].id)) {
+            skipped++;
+            skippedItems.push(
+              buildGenericSyncDetailItem(
+                record.code,
+                `Chiave CODICE + LOTTO già associata a un'altra riga Excel (lotto ${record.lotto})`
+              )
+            );
+            continue;
+          }
+
+          if (exactMatches.length === 1) {
+            const match = exactMatches[0];
+            await sharepointService.updateItem<Record<string, unknown>>(flangeListId, match.id, record.fields);
+            usedItemIds.add(match.id);
+            updated++;
+            updatedItems.push(buildGenericSyncDetailItem(record.code, `Aggiornato da Excel (lotto ${record.lotto})`));
+          } else {
+            const createFields = prepareFieldsForSharePointCreate(record.fields, sharePointColumns);
+            const item = await sharepointService.createItem<Record<string, unknown>>(flangeListId, createFields);
+            usedItemIds.add(item.id);
+            byExactKey.set(record.key, [item]);
+            created++;
+            createdItems.push(buildGenericSyncDetailItem(record.code, `Creato da Excel (lotto ${record.lotto})`));
+          }
+          consecutiveWriteErrors = recordWriteOutcome(consecutiveWriteErrors, true);
+        } catch (rowErr: any) {
+          const message = rowErr?.message || "Errore SharePoint in creazione/aggiornamento";
+          console.error("Errore sync FLANGE Excel -> SharePoint su record", {
+            rowIndex: record.rowIndex,
+            code: record.code,
+            lotto: record.lotto,
+            fields: record.fields,
+            error: rowErr,
+          });
+          skipped++;
+          skippedItems.push(buildGenericSyncDetailItem(record.code, `${message} (lotto ${record.lotto})`));
+          consecutiveWriteErrors = recordWriteOutcome(consecutiveWriteErrors, false);
+          if (consecutiveWriteErrors >= MAX_CONSECUTIVE_SYNC_WRITE_FAILURES) {
+            throw new Error(
+              `Sincronizzazione interrotta dopo ${MAX_CONSECUTIVE_SYNC_WRITE_FAILURES} errori SharePoint consecutivi. Ultimo record: ${record.code} (${record.lotto}). ${message}`
+            );
+          }
         }
-        if ((index + 1) % 10 === 0) onProgress?.(`Excel -> Totem FLANGE: ${updated} aggiornati, ${created} creati (${index + 1}/${rows.length})...`);
+        if ((index + 1) % 10 === 0) onProgress?.(`Excel -> Totem FLANGE: ${updated} aggiornati, ${created} creati (${index + 1}/${excelRecords.length})...`);
       }
 
+      const sharePointOnlyItems = existingItems
+        .filter((item) => !usedItemIds.has(item.id))
+        .map((item) => {
+          const fields = (item.fields || {}) as Record<string, unknown>;
+          const code = toStr(fields.Title) || "(senza codice)";
+          const lotto = toStr(fields.IdentLotto);
+          return buildGenericSyncDetailItem(
+            code,
+            `Presente solo in SharePoint o duplicato${lotto ? ` (lotto ${lotto})` : ""} (ID ${item.id}): nessuna eliminazione eseguita`
+          );
+        });
+
+      clearCacheKeys(["flange", "admin-flange"]);
+
       return {
-        success: skipped === 0,
-        message: `Sincronizzazione FLANGE Excel -> Totem completata: ${updated} aggiornati, ${created} creati, ${skipped} saltati.`,
+        success: skipped === 0 && duplicateExcelRows === 0 && sharePointOnlyItems.length === 0,
+        message: `Sincronizzazione FLANGE Excel -> Totem ${skipped === 0 && duplicateExcelRows === 0 && sharePointOnlyItems.length === 0 ? "completata" : "parziale: verificare il dettaglio"}. Aggiornati ${updated}, creati ${created}, saltati ${skipped}, duplicati Excel ignorati ${duplicateExcelRows}, non associati SharePoint ${sharePointOnlyItems.length}.`,
         details: buildSyncDetailSections([
           { key: "updated", label: "Aggiornati", items: updatedItems },
           { key: "created", label: "Creati", items: createdItems },
           { key: "skipped", label: "Saltati", items: skippedItems },
+          { key: "duplicates", label: "Duplicati Excel ignorati", items: duplicateItems },
+          { key: "sharepoint-only", label: "Solo SharePoint / duplicati", items: sharePointOnlyItems },
         ]),
       };
     } catch (err: any) {

@@ -17,9 +17,9 @@ Nella bonifica iniziale, Excel è la fonte autorevole. Dopo il completamento e l
 - I record presenti soltanto su SharePoint non vengono eliminati automaticamente durante la sincronizzazione ordinaria.
 - La pulizia di duplicati identici o record vuoti richiede sempre una conferma separata e un elenco degli ID interessati.
 
-### Eccezioni approvate: TUBO-MECCANICO, TUBI e FORGIATI
+### Eccezioni approvate: TUBO-MECCANICO, TUBI, FORGIATI e FLANGE
 
-Il 25 settembre 2026 l'utente ha richiesto e confermato che il pulsante **Aggiorna Totem da Excel** per `4_TUBO-MECCANICO`, `3_TUBI` e `1_FORGIATI` ripristini il comportamento storico Excel-autorevole: con chiave `CODICE + LOTTO` univoca, i campi gestiti diversi vengono aggiornati in SharePoint dal file Excel. Il PATCH include soltanto le colonne realmente presenti nella tabella Excel, così non può cancellare campi assenti dal file. Restano invariati i blocchi per chiavi duplicate o ambigue, righe fuori tabella, schema non compatibile, errori consecutivi e l'assenza di eliminazioni automatiche. Questa eccezione non modifica la politica ordinaria degli altri magazzini.
+Il 25 settembre 2026 l'utente ha richiesto e confermato che il pulsante **Aggiorna Totem da Excel** per `4_TUBO-MECCANICO`, `3_TUBI`, `1_FORGIATI` e `11_FLANGE` ripristini il comportamento storico Excel-autorevole: con chiave `CODICE + LOTTO` univoca, i campi gestiti diversi vengono aggiornati in SharePoint dal file Excel. Il PATCH include soltanto le colonne realmente presenti nella tabella Excel, così non può cancellare campi assenti dal file. Restano invariati i blocchi per chiavi mancanti, duplicate o ambigue, schema non compatibile, errori consecutivi e l'assenza di eliminazioni automatiche. Questa eccezione non modifica la politica ordinaria degli altri magazzini.
 
 ## Modello operativo
 
@@ -87,7 +87,7 @@ Un magazzino entra nello stato **Consolidato** solo dopo: build riuscita, test a
 | Data | Magazzino | Attività | Stato | Nota |
 | --- | --- | --- | --- | --- |
 | 2026-09-25 | FLANGE | Verifica iniziale live di file, tabella e schema SharePoint | completata | file `11_FLANGE .xlsx`, tabella `tblFlange`, intervallo `Foglio1!A1:W61`: 60 righe dati e 23 colonne; tutti i nomi interni SharePoint richiesti sono presenti. Nessun record è stato modificato. |
-| 2026-09-25 | FLANGE | Protezioni da consolidare | da correggere | il flusso è già Excel-autorevole e testato, ma manca il preflight dello schema, lo stop dopo 3 errori consecutivi e il match deve essere limitato a `CODICE + LOTTO`, senza fallback sul solo `CODICE`. |
+| 2026-09-25 | FLANGE | Protezioni di sincronizzazione Excel-autorevole | completato | aggiunti preflight dello schema, chiave stretta `CODICE + LOTTO`, blocchi per chiavi mancanti/duplicate/ambigue, stop dopo 3 errori consecutivi, report dei record solo SharePoint e invalidazione cache; nessuna eliminazione automatica. |
 | 2026-09-25 | TUBI | Verifica iniziale di file, tabella e schema SharePoint | completata | file `3_TUBI.xlsx`, tabella `tblTUBI`, intervallo `MAG_TUBI_COOP_2012!A1:AB1116`: 1.115 righe dati e 28 colonne; tutti i nomi interni SharePoint richiesti sono presenti |
 | 2026-09-25 | TUBI | Correzioni di robustezza | completato | `Prezzo metro` ora usa `field_23` (distinto da `Prezzo kg/mt` / `field_22`) sia nel flusso principale sia nel pannello admin; Excel -> SharePoint ora interrompe dopo 3 errori consecutivi. Test, TypeScript e build riusciti; nessun record è stato modificato. |
 | 2026-09-25 | TUBI | Ripristino Excel-autorevole commit `bf3ed2e` | completato | Su chiave `CODICE + LOTTO` univoca, le differenze aziendali vengono aggiornate da Excel con PATCH limitato alle colonne presenti nel file; duplicati, ambiguità, righe fuori tabella e record solo SharePoint restano protetti. Test utente riuscito su `TCAB093` / `CODICE SAM`. |
