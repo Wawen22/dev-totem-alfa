@@ -7343,47 +7343,51 @@ function AuthenticatedShell() {
               fieldLabelMap
             );
 
-            if (changedFields.length === 0) {
-              const storedIdentLotto = normalizeTrimmedValue(
-                (currentRecord.item.fields as Record<string, unknown>).IdentLotto
+            const storedIdentLotto = normalizeTrimmedValue(
+              (currentRecord.item.fields as Record<string, unknown>).IdentLotto
+            );
+            const identityNeedsAlignment =
+              normalizeExcelKey(storedIdentLotto || "") !== normalizeExcelKey(record.identLotto);
+
+            if (shouldApplyExcelAuthoritativeUpdate(changedFields.length, identityNeedsAlignment)) {
+              const updateFields = buildExcelAuthoritativePatch(
+                record.fields,
+                record.comparableFieldMap.keys(),
+                changedFields.length > 0
               );
-              if (normalizeExcelKey(storedIdentLotto || "") !== normalizeExcelKey(record.identLotto)) {
-                await sharepointService.updateItem<Record<string, unknown>>(
-                  tubiListId,
-                  currentRecord.item.id,
-                  { IdentLotto: record.identLotto }
-                );
-                currentRecord.item.fields = {
-                  ...currentRecord.item.fields,
-                  IdentLotto: record.identLotto,
-                };
-                updated++;
-                updatedLabels.push(
-                  buildTubiSyncDetailItem({
-                    title: record.title,
-                    colata: record.colata,
-                    identLotto: record.identLotto,
-                    detail: "Identificativo lotto allineato",
-                  })
-                );
-              } else {
-                unchanged++;
-                unchangedLabels.push(
-                  buildTubiSyncDetailItem({
-                    title: record.title,
-                    colata: record.colata,
-                    identLotto: record.identLotto,
-                    detail: "Nessuna differenza rilevata",
-                  })
-                );
-              }
+              await sharepointService.updateItem<Record<string, unknown>>(
+                tubiListId,
+                currentRecord.item.id,
+                updateFields
+              );
+              currentRecord.item.fields = {
+                ...currentRecord.item.fields,
+                ...updateFields,
+              };
+              currentRecord.comparableFieldMap = record.comparableFieldMap;
+              updated++;
+              updatedLabels.push(
+                buildTubiSyncDetailItem({
+                  title: record.title,
+                  colata: record.colata,
+                  identLotto: record.identLotto,
+                  detail:
+                    changedFields.length > 0
+                      ? `${changedFields.length} campi aggiornati da Excel`
+                      : "Identificativo lotto allineato",
+                  changes: changedFields.length > 0 ? changedFields : undefined,
+                })
+              );
             } else {
-              skipped++;
-              skippedLabels.push(buildTubiSyncDetailItem({
-                title: record.title, colata: record.colata, identLotto: record.identLotto,
-                detail: "Conflitto Excel / Totem: valori diversi, nessuna sovrascrittura",
-                changes: changedFields,
-              }));
+              unchanged++;
+              unchangedLabels.push(
+                buildTubiSyncDetailItem({
+                  title: record.title,
+                  colata: record.colata,
+                  identLotto: record.identLotto,
+                  detail: "Nessuna differenza rilevata",
+                })
+              );
             }
           }
           consecutiveWriteErrors = recordWriteOutcome(consecutiveWriteErrors, true);

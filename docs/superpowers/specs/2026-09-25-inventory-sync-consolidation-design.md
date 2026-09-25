@@ -17,9 +17,9 @@ Nella bonifica iniziale, Excel è la fonte autorevole. Dopo il completamento e l
 - I record presenti soltanto su SharePoint non vengono eliminati automaticamente durante la sincronizzazione ordinaria.
 - La pulizia di duplicati identici o record vuoti richiede sempre una conferma separata e un elenco degli ID interessati.
 
-### Eccezione approvata: TUBO-MECCANICO
+### Eccezioni approvate: TUBO-MECCANICO e TUBI
 
-Il 25 settembre 2026 l'utente ha richiesto e confermato che il pulsante **Aggiorna Totem da Excel** per `4_TUBO-MECCANICO` ripristini il comportamento storico Excel-autorevole: con chiave `CODICE + LOTTO` univoca, i campi gestiti diversi vengono aggiornati in SharePoint dal file Excel. Restano invariati i blocchi per chiavi duplicate o ambigue, righe fuori tabella, schema non compatibile, errori consecutivi e l'assenza di eliminazioni automatiche. Questa eccezione non modifica la politica ordinaria degli altri magazzini.
+Il 25 settembre 2026 l'utente ha richiesto e confermato che il pulsante **Aggiorna Totem da Excel** per `4_TUBO-MECCANICO` e `3_TUBI` ripristini il comportamento storico Excel-autorevole: con chiave `CODICE + LOTTO` univoca, i campi gestiti diversi vengono aggiornati in SharePoint dal file Excel. Il PATCH include soltanto le colonne realmente presenti nella tabella Excel, così non può cancellare campi assenti dal file. Restano invariati i blocchi per chiavi duplicate o ambigue, righe fuori tabella, schema non compatibile, errori consecutivi e l'assenza di eliminazioni automatiche. Questa eccezione non modifica la politica ordinaria degli altri magazzini.
 
 ## Modello operativo
 
@@ -89,6 +89,7 @@ Un magazzino entra nello stato **Consolidato** solo dopo: build riuscita, test a
 | 2026-09-25 | FLANGE | Flusso Excel -> Totem e refresh vista verificati dall'utente | completato | Excel cloud deve essere salvato/sincronizzato prima dell'azione |
 | 2026-09-25 | TUBI | Verifica iniziale di file, tabella e schema SharePoint | completata | file `3_TUBI.xlsx`, tabella `tblTUBI`, intervallo `MAG_TUBI_COOP_2012!A1:AB1116`: 1.115 righe dati e 28 colonne; tutti i nomi interni SharePoint richiesti sono presenti |
 | 2026-09-25 | TUBI | Correzioni di robustezza | completato | `Prezzo metro` ora usa `field_23` (distinto da `Prezzo kg/mt` / `field_22`) sia nel flusso principale sia nel pannello admin; Excel -> SharePoint ora interrompe dopo 3 errori consecutivi. Test, TypeScript e build riusciti; nessun record è stato modificato. |
+| 2026-09-25 | TUBI | Ripristino Excel-autorevole | completato | Su chiave `CODICE + LOTTO` univoca, le differenze aziendali vengono aggiornate da Excel con PATCH limitato alle colonne presenti nel file; duplicati, ambiguità, righe fuori tabella e record solo SharePoint restano protetti. |
 | 2026-09-25 | FORGIATI | Revisione statica del flusso protetto | verificato | validazione schema, conflitti, duplicati e report già presenti |
 | 2026-09-25 | TUBO MECCANICO | Consolidamento tecnico commit `d09dff6` | completato | preflight schema, stop dopo 3 errori consecutivi e report record solo SharePoint aggiunti; test utente riuscito |
 | 2026-09-25 | TUBO MECCANICO | Correzione schema SharePoint approvata | completato | lista Alfa `4_TUBO-MECCANICO`: creata colonna testo `IdentLotto`, nome visibile `LOTTO`; nessun record modificato |
