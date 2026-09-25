@@ -15,6 +15,11 @@ import { flangeColumns } from "./config/flangeColumns";
 import { SharePointListItem } from "./types/sharepoint";
 import { SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "./types/sync";
 import { formatSharePointDate } from "./utils/dateUtils";
+import {
+  getMissingRequiredColumns,
+  MAX_CONSECUTIVE_SYNC_WRITE_FAILURES,
+  recordWriteOutcome,
+} from "./services/syncGuards";
 import { WebsiteViewer } from "./components/features/WebsiteViewer";
 import { DocumentBrowser } from "./components/features/DocumentBrowser";
 import { VideoBrowser } from "./components/features/VideoBrowser";
@@ -7974,7 +7979,26 @@ function AuthenticatedShell() {
       onProgress?.("Caricamento righe TUBO-MECCANICO da Excel...");
       const { columns, rows, dataBodyRange, driveId, driveItem } =
         await resolveTuboMeccanicoExcelContext();
-      const spItems = await sharepointService.listItems<Record<string, unknown>>(tuboMeccanicoListId);
+      const [spItems, sharePointColumns] = await Promise.all([
+        sharepointService.listItems<Record<string, unknown>>(tuboMeccanicoListId),
+        sharepointService.listColumns(tuboMeccanicoListId),
+      ]);
+      const requiredSyncColumns = [
+        "Title",
+        "IdentLotto",
+        ...TUBO_MECCANICO_SHAREPOINT_TEXT_FIELDS,
+        ...TUBO_MECCANICO_SHAREPOINT_NUMERIC_FIELDS,
+        ...TUBO_MECCANICO_SHAREPOINT_DATE_FIELDS,
+      ];
+      const missingSyncColumns = getMissingRequiredColumns(
+        sharePointColumns.map((column) => column.name),
+        requiredSyncColumns
+      );
+      if (missingSyncColumns.length > 0) {
+        throw new Error(
+          `Colonne SharePoint TUBO-MECCANICO mancanti o con nome interno diverso: ${missingSyncColumns.join(", ")}`
+        );
+      }
       const progressiveMap = buildProgressiveMapForGroupedItems(spItems);
       const fieldLabelMap = buildTuboMeccanicoFieldLabelMap(columns);
       const spIndex = new Map<
@@ -8083,6 +8107,7 @@ function AuthenticatedShell() {
       const createdLabels: SyncDetailItem[] = [];
       const unchangedLabels: SyncDetailItem[] = [];
       const skippedLabels: SyncDetailItem[] = [];
+      let consecutiveWriteErrors = 0;
 
       for (let i = 0; i < excelRecords.length; i++) {
         const record = excelRecords[i];
@@ -8120,16 +8145,20 @@ function AuthenticatedShell() {
           }
 
           if (matches.length === 0) {
+            const createFields = prepareFieldsForSharePointCreate(
+              record.fields,
+              sharePointColumns
+            );
             const createdItem = await sharepointService.createItem<Record<string, unknown>>(
               tuboMeccanicoListId,
-              record.fields
+              createFields
             );
             usedItemIds.add(createdItem.id);
             const current = spIndex.get(record.key) || [];
             current.push({
               item: createdItem,
               comparableFieldMap: buildTuboMeccanicoFieldsFieldStateMap(columns, {
-                ...(createdItem.fields || record.fields),
+                ...(createdItem.fields || createFields),
                 IdentLotto: record.identLotto,
               }),
             });
@@ -8194,6 +8223,7 @@ function AuthenticatedShell() {
               }));
             }
           }
+          consecutiveWriteErrors = recordWriteOutcome(consecutiveWriteErrors, true);
         } catch (rowErr: any) {
           const message = rowErr?.message || "Errore SharePoint in creazione/aggiornamento";
           console.error("Errore sync TUBO-MECCANICO Excel -> SharePoint su record", {
@@ -8212,6 +8242,12 @@ function AuthenticatedShell() {
               detail: message,
             })
           );
+          consecutiveWriteErrors = recordWriteOutcome(consecutiveWriteErrors, false);
+          if (consecutiveWriteErrors >= MAX_CONSECUTIVE_SYNC_WRITE_FAILURES) {
+            throw new Error(
+              `Sincronizzazione interrotta dopo ${MAX_CONSECUTIVE_SYNC_WRITE_FAILURES} errori SharePoint consecutivi. Ultimo record: ${record.title} (${record.identLotto}). ${message}`
+            );
+          }
         }
 
         if ((i + 1) % 10 === 0) {
@@ -8221,17 +8257,31 @@ function AuthenticatedShell() {
         }
       }
 
+      const sharePointOnlyLabels = spItems
+        .filter((item) => !usedItemIds.has(item.id))
+        .map((item) => {
+          const fields = (item.fields || {}) as Record<string, unknown>;
+          const title = normalizeTrimmedValue(fields.Title) || "(senza codice)";
+          return buildTubiSyncDetailItem({
+            title,
+            colata: normalizeTrimmedValue(fields.field_14),
+            identLotto: getResolvedTuboMeccanicoIdentLotto(item, progressiveMap),
+            detail: `Presente solo in SharePoint o duplicato (ID ${item.id}): nessuna eliminazione eseguita`,
+          });
+        });
+
       clearCacheKeys(["tubo-meccanico", "admin-tubo-meccanico"]);
 
       return {
-        success: skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0,
-        message: `Sincronizzazione TUBO-MECCANICO Excel -> SharePoint ${skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0 ? "completata" : "parziale: verificare i record saltati"}. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
+        success: skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0 && sharePointOnlyLabels.length === 0,
+        message: `Sincronizzazione TUBO-MECCANICO Excel -> SharePoint ${skipped === 0 && duplicateExcelRows === 0 && outsideTableLabels.length === 0 && sharePointOnlyLabels.length === 0 ? "completata" : "parziale: verificare i record saltati"}. Aggiornati ${updated}, creati ${created}, invariati ${unchanged}, saltati ${skipped}, duplicati ignorati ${duplicateExcelRows}, non associati SharePoint ${sharePointOnlyLabels.length}.${outsideTableLabels.length > 0 ? ` Attenzione: trovate ${outsideTableLabels.length} righe valorizzate fuori dalla tabella Excel.` : ""}`,
         details: buildSyncDetailSections([
           { key: "updated", label: "Aggiornati", items: updatedLabels },
           { key: "created", label: "Creati", items: createdLabels },
           { key: "unchanged", label: "Invariati", items: unchangedLabels },
           { key: "skipped", label: "Saltati", items: [...skippedLabels, ...outsideTableLabels] },
           { key: "duplicates", label: "Duplicati Excel ignorati", items: duplicateLabels },
+          { key: "sharepoint-only", label: "Solo SharePoint / duplicati", items: sharePointOnlyLabels },
         ]),
       };
     } catch (err: any) {
