@@ -10,6 +10,7 @@ export interface ForgiatoColumn {
 // Aggiorna i valori `field` con gli internal name reali della lista SharePoint.
 export const forgiatiColumns: ForgiatoColumn[] = [
   { field: "Title", label: "Codice / Title", width: "200px" },
+  { field: "CodiceSAM", label: "Codice SAM" },
   { field: "field_1", label: "N° ordine" },
   { field: "field_2", label: "Data Ord", type: "date" },
   { field: "field_3", label: "Fornitore" },
@@ -37,5 +38,4 @@ export const forgiatiColumns: ForgiatoColumn[] = [
   { field: "field_24", label: "Commessa" },
   { field: "field_25", label: "Note" },
   { field: "field_26", label: "Data/ora modifica", type: "date" },
-  { field: "CodiceSAM", label: "Codice SAM" },
 ];

@@ -213,6 +213,16 @@ const formatCellValue = (value: unknown, type?: "text" | "date" | "number") => {
   return String(value);
 };
 
+const getTubiDisplayFieldValue = (fields: Record<string, unknown>, fieldKey: string) => {
+  const value = fields[fieldKey];
+  // Compatibilità con i record precedenti, che possono contenere il prezzo
+  // solamente nel campo ormai dismesso "Prezzo metro".
+  if (fieldKey === "field_22" && (value === null || value === undefined || value === "")) {
+    return fields.field_23;
+  }
+  return value;
+};
+
 const formatLottoProg = (val: string | undefined | null) => {
   const str = val ? String(val) : "";
   return str ? str.toUpperCase() : "A";
@@ -317,7 +327,7 @@ const tubiExcelColumnFieldMap = (() => {
   map.set(normalizeExcelKey("GIACENZAMM NON TAGLIATO"), "field_20");
   map.set(normalizeExcelKey("DATA ULTIMO PRELIEVO"), "field_21");
   map.set(normalizeExcelKey("PREZZO KGMT"), "field_22");
-  map.set(normalizeExcelKey("PREZZO METRO"), "field_23");
+  map.set(normalizeExcelKey("PREZZO METRO"), "field_22");
   map.set(normalizeExcelKey("ACQUISTATO DAL CURATORE"), "field_24");
   map.set(normalizeExcelKey("NO COMMESSA"), "field_25");
   map.set(normalizeExcelKey("N COMMESSA"), "field_25");
@@ -363,7 +373,7 @@ const buildTubiExcelRow = (excelColumns: string[], fields: Record<string, unknow
     const normalized = normalizeExcelKey(columnName || "");
     const fieldKey =
       tubiExcelColumnFieldMap.get(normalized) || fieldKeyLookup.get(normalized) || null;
-    const rawValue = fieldKey ? fields[fieldKey] : null;
+    const rawValue = fieldKey ? getTubiDisplayFieldValue(fields, fieldKey) : null;
     return toExcelCellValueForDateFields(TUBI_DATE_FIELDS, fieldKey, rawValue);
   });
 };
@@ -1168,7 +1178,7 @@ const buildComparableTubiFieldsRow = (excelColumns: string[], fields: Record<str
   excelColumns.map((columnName) => {
     const fieldKey = getTubiExcelFieldKey(columnName);
     if (isTubiNonBusinessCompareField(fieldKey)) return "";
-    const rawValue = fieldKey ? fields[fieldKey] : null;
+    const rawValue = fieldKey ? getTubiDisplayFieldValue(fields, fieldKey) : null;
     return normalizeComparableCellValue(toExcelCellValueForDateFields(TUBI_DATE_FIELDS, fieldKey, rawValue));
   });
 
@@ -3580,7 +3590,7 @@ function TubiPanel
     return groupedRows.filter((group) =>
       group.items.some((item) =>
         visibleColumns.some((col) => {
-          const v = (item.fields as Record<string, unknown>)[col.field];
+          const v = getTubiDisplayFieldValue(item.fields as Record<string, unknown>, col.field);
           if (v === null || v === undefined) return false;
 
           let valStr = String(v);
@@ -4083,7 +4093,10 @@ function TubiPanel
                         );
                       }
 
-                      const content = formatCellValue((representative.fields as Record<string, unknown>)[col.field], col.type);
+                      const content = formatCellValue(
+                        getTubiDisplayFieldValue(representative.fields as Record<string, unknown>, col.field),
+                        col.type
+                      );
 
                       if (isTitle) {
                         return (
@@ -4345,7 +4358,10 @@ function TubiPanel
             <div className="modal__body">
               <dl style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 16px", margin: 0 }}>
                 {tubiColumns.filter(col => !col.computed).map((col) => {
-                  const val = (detailGroup.representative.fields as Record<string, unknown>)[col.field];
+                  const val = getTubiDisplayFieldValue(
+                    detailGroup.representative.fields as Record<string, unknown>,
+                    col.field
+                  );
                   const display = col.type === "date" ? formatSharePointDate(val) : (val !== null && val !== undefined && val !== "" ? String(val) : "—");
                   return (
                     <React.Fragment key={col.field}>
@@ -5376,6 +5392,7 @@ function StockUpdatePage({
 
           const infoItems = isForgiati
             ? [
+                { label: "Codice SAM", value: raw["CodiceSAM"] },
                 { label: "N° Ordine", value: raw["field_1"] },
                 { label: "Posizione", value: raw["field_4"] },
                 { label: "Q.tà orig", value: raw["field_5"] },
@@ -5384,7 +5401,6 @@ function StockUpdatePage({
                 { label: "Materiale", value: raw["field_9"] },
                 { label: "Grado materiale 2", value: raw["GRADOMATERIALE2"] },
                 { label: "No. Disegno - Particolare", value: raw["field_8"] },
-                { label: "Codice SAM", value: raw["CodiceSAM"] },
               ]
             : isOring
             ? [
@@ -5434,7 +5450,7 @@ function StockUpdatePage({
                 { label: "Lungh. Tubo (mm)", value: raw["field_7"] },
                 { label: "Ø Est.", value: raw["field_8"] },
                 { label: "SP", value: raw["field_9"] },
-                { label: "GRADO", value: raw["field_10"] },
+                { label: "Grado materiale 1", value: raw["field_10"] },
                 { label: "DATA CONSEGNA", value: formatSharePointDate(raw["field_12"]) },
                 { label: "N° CERT.", value: raw["field_13"] },
               ]
@@ -5460,7 +5476,7 @@ function StockUpdatePage({
                 { label: "DN", value: raw["field_8"] },
                 { label: "DN mm", value: raw["field_9"] },
                 { label: "SP", value: raw["field_10"] },
-                { label: "Grado", value: raw["field_11"] },
+                { label: "Grado materiale 1", value: raw["field_11"] },
                 { label: "Grado materiale 2", value: raw["GRADOMATERIALE2"] },
                 { label: "N Cert", value: raw["field_17"] },
                 { label: "DATA CONSEGNA", value: formatSharePointDate(raw["field_16"]) },

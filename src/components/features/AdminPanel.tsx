@@ -101,6 +101,7 @@ type AdminPanelProps = {
 
 const FORGIATI_FIELDS: FieldConfig[] = [
   { key: "Title", label: "Codice / Title", required: true, placeholder: "Es. FOR-001" },
+  { key: "CodiceSAM", label: "Codice SAM" },
   { key: "field_1", label: "N° Ordine" },
   { key: "field_2", label: "Data Ordine", type: "date" },
   { key: "field_10", label: "N° Bolla" },
@@ -128,7 +129,6 @@ const FORGIATI_FIELDS: FieldConfig[] = [
   { key: "field_19", label: "Anello - Disco" },
   { key: "field_20", label: "Grezzo - Sgrossato" },
   { key: "field_26", label: "Data/ora modifica", type: "date", writable: false },
-  { key: "CodiceSAM", label: "Codice SAM" },
   { key: "IdentLotto", label: "Ident. Lotto", writable: false },
 ];
 
@@ -145,7 +145,7 @@ const TUBI_FIELDS: FieldConfig[] = [
   { key: "field_8", label: "DN (\")" },
   { key: "field_9", label: "DN (mm)" },
   { key: "field_10", label: "SP" },
-  { key: "field_11", label: "GRADO" },
+  { key: "field_11", label: "Grado materiale 1" },
   { key: "GRADOMATERIALE2", label: "Grado materiale 2" },
   { key: "field_12", label: "PSL1 / PSL2" },
   { key: "field_13", label: "PED" },
@@ -159,10 +159,6 @@ const TUBI_FIELDS: FieldConfig[] = [
   { key: "field_20", label: "Giacenza non tagliato (mm)" },
   { key: "field_16", label: "Data consegna", type: "date" },
   { key: "field_22", label: "Prezzo kg/mt" },
-  { key: "field_23", label: "Prezzo metro" },
-  { key: "field_24", label: "Acquistato dal Curatore" },
-  { key: "field_26", label: "Esubero", writable: false },
-  { key: "field_27", label: "RITARDO" },
   { key: "IdentLotto", label: "Ident. Lotto", writable: false },
 ];
 
@@ -238,7 +234,7 @@ const TUBO_MECCANICO_FIELDS: FieldConfig[] = [
   { key: "field_7", label: "Lungh. Tubo (mm)" },
   { key: "field_8", label: "Ø Est." },
   { key: "field_9", label: "SP" },
-  { key: "field_10", label: "GRADO" },
+  { key: "field_10", label: "Grado materiale 1" },
   { key: "field_11", label: "N° Bolla" },
   { key: "field_12", label: "DATA CONSEGNA", type: "date" },
   { key: "field_13", label: "N° CERT." },
@@ -457,7 +453,7 @@ const buildTubiExcelColumnMap = () => {
   map.set(normalizeExcelKey("GIACENZAMM NON TAGLIATO"), "field_20");
   map.set(normalizeExcelKey("DATA ULTIMO PRELIEVO"), "field_21");
   map.set(normalizeExcelKey("PREZZO KGMT"), "field_22");
-  map.set(normalizeExcelKey("PREZZO METRO"), "field_23");
+  map.set(normalizeExcelKey("PREZZO METRO"), "field_22");
   map.set(normalizeExcelKey("ACQUISTATO DAL CURATORE"), "field_24");
   map.set(normalizeExcelKey("NO COMMESSA"), "field_25");
   map.set(normalizeExcelKey("N COMMESSA"), "field_25");
@@ -605,7 +601,13 @@ const buildTubiExcelRow = (excelColumns: string[], fields: Record<string, unknow
     const normalized = normalizeExcelKey(columnName || "");
     const fieldKey =
       TUBI_EXCEL_COLUMN_MAP.get(normalized) || fieldKeyLookup.get(normalized) || null;
-    const rawValue = fieldKey ? fields[fieldKey] : null;
+    const rawValue = fieldKey === "field_22"
+      ? fields.field_22 === null || fields.field_22 === undefined || fields.field_22 === ""
+        ? fields.field_23
+        : fields.field_22
+      : fieldKey
+      ? fields[fieldKey]
+      : null;
     return toExcelCellValue(fieldKey, rawValue);
   });
 };
@@ -963,6 +965,12 @@ const buildFormFromItem = (
       return;
     }
     const value = item?.fields ? (item.fields as Record<string, unknown>)[field.key] : undefined;
+    // Il precedente campo "Prezzo metro" resta leggibile per gli articoli
+    // storici, ma ogni modifica viene salvata nel solo campo prezzo attivo.
+    if (field.key === "field_22" && !toStr(value)) {
+      form[field.key] = toStr((item?.fields as Record<string, unknown> | undefined)?.field_23);
+      return;
+    }
     if (field.type === "date") {
       form[field.key] = toInputDate(value);
       return;

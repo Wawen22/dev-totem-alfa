@@ -11,7 +11,7 @@ export const tuboMeccanicoColumns: ForgiatoColumn[] = [
   { field: "field_7", label: "Lungh. Tubo (mm)" },
   { field: "field_8", label: "Ø Est." },
   { field: "field_9", label: "SP" },
-  { field: "field_10", label: "GRADO" },
+  { field: "field_10", label: "Grado materiale 1" },
   { field: "field_11", label: "N° Bolla" },
   { field: "field_12", label: "DATA CONSEGNA", type: "date" },
   { field: "field_13", label: "N° CERT." },
