@@ -87,7 +87,8 @@ Un magazzino entra nello stato **Consolidato** solo dopo: build riuscita, test a
 | Data | Magazzino | Attività | Stato | Nota |
 | --- | --- | --- | --- | --- |
 | 2026-09-25 | FLANGE | Flusso Excel -> Totem e refresh vista verificati dall'utente | completato | Excel cloud deve essere salvato/sincronizzato prima dell'azione |
-| 2026-09-25 | TUBI | Verifica iniziale di file, tabella e schema SharePoint | in corso | fase esclusivamente in lettura; nessun record viene modificato |
+| 2026-09-25 | TUBI | Verifica iniziale di file, tabella e schema SharePoint | completata | file `3_TUBI.xlsx`, tabella `tblTUBI`, intervallo `MAG_TUBI_COOP_2012!A1:AB1116`: 1.115 righe dati e 28 colonne; tutti i nomi interni SharePoint richiesti sono presenti |
+| 2026-09-25 | TUBI | Anomalie rilevate nella verifica statica | da correggere | `Prezzo metro` viene oggi associato a `field_22` anziché `field_23`; il flusso Excel -> SharePoint non applica ancora lo stop dopo 3 errori consecutivi. Nessun record è stato modificato. |
 | 2026-09-25 | FORGIATI | Revisione statica del flusso protetto | verificato | validazione schema, conflitti, duplicati e report già presenti |
 | 2026-09-25 | TUBO MECCANICO | Consolidamento tecnico commit `d09dff6` | completato | preflight schema, stop dopo 3 errori consecutivi e report record solo SharePoint aggiunti; test utente riuscito |
 | 2026-09-25 | TUBO MECCANICO | Correzione schema SharePoint approvata | completato | lista Alfa `4_TUBO-MECCANICO`: creata colonna testo `IdentLotto`, nome visibile `LOTTO`; nessun record modificato |
