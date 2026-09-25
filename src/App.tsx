@@ -597,6 +597,25 @@ const buildFlangeExcelRow = (excelColumns: string[], fields: Record<string, unkn
   });
 };
 
+const FLANGE_NUMERIC_FIELDS = new Set([
+  "Quantita", "DN", "SP", "PrezzoCad", "GiacenzaMm", "PrezzoEuroKg",
+]);
+
+const buildFlangePayloadFromExcelRow = (excelColumns: string[], values: unknown[]) => {
+  const fields: Record<string, unknown> = {};
+  excelColumns.forEach((columnName, index) => {
+    const fieldKey = flangeExcelColumnFieldMap.get(normalizeExcelKey(columnName || ""));
+    if (!fieldKey || fieldKey === "Modified" || fieldKey === "Created") return;
+    const value = values[index];
+    fields[fieldKey] = FLANGE_DATE_FIELDS.has(fieldKey)
+      ? normalizeDateValue(value)
+      : FLANGE_NUMERIC_FIELDS.has(fieldKey)
+      ? normalizeWorkbookNumberValue(value)
+      : normalizeWorkbookScalarValue(value);
+  });
+  return normalizeTrimmedValue(fields.Title) ? fields : null;
+};
+
 const getForgiatiExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
   const target = normalizeExcelKey(fieldKey);
   for (let i = 0; i < excelColumns.length; i++) {
@@ -772,12 +791,17 @@ const findFlangeExcelRowIndex = (
   if (titleIdx === null) return null;
   const title = normalizeExcelKey(options.codice || "");
   const lotto = normalizeExcelKey(options.lotto || "");
+  const sameCodeRows: number[] = [];
   for (const row of rows) {
     const values = row.values?.[0] || [];
     if (normalizeExcelKey(String(values[titleIdx] ?? "")) !== title) continue;
+    sameCodeRows.push(row.index);
     if (lottoIdx === null || normalizeExcelKey(String(values[lottoIdx] ?? "")) === lotto) return row.index;
   }
-  return null;
+  // I record storici possono avere il lotto vuoto in SharePoint e "A" in
+  // Excel. Se il codice compare una sola volta, è comunque una corrispondenza
+  // univoca; se compare più volte non scegliamo mai una riga arbitraria.
+  return sameCodeRows.length === 1 ? sameCodeRows[0] : null;
 };
 const parseExcelAddress = (address: string) => {
   const [sheetPartRaw, rangePartRaw] = address.split("!");
@@ -8223,8 +8247,109 @@ function AuthenticatedShell() {
     resolveTuboMeccanicoExcelContext,
   ]);
 
+  const handleSyncFlangeExcelToSharePoint = useCallback(async (
+    onProgress?: SyncProgressHandler
+  ): Promise<SyncResult> => {
+    if (!sharepointService) return { success: false, message: "Configurazione SharePoint mancante." };
+    if (!flangeListId) return { success: false, message: "List ID FLANGE non configurato." };
+    const path = flangeExcelPath || (flangeExcelFolder && flangeExcelFilename ? `${flangeExcelFolder}/${flangeExcelFilename}` : "");
+    if (!path || !flangeExcelTable) return { success: false, message: "Percorso Excel o tabella FLANGE non configurati." };
+
+    try {
+      let driveId = flangeExcelDriveIdRef.current;
+      if (!driveId && flangeExcelDriveNameEnv) {
+        driveId = await sharepointService.getDriveIdByName(flangeExcelDriveNameEnv);
+        flangeExcelDriveIdRef.current = driveId;
+      }
+      if (!driveId && flangeExcelDriveNameEnv) throw new Error(`Libreria "${flangeExcelDriveNameEnv}" non trovata`);
+
+      onProgress?.("Apertura tabella Excel FLANGE...");
+      const driveItem = await sharepointService.getDriveItemByPath(path, driveId || undefined);
+      const [columns, rows, existingItems, sharePointColumns] = await Promise.all([
+        sharepointService.listWorkbookTableColumnsByItemId(driveItem.id, flangeExcelTable, driveId || undefined),
+        sharepointService.listWorkbookTableRowsByItemId(driveItem.id, flangeExcelTable, driveId || undefined),
+        sharepointService.listItems<Record<string, unknown>>(flangeListId),
+        sharepointService.listColumns(flangeListId),
+      ]);
+
+      const byExactKey = new Map<string, SharePointListItem<Record<string, unknown>>[]>();
+      const byCode = new Map<string, SharePointListItem<Record<string, unknown>>[]>();
+      const keyFor = (title: unknown, lotto: unknown) =>
+        `${normalizeExcelKey(String(title ?? ""))}::${normalizeExcelKey(String(lotto ?? ""))}`;
+      existingItems.forEach((item) => {
+        const fields = item.fields as Record<string, unknown>;
+        const code = normalizeExcelKey(toStr(fields.Title));
+        if (!code) return;
+        const exact = keyFor(fields.Title, fields.IdentLotto);
+        byExactKey.set(exact, [...(byExactKey.get(exact) || []), item]);
+        byCode.set(code, [...(byCode.get(code) || []), item]);
+      });
+
+      let updated = 0;
+      let created = 0;
+      let skipped = 0;
+      const updatedItems: SyncDetailItem[] = [];
+      const createdItems: SyncDetailItem[] = [];
+      const skippedItems: SyncDetailItem[] = [];
+
+      for (let index = 0; index < rows.length; index++) {
+        const fields = buildFlangePayloadFromExcelRow(columns, rows[index].values?.[0] || []);
+        if (!fields) {
+          skipped++;
+          skippedItems.push(buildGenericSyncDetailItem(`Riga Excel ${index + 1}`, "CODICE vuoto"));
+          continue;
+        }
+        const code = toStr(fields.Title);
+        const lotto = toStr(fields.IdentLotto);
+        const exactMatches = byExactKey.get(keyFor(code, lotto)) || [];
+        const codeMatches = byCode.get(normalizeExcelKey(code)) || [];
+        const match = exactMatches.length === 1
+          ? exactMatches[0]
+          : exactMatches.length === 0 && codeMatches.length === 1
+          ? codeMatches[0]
+          : null;
+        if ((exactMatches.length > 1) || (!match && codeMatches.length > 1)) {
+          skipped++;
+          skippedItems.push(buildGenericSyncDetailItem(code, "Record con CODICE/LOTTO ambiguo: nessuna sovrascrittura"));
+          continue;
+        }
+        if (match) {
+          await sharepointService.updateItem<Record<string, unknown>>(flangeListId, match.id, fields);
+          updated++;
+          updatedItems.push(buildGenericSyncDetailItem(code, `Aggiornato da Excel${lotto ? ` (lotto ${lotto})` : ""}`));
+        } else {
+          const createFields = prepareFieldsForSharePointCreate(fields, sharePointColumns);
+          const item = await sharepointService.createItem<Record<string, unknown>>(flangeListId, createFields);
+          created++;
+          createdItems.push(buildGenericSyncDetailItem(code, `Creato da Excel${lotto ? ` (lotto ${lotto})` : ""}`));
+          const exact = keyFor(fields.Title, fields.IdentLotto);
+          byExactKey.set(exact, [...(byExactKey.get(exact) || []), item]);
+          const normalizedCode = normalizeExcelKey(code);
+          byCode.set(normalizedCode, [...(byCode.get(normalizedCode) || []), item]);
+        }
+        if ((index + 1) % 10 === 0) onProgress?.(`Excel -> Totem FLANGE: ${updated} aggiornati, ${created} creati (${index + 1}/${rows.length})...`);
+      }
+
+      return {
+        success: skipped === 0,
+        message: `Sincronizzazione FLANGE Excel -> Totem completata: ${updated} aggiornati, ${created} creati, ${skipped} saltati.`,
+        details: buildSyncDetailSections([
+          { key: "updated", label: "Aggiornati", items: updatedItems },
+          { key: "created", label: "Creati", items: createdItems },
+          { key: "skipped", label: "Saltati", items: skippedItems },
+        ]),
+      };
+    } catch (err: any) {
+      console.error("Errore sync FLANGE Excel -> SharePoint", err);
+      return { success: false, message: `Errore sync FLANGE Excel -> Totem: ${err?.message || "errore sconosciuto"}` };
+    }
+  }, [
+    sharepointService, flangeListId, flangeExcelPath, flangeExcelFolder, flangeExcelFilename,
+    flangeExcelTable, flangeExcelDriveNameEnv,
+  ]);
+
   const handleSyncFromExcel = useCallback(async (
-    listKind: "FORGIATI" | "TUBI" | "TUBO-MECCANICO",
+    listKind: "FORGIATI" | "TUBI" | "TUBO-MECCANICO" | "FLANGE",
     onProgress?: SyncProgressHandler
   ): Promise<SyncResult> => {
     if (listKind === "FORGIATI") {
@@ -8233,11 +8358,15 @@ function AuthenticatedShell() {
     if (listKind === "TUBO-MECCANICO") {
       return handleSyncTuboMeccanicoExcelToSharePoint(onProgress);
     }
+    if (listKind === "FLANGE") {
+      return handleSyncFlangeExcelToSharePoint(onProgress);
+    }
     return handleSyncTubiExcelToSharePoint(onProgress);
   }, [
     handleSyncForgiatiExcelToSharePoint,
     handleSyncTubiExcelToSharePoint,
     handleSyncTuboMeccanicoExcelToSharePoint,
+    handleSyncFlangeExcelToSharePoint,
   ]);
 
   const handleSyncExcel = useCallback(async (

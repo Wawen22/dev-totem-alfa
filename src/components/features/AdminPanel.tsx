@@ -95,7 +95,7 @@ type AdminPanelProps = {
     onProgress?: (msg: string) => void
   ) => Promise<SyncResult>;
   onSyncFromExcel?: (
-    listKind: Extract<ListKind, "FORGIATI" | "TUBI" | "TUBO-MECCANICO">,
+    listKind: Extract<ListKind, "FORGIATI" | "TUBI" | "TUBO-MECCANICO" | "FLANGE">,
     onProgress?: (msg: string) => void
   ) => Promise<SyncResult>;
 };
@@ -947,12 +947,14 @@ const findFlangeExcelRowIndex = (
   if (titleIdx === null) return null;
   const title = normalizeExcelKey(options.codice || "");
   const lotto = normalizeExcelKey(options.lotto || "");
+  const sameCodeRows: number[] = [];
   for (const row of rows) {
     const values = row.values?.[0] || [];
     if (normalizeExcelKey(String(values[titleIdx] ?? "")) !== title) continue;
+    sameCodeRows.push(row.index);
     if (lottoIdx === null || normalizeExcelKey(String(values[lottoIdx] ?? "")) === lotto) return row.index;
   }
-  return null;
+  return sameCodeRows.length === 1 ? sameCodeRows[0] : null;
 };
 
 const findLastRowIndexByCodice = (
@@ -2359,7 +2361,7 @@ export function AdminPanel({
   const EXCEL_LISTS: ListKind[] = ["FORGIATI", "TUBI", "TUBO-MECCANICO", "SPARK-GUPS", "FILO-FLUSSO", "FLANGE"];
   const hasExcel = EXCEL_LISTS.includes(activeList);
   const showExcelSyncAction = activeList === "TUBI" || activeList === "FORGIATI" || activeList === "TUBO-MECCANICO" || activeList === "FLANGE";
-  const showBidirectionalSyncActions = activeList === "TUBI" || activeList === "FORGIATI" || activeList === "TUBO-MECCANICO";
+  const showBidirectionalSyncActions = activeList === "TUBI" || activeList === "FORGIATI" || activeList === "TUBO-MECCANICO" || activeList === "FLANGE";
 
   const handleSyncExcel = useCallback(async () => {
     if (!onSyncExcel) return;
@@ -2377,7 +2379,7 @@ export function AdminPanel({
   }, [onSyncExcel, activeList]);
 
   const handleSyncFromExcel = useCallback(async () => {
-    if (!onSyncFromExcel || (activeList !== "TUBI" && activeList !== "FORGIATI" && activeList !== "TUBO-MECCANICO")) return;
+    if (!onSyncFromExcel || (activeList !== "TUBI" && activeList !== "FORGIATI" && activeList !== "TUBO-MECCANICO" && activeList !== "FLANGE")) return;
     setSyncStatus("syncing");
     setSyncMessage("Avvio sincronizzazione Excel -> SharePoint...");
     setSyncDetails(null);
