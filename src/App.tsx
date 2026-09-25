@@ -468,6 +468,29 @@ const filoFlussoExcelColumnFieldMap = (() => {
 
 const SPARK_DATE_FIELDS = new Set<string>();
 const FILO_FLUSSO_DATE_FIELDS = new Set<string>([]);
+const FLANGE_DATE_FIELDS = new Set(["DataOrdine", "DataConsegna", "Modified", "Created"]);
+
+const flangeExcelColumnFieldMap = (() => {
+  const map = buildExcelColumnFieldMap(flangeColumns);
+  map.set(normalizeExcelKey("CODICE"), "Title");
+  map.set(normalizeExcelKey("LOTTO"), "IdentLotto");
+  map.set(normalizeExcelKey("CODICE SAM"), "CodiceSAM");
+  map.set(normalizeExcelKey("N ORDINE"), "NumeroOrdine");
+  map.set(normalizeExcelKey("N. ORDINE"), "NumeroOrdine");
+  map.set(normalizeExcelKey("DATA OD"), "DataOrdine");
+  map.set(normalizeExcelKey("QTA"), "Quantita");
+  map.set(normalizeExcelKey("QTA."), "Quantita");
+  map.set(normalizeExcelKey("GRADO 1"), "Grado1");
+  map.set(normalizeExcelKey("GRADO 2"), "Grado2");
+  map.set(normalizeExcelKey("N BOLLA"), "NumeroBolla");
+  map.set(normalizeExcelKey("N. BOLLA"), "NumeroBolla");
+  map.set(normalizeExcelKey("N CERT"), "NumeroCertificato");
+  map.set(normalizeExcelKey("N CERT."), "NumeroCertificato");
+  map.set(normalizeExcelKey("N COLATA"), "NumeroColata");
+  map.set(normalizeExcelKey("PREZZO EUROKG"), "PrezzoEuroKg");
+  map.set(normalizeExcelKey("PREZZO €/KG"), "PrezzoEuroKg");
+  return map;
+})();
 
 const tuboMeccanicoExcelColumnFieldMap = (() => {
   const map = buildExcelColumnFieldMap(tuboMeccanicoColumns);
@@ -564,6 +587,16 @@ const buildFiloFlussoExcelRow = (excelColumns: string[], fields: Record<string, 
   });
 };
 
+const buildFlangeExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
+  const fieldKeyLookup = new Map<string, string>();
+  Object.keys(fields).forEach((key) => fieldKeyLookup.set(normalizeExcelKey(key), key));
+  return excelColumns.map((columnName) => {
+    const normalized = normalizeExcelKey(columnName || "");
+    const fieldKey = flangeExcelColumnFieldMap.get(normalized) || fieldKeyLookup.get(normalized) || null;
+    return toExcelCellValueForDateFields(FLANGE_DATE_FIELDS, fieldKey, fieldKey ? fields[fieldKey] : null);
+  });
+};
+
 const getForgiatiExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
   const target = normalizeExcelKey(fieldKey);
   for (let i = 0; i < excelColumns.length; i++) {
@@ -596,6 +629,15 @@ const getFiloFlussoExcelColumnIndex = (excelColumns: string[], fieldKey: string)
     if (mapped && normalizeExcelKey(mapped) === target) {
       return i;
     }
+  }
+  return null;
+};
+
+const getFlangeExcelColumnIndex = (excelColumns: string[], fieldKey: string) => {
+  const target = normalizeExcelKey(fieldKey);
+  for (let i = 0; i < excelColumns.length; i++) {
+    const mapped = flangeExcelColumnFieldMap.get(normalizeExcelKey(excelColumns[i] || ""));
+    if (mapped && normalizeExcelKey(mapped) === target) return i;
   }
   return null;
 };
@@ -717,6 +759,24 @@ const findFiloFlussoExcelRowIndex = (
     }
   }
 
+  return null;
+};
+
+const findFlangeExcelRowIndex = (
+  rows: Array<{ index: number; values: Array<Array<unknown>> }>,
+  excelColumns: string[],
+  options: { codice: string; lotto?: string }
+) => {
+  const titleIdx = getFlangeExcelColumnIndex(excelColumns, "Title");
+  const lottoIdx = getFlangeExcelColumnIndex(excelColumns, "IdentLotto");
+  if (titleIdx === null) return null;
+  const title = normalizeExcelKey(options.codice || "");
+  const lotto = normalizeExcelKey(options.lotto || "");
+  for (const row of rows) {
+    const values = row.values?.[0] || [];
+    if (normalizeExcelKey(String(values[titleIdx] ?? "")) !== title) continue;
+    if (lottoIdx === null || normalizeExcelKey(String(values[lottoIdx] ?? "")) === lotto) return row.index;
+  }
   return null;
 };
 const parseExcelAddress = (address: string) => {
@@ -6144,6 +6204,13 @@ function AuthenticatedShell() {
   const sparkGupsExcelDriveIdRef = useRef<string | null>(sparkGupsExcelDriveIdEnv || null);
   const filoFlussoListId = import.meta.env.VITE_FILO_FLUSSO_LIST_ID;
   const flangeListId = import.meta.env.VITE_FLANGE_LIST_ID;
+  const flangeExcelPath = (import.meta.env.VITE_FLANGE_EXCEL_PATH || "").trim();
+  const flangeExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
+  const flangeExcelFilename = (import.meta.env.VITE_SP_FLANGE_FILENAME || import.meta.env.VITE_FLANGE_EXCEL_FILE || "").trim();
+  const flangeExcelTable = (import.meta.env.VITE_FLANGE_EXCEL_TABLE || "tblFlange").trim();
+  const flangeExcelDriveIdEnv = (import.meta.env.VITE_FLANGE_EXCEL_DRIVE_ID || "").trim();
+  const flangeExcelDriveNameEnv = (import.meta.env.VITE_FLANGE_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
+  const flangeExcelDriveIdRef = useRef<string | null>(flangeExcelDriveIdEnv || null);
   const filoFlussoExcelPath = (import.meta.env.VITE_FILO_FLUSSO_EXCEL_PATH || "").trim();
   const filoFlussoExcelFolder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
   const filoFlussoExcelFilename = (import.meta.env.VITE_SP_FILO_FLUSSO_FILENAME || import.meta.env.VITE_FILO_FLUSSO_EXCEL_FILE || "").trim();
@@ -8174,7 +8241,7 @@ function AuthenticatedShell() {
   ]);
 
   const handleSyncExcel = useCallback(async (
-    listKind: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO",
+    listKind: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO" | "FLANGE",
     onProgress?: (msg: string) => void
   ): Promise<SyncResult> => {
     if (listKind === "FORGIATI") {
@@ -8272,6 +8339,19 @@ function AuthenticatedShell() {
         getColIndex: getFiloFlussoExcelColumnIndex,
         matchKey: "lotto",
         matchLottoField: "field_3",
+      },
+      FLANGE: {
+        listId: flangeListId,
+        path: flangeExcelPath || (flangeExcelFolder && flangeExcelFilename ? `${flangeExcelFolder}/${flangeExcelFilename}` : ""),
+        folder: flangeExcelFolder, filename: flangeExcelFilename,
+        table: flangeExcelTable,
+        driveNameEnv: flangeExcelDriveNameEnv,
+        driveIdRef: flangeExcelDriveIdRef,
+        buildRow: buildFlangeExcelRow,
+        findRow: findFlangeExcelRowIndex,
+        getColIndex: getFlangeExcelColumnIndex,
+        matchKey: "lotto",
+        matchLottoField: "IdentLotto",
       },
     };
 
@@ -8376,6 +8456,7 @@ function AuthenticatedShell() {
     tuboMeccanicoListId, tuboMeccanicoExcelPath, tuboMeccanicoExcelFolder, tuboMeccanicoExcelFilename, tuboMeccanicoExcelTable, tuboMeccanicoExcelDriveNameEnv,
     sparkGupsListId, sparkGupsExcelPath, sparkGupsExcelFolder, sparkGupsExcelFilename, sparkGupsExcelTable, sparkGupsExcelDriveNameEnv,
     filoFlussoListId, filoFlussoExcelPath, filoFlussoExcelFolder, filoFlussoExcelFilename, filoFlussoExcelTable, filoFlussoExcelDriveNameEnv,
+    flangeListId, flangeExcelPath, flangeExcelFolder, flangeExcelFilename, flangeExcelTable, flangeExcelDriveNameEnv,
   ]);
 
   const handleSave = useCallback(async () => {
