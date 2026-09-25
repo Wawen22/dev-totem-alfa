@@ -85,7 +85,8 @@ Un magazzino entra nello stato **Consolidato** solo dopo: build riuscita, test a
 | 2026-09-25 | FLANGE | Flusso Excel -> Totem e refresh vista verificati dall'utente | completato | Excel cloud deve essere salvato/sincronizzato prima dell'azione |
 | 2026-09-25 | TUBI | Revisione statica del flusso protetto | verificato | validazione schema, conflitti, duplicati e report già presenti |
 | 2026-09-25 | FORGIATI | Revisione statica del flusso protetto | verificato | validazione schema, conflitti, duplicati e report già presenti |
-| 2026-09-25 | TUBO MECCANICO | Revisione statica | da consolidare | manca preflight schema e stop dopo errori consecutivi |
+| 2026-09-25 | TUBO MECCANICO | Consolidamento tecnico commit `d09dff6` | in verifica utente | preflight schema, stop dopo 3 errori consecutivi e report record solo SharePoint aggiunti; build e 5 test automatici verdi |
+| 2026-09-25 | TUBO MECCANICO | Correzione schema SharePoint approvata | completato | lista Alfa `4_TUBO-MECCANICO`: creata colonna testo `IdentLotto`, nome visibile `LOTTO`; nessun record modificato |
 | 2026-09-25 | Tutti | Bonifica iniziale SharePoint da Excel | non avviata | richiederà conferma per ciascun magazzino |
 
 ## Criteri di accettazione per ciascun magazzino
