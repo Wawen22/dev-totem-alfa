@@ -7764,7 +7764,6 @@ function AuthenticatedShell() {
                 detail: "Nuovo articolo creato in SharePoint",
               })
             );
-            consecutiveWriteErrors = 0;
           } else {
             const currentRecord = matches[0];
             usedItemIds.add(currentRecord.item.id);
@@ -7773,50 +7772,54 @@ function AuthenticatedShell() {
               record.comparableFieldMap,
               fieldLabelMap
             );
-            if (changedFields.length === 0) {
-              const storedIdentLotto = normalizeTrimmedValue(
-                (currentRecord.item.fields as Record<string, unknown>).IdentLotto
+            const storedIdentLotto = normalizeTrimmedValue(
+              (currentRecord.item.fields as Record<string, unknown>).IdentLotto
+            );
+            const identityNeedsAlignment =
+              normalizeExcelKey(storedIdentLotto || "") !== normalizeExcelKey(record.identLotto);
+
+            if (shouldApplyExcelAuthoritativeUpdate(changedFields.length, identityNeedsAlignment)) {
+              const updateFields = buildExcelAuthoritativePatch(
+                record.fields,
+                record.comparableFieldMap.keys(),
+                changedFields.length > 0
               );
-              if (normalizeExcelKey(storedIdentLotto || "") !== normalizeExcelKey(record.identLotto)) {
-                await sharepointService.updateItem<Record<string, unknown>>(
-                  forgiatiListId,
-                  currentRecord.item.id,
-                  { IdentLotto: record.identLotto }
-                );
-                currentRecord.item.fields = {
-                  ...currentRecord.item.fields,
-                  IdentLotto: record.identLotto,
-                };
-                updated++;
-                updatedLabels.push(
-                  buildTubiSyncDetailItem({
-                    title: record.title,
-                    colata: record.colata,
-                    identLotto: record.identLotto,
-                    detail: "Identificativo lotto allineato",
-                  })
-                );
-                consecutiveWriteErrors = 0;
-              } else {
-                unchanged++;
-                unchangedLabels.push(
-                  buildTubiSyncDetailItem({
-                    title: record.title,
-                    colata: record.colata,
-                    identLotto: record.identLotto,
-                    detail: "Nessuna differenza rilevata",
-                  })
-                );
-              }
+              await sharepointService.updateItem<Record<string, unknown>>(
+                forgiatiListId,
+                currentRecord.item.id,
+                updateFields
+              );
+              currentRecord.item.fields = {
+                ...currentRecord.item.fields,
+                ...updateFields,
+              };
+              currentRecord.comparableFieldMap = record.comparableFieldMap;
+              updated++;
+              updatedLabels.push(
+                buildTubiSyncDetailItem({
+                  title: record.title,
+                  colata: record.colata,
+                  identLotto: record.identLotto,
+                  detail:
+                    changedFields.length > 0
+                      ? `${changedFields.length} campi aggiornati da Excel`
+                      : "Identificativo lotto allineato",
+                  changes: changedFields.length > 0 ? changedFields : undefined,
+                })
+              );
             } else {
-              skipped++;
-              skippedLabels.push(buildTubiSyncDetailItem({
-                title: record.title, colata: record.colata, identLotto: record.identLotto,
-                detail: "Conflitto Excel / Totem: valori diversi, nessuna sovrascrittura",
-                changes: changedFields,
-              }));
+              unchanged++;
+              unchangedLabels.push(
+                buildTubiSyncDetailItem({
+                  title: record.title,
+                  colata: record.colata,
+                  identLotto: record.identLotto,
+                  detail: "Nessuna differenza rilevata",
+                })
+              );
             }
           }
+          consecutiveWriteErrors = recordWriteOutcome(consecutiveWriteErrors, true);
         } catch (rowErr: any) {
           const message = rowErr?.message || "Errore SharePoint in creazione/aggiornamento";
           console.error("Errore sync FORGIATI Excel -> SharePoint su record", {
@@ -7835,10 +7838,10 @@ function AuthenticatedShell() {
               detail: message,
             })
           );
-          consecutiveWriteErrors += 1;
-          if (consecutiveWriteErrors >= 3) {
+          consecutiveWriteErrors = recordWriteOutcome(consecutiveWriteErrors, false);
+          if (consecutiveWriteErrors >= MAX_CONSECUTIVE_SYNC_WRITE_FAILURES) {
             throw new Error(
-              `Sincronizzazione interrotta dopo 3 errori SharePoint consecutivi. Ultimo record: ${record.title} (${record.identLotto}). ${message}`
+              `Sincronizzazione interrotta dopo ${MAX_CONSECUTIVE_SYNC_WRITE_FAILURES} errori SharePoint consecutivi. Ultimo record: ${record.title} (${record.identLotto}). ${message}`
             );
           }
           continue;
