@@ -17,6 +17,10 @@ Nella bonifica iniziale, Excel è la fonte autorevole. Dopo il completamento e l
 - I record presenti soltanto su SharePoint non vengono eliminati automaticamente durante la sincronizzazione ordinaria.
 - La pulizia di duplicati identici o record vuoti richiede sempre una conferma separata e un elenco degli ID interessati.
 
+### Eccezione approvata: TUBO-MECCANICO
+
+Il 25 settembre 2026 l'utente ha richiesto e confermato che il pulsante **Aggiorna Totem da Excel** per `4_TUBO-MECCANICO` ripristini il comportamento storico Excel-autorevole: con chiave `CODICE + LOTTO` univoca, i campi gestiti diversi vengono aggiornati in SharePoint dal file Excel. Restano invariati i blocchi per chiavi duplicate o ambigue, righe fuori tabella, schema non compatibile, errori consecutivi e l'assenza di eliminazioni automatiche. Questa eccezione non modifica la politica ordinaria degli altri magazzini.
+
 ## Modello operativo
 
 ### 1. Verifica non distruttiva
@@ -87,6 +91,7 @@ Un magazzino entra nello stato **Consolidato** solo dopo: build riuscita, test a
 | 2026-09-25 | FORGIATI | Revisione statica del flusso protetto | verificato | validazione schema, conflitti, duplicati e report già presenti |
 | 2026-09-25 | TUBO MECCANICO | Consolidamento tecnico commit `d09dff6` | in verifica utente | preflight schema, stop dopo 3 errori consecutivi e report record solo SharePoint aggiunti; build e 5 test automatici verdi |
 | 2026-09-25 | TUBO MECCANICO | Correzione schema SharePoint approvata | completato | lista Alfa `4_TUBO-MECCANICO`: creata colonna testo `IdentLotto`, nome visibile `LOTTO`; nessun record modificato |
+| 2026-09-25 | TUBO MECCANICO | Ripristino Excel-autorevole approvato | in verifica utente | le differenze su chiave univoca aggiornano SharePoint; PATCH limitato alle colonne realmente presenti nell'Excel, senza eliminazioni |
 | 2026-09-25 | Tutti | Bonifica iniziale SharePoint da Excel | non avviata | richiederà conferma per ciascun magazzino |
 
 ## Criteri di accettazione per ciascun magazzino

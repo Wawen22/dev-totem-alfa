@@ -16,9 +16,11 @@ import { SharePointListItem } from "./types/sharepoint";
 import { SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "./types/sync";
 import { formatSharePointDate } from "./utils/dateUtils";
 import {
+  buildExcelAuthoritativePatch,
   getMissingRequiredColumns,
   MAX_CONSECUTIVE_SYNC_WRITE_FAILURES,
   recordWriteOutcome,
+  shouldApplyExcelAuthoritativeUpdate,
 } from "./services/syncGuards";
 import { WebsiteViewer } from "./components/features/WebsiteViewer";
 import { DocumentBrowser } from "./components/features/DocumentBrowser";
@@ -514,13 +516,16 @@ const tuboMeccanicoExcelColumnFieldMap = (() => {
   map.set(normalizeExcelKey("O EST"), "field_8");
   map.set(normalizeExcelKey("SP"), "field_9");
   map.set(normalizeExcelKey("GRADO"), "field_10");
+  map.set(normalizeExcelKey("GR MAT 1"), "field_10");
   map.set(normalizeExcelKey("NBOLLA"), "field_11");
   map.set(normalizeExcelKey("DATA CONSEGNA"), "field_12");
   map.set(normalizeExcelKey("N CERT"), "field_13");
   map.set(normalizeExcelKey("N COLATA"), "field_14");
   map.set(normalizeExcelKey("PREZZO UNITARIO"), "field_15");
   map.set(normalizeExcelKey("GIACENZA AMMINISTRAZIONE MM"), "field_16");
+  map.set(normalizeExcelKey("GIACENZA TOTALE MM"), "field_16");
   map.set(normalizeExcelKey("GIACENZA MM"), "field_17");
+  map.set(normalizeExcelKey("GIACENZA X TAGLIATI MM"), "field_17");
   map.set(normalizeExcelKey("DATA PRELIEVO"), "field_18");
   map.set(normalizeExcelKey("UTILIZZATO PER COMM MM"), "field_19");
   map.set(normalizeExcelKey("LOTTO"), "IdentLotto"); // colonna Excel si chiama "LOTTO"
@@ -1021,6 +1026,7 @@ const FORGIATI_SHAREPOINT_DATE_FIELDS = ["field_2", "field_11", "field_23"] as c
 
 const TUBO_MECCANICO_SHAREPOINT_TEXT_FIELDS = [
   "field_1",
+  "field_2",
   "field_4",
   "field_10",
   "field_11",
@@ -8180,47 +8186,51 @@ function AuthenticatedShell() {
               record.comparableFieldMap,
               fieldLabelMap
             );
-            if (changedFields.length === 0) {
-              const storedIdentLotto = normalizeTrimmedValue(
-                (currentRecord.item.fields as Record<string, unknown>).IdentLotto
+            const storedIdentLotto = normalizeTrimmedValue(
+              (currentRecord.item.fields as Record<string, unknown>).IdentLotto
+            );
+            const identityNeedsAlignment =
+              normalizeExcelKey(storedIdentLotto || "") !== normalizeExcelKey(record.identLotto);
+
+            if (shouldApplyExcelAuthoritativeUpdate(changedFields.length, identityNeedsAlignment)) {
+              const updateFields = buildExcelAuthoritativePatch(
+                record.fields,
+                record.comparableFieldMap.keys(),
+                changedFields.length > 0
               );
-              if (normalizeExcelKey(storedIdentLotto || "") !== normalizeExcelKey(record.identLotto)) {
-                await sharepointService.updateItem<Record<string, unknown>>(
-                  tuboMeccanicoListId,
-                  currentRecord.item.id,
-                  { IdentLotto: record.identLotto }
-                );
-                currentRecord.item.fields = {
-                  ...currentRecord.item.fields,
-                  IdentLotto: record.identLotto,
-                };
-                updated++;
-                updatedLabels.push(
-                  buildTubiSyncDetailItem({
-                    title: record.title,
-                    colata: record.colata,
-                    identLotto: record.identLotto,
-                    detail: "Identificativo lotto allineato",
-                  })
-                );
-              } else {
-                unchanged++;
-                unchangedLabels.push(
-                  buildTubiSyncDetailItem({
-                    title: record.title,
-                    colata: record.colata,
-                    identLotto: record.identLotto,
-                    detail: "Nessuna differenza rilevata",
-                  })
-                );
-              }
+              await sharepointService.updateItem<Record<string, unknown>>(
+                tuboMeccanicoListId,
+                currentRecord.item.id,
+                updateFields
+              );
+              currentRecord.item.fields = {
+                ...currentRecord.item.fields,
+                ...updateFields,
+              };
+              currentRecord.comparableFieldMap = record.comparableFieldMap;
+              updated++;
+              updatedLabels.push(
+                buildTubiSyncDetailItem({
+                  title: record.title,
+                  colata: record.colata,
+                  identLotto: record.identLotto,
+                  detail:
+                    changedFields.length > 0
+                      ? `${changedFields.length} campi aggiornati da Excel`
+                      : "Identificativo lotto allineato",
+                  changes: changedFields.length > 0 ? changedFields : undefined,
+                })
+              );
             } else {
-              skipped++;
-              skippedLabels.push(buildTubiSyncDetailItem({
-                title: record.title, colata: record.colata, identLotto: record.identLotto,
-                detail: "Conflitto Excel / Totem: valori diversi, nessuna sovrascrittura",
-                changes: changedFields,
-              }));
+              unchanged++;
+              unchangedLabels.push(
+                buildTubiSyncDetailItem({
+                  title: record.title,
+                  colata: record.colata,
+                  identLotto: record.identLotto,
+                  detail: "Nessuna differenza rilevata",
+                })
+              );
             }
           }
           consecutiveWriteErrors = recordWriteOutcome(consecutiveWriteErrors, true);
