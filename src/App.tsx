@@ -12,6 +12,8 @@ import { sparkGupsColumns } from "./config/sparkGupsColumns";
 import { filoFlussoColumns } from "./config/filoFlussoColumns";
 import { tuboMeccanicoColumns } from "./config/tuboMeccanicoColumns";
 import { flangeColumns } from "./config/flangeColumns";
+import { assertUniqueFlangeLots, buildFlangeLotPayload, effectiveFlangeLot, flangeLotLabels, nextFlangeLot } from "./utils/flangeLots";
+import { matchFlangeExcelRow } from "./utils/flangeExcelMatch";
 import { SharePointListItem } from "./types/sharepoint";
 import { SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "./types/sync";
 import { formatSharePointDate } from "./utils/dateUtils";
@@ -63,6 +65,7 @@ type CartItem = {
   bolla?: unknown;
   colata?: unknown;
   lottoProg?: string;
+  lotAmbiguous?: boolean;
   fields: Record<string, unknown>;
 };
 
@@ -496,6 +499,7 @@ const flangeExcelColumnFieldMap = (() => {
   map.set(normalizeExcelKey("N COLATA"), "NumeroColata");
   map.set(normalizeExcelKey("PREZZO EUROKG"), "PrezzoEuroKg");
   map.set(normalizeExcelKey("PREZZO €/KG"), "PrezzoEuroKg");
+  map.set(normalizeExcelKey("GIACENZA (mm)"), "GiacenzaMm");
   return map;
 })();
 
@@ -795,24 +799,8 @@ const findFlangeExcelRowIndex = (
   rows: Array<{ index: number; values: Array<Array<unknown>> }>,
   excelColumns: string[],
   options: { codice: string; lotto?: string }
-) => {
-  const titleIdx = getFlangeExcelColumnIndex(excelColumns, "Title");
-  const lottoIdx = getFlangeExcelColumnIndex(excelColumns, "IdentLotto");
-  if (titleIdx === null) return null;
-  const title = normalizeExcelKey(options.codice || "");
-  const lotto = normalizeExcelKey(options.lotto || "");
-  const sameCodeRows: number[] = [];
-  for (const row of rows) {
-    const values = row.values?.[0] || [];
-    if (normalizeExcelKey(String(values[titleIdx] ?? "")) !== title) continue;
-    sameCodeRows.push(row.index);
-    if (lottoIdx === null || normalizeExcelKey(String(values[lottoIdx] ?? "")) === lotto) return row.index;
-  }
-  // I record storici possono avere il lotto vuoto in SharePoint e "A" in
-  // Excel. Se il codice compare una sola volta, è comunque una corrispondenza
-  // univoca; se compare più volte non scegliamo mai una riga arbitraria.
-  return sameCodeRows.length === 1 ? sameCodeRows[0] : null;
-};
+) => matchFlangeExcelRow(rows, getFlangeExcelColumnIndex(excelColumns, "Title"), getFlangeExcelColumnIndex(excelColumns, "IdentLotto"), options.codice, options.lotto || "");
+
 const parseExcelAddress = (address: string) => {
   const [sheetPartRaw, rangePartRaw] = address.split("!");
   const sheetPart = sheetPartRaw || "";
@@ -1922,98 +1910,197 @@ interface SelectionStateProps {
   selectionLimitReached: boolean;
 }
 
-function FlangePanel() {
+export async function writeFlangeExcel(service: SharePointService, fields: Record<string, unknown>, create = false) {
+  const folder = (import.meta.env.VITE_SP_FOLDER_PATH || import.meta.env.VITE_EXCEL_FOLDER_PATH || "").trim();
+  const filename = (import.meta.env.VITE_SP_FLANGE_FILENAME || import.meta.env.VITE_FLANGE_EXCEL_FILE || "").trim();
+  const path = (import.meta.env.VITE_FLANGE_EXCEL_PATH || (folder && filename ? `${folder}/${filename}` : "")).trim();
+  const table = (import.meta.env.VITE_FLANGE_EXCEL_TABLE || "tblFlange").trim();
+  const driveName = (import.meta.env.VITE_FLANGE_EXCEL_DRIVE_NAME || import.meta.env.VITE_SP_LIBRARY_NAME || "").trim();
+  const driveId = import.meta.env.VITE_FLANGE_EXCEL_DRIVE_ID || (driveName ? await service.getDriveIdByName(driveName) : undefined);
+  if (driveName && !driveId) throw new Error(`Libreria "${driveName}" non trovata`);
+  if (!path || !table) throw new Error("Percorso Excel o tabella FLANGE non configurati");
+  const file = await service.getDriveItemByPath(path, driveId || undefined);
+  const columns = await service.listWorkbookTableColumnsByItemId(file.id, table, driveId || undefined);
+  if (getFlangeExcelColumnIndex(columns, "Title") === null || getFlangeExcelColumnIndex(columns, "IdentLotto") === null) {
+    throw new Error("Colonne CODICE/LOTTO non trovate nella tabella Excel FLANGE");
+  }
+  const rows = await service.listWorkbookTableRowsByItemId(file.id, table, driveId || undefined);
+  const sessionId = await service.createWorkbookSessionByItemId(file.id, { persistChanges: true }, driveId || undefined);
+  try {
+    if (create) {
+      // Do not use the legacy single-code fallback to match a newly created lot.
+      const codeIndex = getFlangeExcelColumnIndex(columns, "Title")!;
+      const lotIndex = getFlangeExcelColumnIndex(columns, "IdentLotto")!;
+      if (rows.some((row) => normalizeExcelKey(String(row.values[0]?.[codeIndex] ?? "")) === normalizeExcelKey(toStr(fields.Title)) && effectiveFlangeLot(row.values[0]?.[lotIndex]) === effectiveFlangeLot(fields.IdentLotto))) {
+        throw new Error("Il lotto esiste già in Excel: verificare la sincronizzazione");
+      }
+      const insertAfter = findLastRowIndexByCodice(rows, columns, toStr(fields.Title), getFlangeExcelColumnIndex);
+      await service.appendWorkbookTableRowByItemId(file.id, table, buildFlangeExcelRow(columns, fields), { sessionId, index: insertAfter === null ? undefined : insertAfter + 1 }, driveId || undefined);
+    } else {
+      const index = findFlangeExcelRowIndex(rows, columns, { codice: toStr(fields.Title), lotto: toStr(fields.IdentLotto) });
+      if (index === null) throw new Error(`Riga Excel non trovata: ${fields.Title} (${fields.IdentLotto})`);
+      const range = await service.getWorkbookTableDataBodyRangeByItemId(file.id, table, driveId || undefined);
+      const address = buildRowRangeAddress(range.address, index, range.rowCount);
+      if (!address) throw new Error("Indirizzo riga Excel FLANGE non valido");
+      const original = rows.find((row) => row.index === index)?.values[0] || [];
+      const generated = buildFlangeExcelRow(columns, fields);
+      // Preserve retired and unrelated workbook columns; only patch supplied fields.
+      const values = columns.map((column, columnIndex) => {
+        const key = flangeExcelColumnFieldMap.get(normalizeExcelKey(column));
+        return key && Object.prototype.hasOwnProperty.call(fields, key) ? generated[columnIndex] : (original[columnIndex] ?? null) as string | number | boolean | null;
+      });
+      await service.updateWorkbookRangeByAddress(file.id, address.sheetName, address.address, [values], { sessionId }, driveId || undefined);
+    }
+  } finally {
+    try { await service.closeWorkbookSessionByItemId(file.id, sessionId, driveId || undefined); }
+    catch (error) { console.warn("Errore chiusura sessione Excel FLANGE", error); }
+  }
+}
+
+export function FlangePanel({ selectedItems, onToggle, selectionLimitReached }: SelectionStateProps) {
   const getClient = useAuthenticatedGraphClient();
   const siteId = import.meta.env.VITE_SHAREPOINT_SITE_ID;
   const listId = import.meta.env.VITE_FLANGE_LIST_ID;
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
-
+  const [lotCode, setLotCode] = useState<string | null>(null);
+  const [draft, setDraft] = useState<string[]>([]);
+  const [colata, setColata] = useState("");
+  const [ordine, setOrdine] = useState("");
+  const [codiceSam, setCodiceSam] = useState("");
+  const [dataOrdine, setDataOrdine] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [createdRows, setCreatedRows] = useState<FlangeItem[]>([]);
+  const [message, setMessage] = useState<string | null>(null);
+  const [messageStatus, setMessageStatus] = useState<"success" | "warning" | "error">("success");
   const service = useMemo(() => (siteId ? new SharePointService(getClient, siteId) : null), [getClient, siteId]);
   const { data: rawRows, loading, error, refresh } = useCachedList<Record<string, unknown>>(service, listId, "flange");
-
-  const rows = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    const filtered = rawRows.filter((item) => {
-      const fields = item.fields as Record<string, unknown>;
-      if (!toStr(fields.Title).trim()) return false;
-      if (!term) return true;
-      return flangeColumns.some((column) => toStr(fields[column.field]).toLowerCase().includes(term));
+  const columns = flangeColumns.filter((column) => !column.hidden);
+  const groups = useMemo(() => {
+    const map = new Map<string, FlangeItem[]>();
+    [...rawRows, ...createdRows.filter((item) => !rawRows.some((row) => row.id === item.id))].forEach((item) => {
+      const title = toStr(item.fields.Title).trim();
+      if (title) map.set(title, [...(map.get(title) || []), item]);
     });
-    return filtered.sort((left, right) =>
-      compareTubiTitle(toStr((left.fields as Record<string, unknown>).Title), toStr((right.fields as Record<string, unknown>).Title))
-    );
-  }, [rawRows, search]);
-
-  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+    return [...map.entries()].map(([title, items]) => ({ title, items, labels: flangeLotLabels(items) })).sort((a, b) => compareTubiTitle(b.title, a.title));
+  }, [rawRows, createdRows]);
+  const filtered = groups.filter((group) => group.items.some((item) => columns.some((column) => {
+    const value = column.type === "date" ? formatSharePointDate(item.fields[column.field]) : toStr(item.fields[column.field]);
+    return value.toLowerCase().includes(search.trim().toLowerCase());
+  })));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
-  const visibleRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-
-  useEffect(() => setPage(1), [search, pageSize]);
-
-  if (!listId) {
-    return <div className="panel"><div className="panel-content"><div className="alert warning">Configura <code>VITE_FLANGE_LIST_ID</code> per visualizzare le flange.</div></div></div>;
-  }
-
+  const visible = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const group = groups.find((entry) => entry.title === lotCode);
+  const toCart = (item: FlangeItem, labels: Map<string, string>): CartItem => ({
+    key: `FLANGE-${item.id}`, source: "FLANGE", itemId: item.id, title: toStr(item.fields.Title), fields: item.fields,
+    bolla: item.fields.NumeroBolla, colata: item.fields.NumeroColata, lottoProg: labels.get(item.id),
+    lotAmbiguous: [...labels.values()].filter((label) => label === labels.get(item.id)).length > 1,
+  });
+  const openLots = (entry: typeof groups[number]) => {
+    setLotCode(entry.title);
+    setDraft(entry.items.filter((item) => selectedItems[`FLANGE-${item.id}`]).map((item) => `FLANGE-${item.id}`));
+    setColata(buildColataPlaceholder(nextFlangeLot([...entry.labels.values()]).toLowerCase()));
+    setOrdine(""); setDataOrdine(""); setCodiceSam(toStr(entry.items[0].fields.CodiceSAM)); setMessage(null);
+  };
+  const outsideCount = Object.keys(selectedItems).filter((key) => !group?.items.some((item) => key === `FLANGE-${item.id}`)).length;
+  const confirmSelection = () => {
+    if (!group || outsideCount + draft.length > CART_SELECTION_LIMIT) return;
+    const items = group.items.map((item) => toCart(item, group.labels));
+    items.filter((item) => selectedItems[item.key] && !draft.includes(item.key)).forEach((item) => onToggle(item, true));
+    items.filter((item) => !selectedItems[item.key] && draft.includes(item.key)).forEach((item) => onToggle(item, false));
+    setLotCode(null);
+  };
+  const createLot = async () => {
+    if (!service || !listId || !group || saving || !colata.trim()) return;
+    setSaving(true); setMessage(null);
+    try {
+      const payload = buildFlangeLotPayload(group.items[0].fields, {
+        identLotto: nextFlangeLot([...group.labels.values()]), colata, ordine, codiceSam, dataOrdine: toIsoOrNull(dataOrdine),
+      });
+      const created = await service.createItem(listId, payload);
+      const createdItem = { id: created.id, fields: { ...payload, ...created.fields } };
+      setCreatedRows((current) => [...current, createdItem]);
+      clearCacheKeys(["flange", "admin-flange"]);
+      let excelError: string | null = null;
+      try { await writeFlangeExcel(service, payload, true); }
+      catch (error) { excelError = error instanceof Error ? error.message : "Errore Excel"; }
+      // Keep the new lot available even while the refreshed list is loading.
+      const labels = new Map(group.labels).set(created.id, toStr(payload.IdentLotto));
+      if (outsideCount + draft.length < CART_SELECTION_LIMIT) {
+        onToggle(toCart(createdItem, labels), false);
+        setDraft((current) => [...current, `FLANGE-${created.id}`]);
+      }
+      setColata("");
+      setMessageStatus(excelError ? "warning" : "success");
+      setMessage(excelError ? `Lotto ${payload.IdentLotto} creato su SharePoint; Excel non aggiornato: ${excelError}. Non ricreare il lotto; usa Aggiorna Excel dal Pannello Admin.` : `Lotto ${payload.IdentLotto} creato su SharePoint e Excel.`);
+      await refresh();
+    } catch (error) {
+      setMessageStatus("error"); setMessage(error instanceof Error ? error.message : "Errore creazione lotto");
+    } finally { setSaving(false); }
+  };
   return (
-    <div className="panel inventory-panel">
-      <div className="panel-content">
-        <div className="section-heading" style={{ marginBottom: 12 }}>
-          <div>
-            <p className="eyebrow" style={{ marginBottom: 4 }}>Magazzino</p>
-            <h2 style={{ margin: 0 }}>11_FLANGE</h2>
-          </div>
-          <div className="action-row">
-            <input
-              type="search"
-              placeholder="Cerca codice, lotto, ordine, bolla..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            <button className="btn secondary" onClick={refresh} disabled={loading} type="button">
-              {loading ? "Aggiorno..." : "Aggiorna"}
-            </button>
-          </div>
+    <div className="panel inventory-panel"><div className="panel-content">
+      {error && <div className="alert error">{error}</div>}
+      {!listId && <div className="alert warning">Configura VITE_FLANGE_LIST_ID per visualizzare le flange.</div>}
+      <div className="toolbar">
+        <div className="search-box"><input type="search" placeholder="Cerca in tutte le colonne..." value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} />
+          {search && <button className="icon-btn" aria-label="Cancella ricerca" onClick={() => { setSearch(""); setPage(1); }}>✕</button>}
         </div>
-        {error && <div className="alert error">{error}</div>}
-        <div className="muted" style={{ marginBottom: 10 }}>{rows.length} flange trovate</div>
-        <div className="table-scroll">
-          <table className="inventory-table">
-            <thead>
-              <tr>
-                {flangeColumns.filter((column) => !column.hidden).map((column) => <th key={column.field}>{column.label}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {visibleRows.map((item: FlangeItem) => {
-                const fields = item.fields as Record<string, unknown>;
-                return (
-                  <tr key={item.id}>
-                    {flangeColumns.filter((column) => !column.hidden).map((column) => (
-                      <td key={column.field}>
-                        {column.type === "date" ? formatSharePointDate(fields[column.field]) : toStr(fields[column.field])}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-              {!loading && visibleRows.length === 0 && <tr><td colSpan={flangeColumns.length}>Nessuna flangia trovata.</td></tr>}
-            </tbody>
-          </table>
-        </div>
-        <div className="pagination-controls" style={{ marginTop: 12 }}>
-          <label className="field" style={{ maxWidth: 130 }}>
-            <span>Per pagina</span>
-            <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}>
-              {[50, 100, 200].map((value) => <option key={value} value={value}>{value}</option>)}
-            </select>
-          </label>
-          <button className="btn secondary" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={currentPage === 1} type="button">←</button>
-          <span>{currentPage} / {totalPages}</span>
-          <button className="btn secondary" onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={currentPage === totalPages} type="button">→</button>
+        <div className="pager-info">
+          <button className="btn secondary" onClick={refresh} disabled={loading || saving}>Aggiorna</button>
+          <span className="pill">{filtered.length} risultati</span>
+          <label className="page-size"><span>Per pagina</span><select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}>{[50, 100, 200].map((size) => <option key={size}>{size}</option>)}</select></label>
+          <div className="pager"><button className="icon-btn" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>←</button><span>{currentPage} / {totalPages}</span><button className="icon-btn" disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}>→</button></div>
         </div>
       </div>
+      <div className="table-scroll"><table className="inventory-table"><thead><tr>
+        <th className="selection-col" aria-label="Seleziona lotto"><span className="selection-col__icon" aria-hidden="true" /></th>
+        {columns.map((column) => <th key={column.field} className={column.field === "Title" ? "sticky-col" : undefined}>{column.label}</th>)}
+        <th>Lotti</th>
+      </tr></thead><tbody>
+        {!visible.length && <tr><td colSpan={columns.length + 2} className="muted">{loading ? "Carico dati..." : "Nessuna flangia trovata"}</td></tr>}
+        {visible.map((entry) => <tr key={entry.title}>
+          <td className="selection-col"><input type="checkbox" aria-label={`Seleziona ${entry.title}`} checked={entry.items.some((item) => Boolean(selectedItems[`FLANGE-${item.id}`]))} disabled={selectionLimitReached && !entry.items.some((item) => Boolean(selectedItems[`FLANGE-${item.id}`]))} onChange={() => {
+            if (entry.items.length === 1) {
+              const item = toCart(entry.items[0], entry.labels);
+              onToggle(item, Boolean(selectedItems[item.key]));
+            } else openLots(entry);
+          }} /></td>
+          {columns.map((column) => column.field === "Title"
+            ? <th scope="row" className="sticky-col" key={column.field}><div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}><span>{entry.title}</span><button className="icon-btn" aria-label={`Gestisci lotti ${entry.title}`} onClick={() => openLots(entry)}>📦</button></div></th>
+            : <td key={column.field}>{column.field === "IdentLotto" ? [...entry.labels.values()].join(", ") : formatCellValue(entry.items[0].fields[column.field], column.type)}</td>)}
+          <td><button className="btn secondary" onClick={() => openLots(entry)}>Lotti ({entry.items.length})</button></td>
+        </tr>)}
+      </tbody></table></div>
+    </div>
+    {group && <div className="modal-backdrop blur" role="dialog" aria-modal="true" aria-labelledby="flange-lot-title"><div className="modal">
+      <div className="modal__header"><div><p className="eyebrow">Seleziona lotto</p><h3 id="flange-lot-title">{group.title}</h3></div><button className="icon-btn" disabled={saving} aria-label="Chiudi" onClick={() => setLotCode(null)}>✕</button></div>
+      <div className="modal__body">
+        <div className="table-scroll modal-table"><table className="inventory-table"><thead><tr><th>Seleziona</th><th>Lotto</th><th>Colata</th><th>N° Ordine</th><th>Giacenza (Numero Pezzi)</th><th>Commessa</th></tr></thead><tbody>
+          {group.items.map((item) => {
+            const key = `FLANGE-${item.id}`;
+            const checked = draft.includes(key);
+            return <tr key={item.id}><td className="selection-col"><input type="checkbox" aria-label={`Seleziona lotto ${group.labels.get(item.id)}`} checked={checked} disabled={saving || toCart(item, group.labels).lotAmbiguous || (!checked && outsideCount + draft.length >= CART_SELECTION_LIMIT)} onChange={() => setDraft((current) => checked ? current.filter((value) => value !== key) : [...current, key])} /></td>
+              <td><span className="lotto-chip">{group.labels.get(item.id)}</span></td><td>{toStr(item.fields.NumeroColata) || "-"}</td><td>{toStr(item.fields.NumeroOrdine) || "-"}</td><td>{toStr(item.fields.GiacenzaMm) || "-"}</td><td>{toStr(item.fields.Commessa) || "-"}</td></tr>;
+          })}
+        </tbody></table></div>
+        {new Set(group.labels.values()).size < group.items.length && <div className="alert warning">Alcuni lotti hanno lo stesso identificativo. Correggili nel Pannello Admin prima di selezionarli.</div>}
+        <h4>Aggiungi nuovo lotto</h4>
+        <div className="field-grid">
+          <label className="field"><span>N° Colata *</span><input value={colata} disabled={saving} onChange={(event) => setColata(event.target.value)} /></label>
+          <label className="field"><span>N° Ordine</span><input value={ordine} disabled={saving} onChange={(event) => setOrdine(event.target.value)} /></label>
+          <label className="field"><span>Codice SAM</span><input value={codiceSam} disabled={saving} onChange={(event) => setCodiceSam(event.target.value)} /></label>
+          <label className="field"><span>Data ordine</span><input type="date" value={dataOrdine} disabled={saving} onChange={(event) => setDataOrdine(event.target.value)} /></label>
+        </div>
+        <p className="muted">Il nuovo lotto parte con giacenza e quantità pari a zero.</p>
+        <button className="btn primary" disabled={saving || loading || !colata.trim() || !listId} onClick={createLot}>{saving ? "Creo..." : "Crea lotto"}</button>
+        {message && <div className={`alert ${messageStatus}`} style={{ marginTop: 10 }}>{message}</div>}
+        {(selectionLimitReached || outsideCount + draft.length >= CART_SELECTION_LIMIT) && <p className="muted">Limite massimo di 10 articoli in carrello.</p>}
+      </div>
+      <div className="modal__footer"><button className="btn secondary" disabled={saving} onClick={() => setLotCode(null)}>Chiudi</button><button className="btn primary" disabled={saving || outsideCount + draft.length > CART_SELECTION_LIMIT} onClick={confirmSelection}>Conferma selezione</button></div>
+    </div></div>}
     </div>
   );
 }
@@ -5403,6 +5490,15 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
 function buildEditableState(item: CartItem): EditableItemState {
   const fields = item.fields || {};
 
+  if (item.source === "FLANGE") {
+    return {
+      type: "FLANGE", title: item.title, giacenza: toStr(fields.GiacenzaMm),
+      commessa: toStr(fields.Commessa), prezzoUnitario: toStr(fields.PrezzoCad),
+      nrOrdine: toStr(fields.NumeroOrdine), lotto: item.lottoProg || toStr(fields.IdentLotto), codiceSam: toStr(fields.CodiceSAM),
+      bolla: toStr(fields.NumeroBolla), colata: toStr(fields.NumeroColata), raw: fields,
+    };
+  }
+
   if (item.source === "FORGIATI") {
     return {
       type: "FORGIATI",
@@ -5511,7 +5607,7 @@ function buildEditableState(item: CartItem): EditableItemState {
   };
 }
 
-function StockUpdatePage({
+export function StockUpdatePage({
   items,
   values,
   onChange,
@@ -5581,9 +5677,12 @@ function StockUpdatePage({
           const isSpark = item.source === "SPARK-GUPS";
           const isFiloFlusso = item.source === "FILO-FLUSSO";
           const isTuboMeccanico = item.source === "TUBO-MECCANICO";
+          const isFlange = item.source === "FLANGE";
           const raw = (cardValues.raw || {}) as Record<string, unknown>;
 
-          const infoItems = isForgiati
+          const infoItems = isFlange
+            ? flangeColumns.filter((column) => !column.hidden && !["Title", "GiacenzaMm", "PrezzoCad", "Commessa"].includes(column.field)).map((column) => ({ label: column.label, value: column.type === "date" ? formatSharePointDate(raw[column.field]) : raw[column.field] }))
+            : isForgiati
             ? [
                 { label: "Codice SAM", value: raw["CodiceSAM"] },
                 { label: "N° Ordine", value: raw["field_1"] },
@@ -5735,7 +5834,13 @@ function StockUpdatePage({
                 <div className="section-heading">
                   <span className="pill ghost">Campi modificabili</span>
                 </div>
-                {isForgiati ? (
+                {isFlange ? (
+                  <div className="field-grid">
+                    <label className="field"><span>Giacenza (Numero Pezzi)</span><input type="number" min="0" step="1" value={cardValues.giacenza || ""} onChange={(event) => onChange(item.key, "giacenza", event.target.value)} /></label>
+                    <label className="field"><span>Prezzo CAD</span><input type="text" inputMode="decimal" value={cardValues.prezzoUnitario || ""} onChange={(event) => onChange(item.key, "prezzoUnitario", event.target.value)} /></label>
+                    <label className="field"><span>Commessa</span><input value={cardValues.commessa || ""} onChange={(event) => onChange(item.key, "commessa", event.target.value)} /></label>
+                  </div>
+                ) : isForgiati ? (
                   <>
                     <div className="field-grid">
                       <label className="field">
@@ -6353,6 +6458,7 @@ function AuthenticatedShell() {
     if (item.source === "ORING-HNBR") return toStr((raw as any).field_18);
     if (item.source === "SPARK-GUPS") return toStr((raw as any).field_4);
     if (item.source === "FILO-FLUSSO") return toStr((raw as any).field_1);
+    if (item.source === "FLANGE") return toStr(raw.NumeroOrdine);
     return "";
   };
 
@@ -8697,6 +8803,7 @@ function AuthenticatedShell() {
       }
 
       onProgress?.(`${spItems.length} articoli trovati. Apertura file Excel...`);
+      if (listKind === "FLANGE") assertUniqueFlangeLots(spItems);
       let driveId = cfg.driveIdRef.current;
       if (!driveId && cfg.driveNameEnv) {
         driveId = await sharepointService.getDriveIdByName(cfg.driveNameEnv);
@@ -8734,7 +8841,19 @@ function AuthenticatedShell() {
           }
 
           const rowIndex = cfg.findRow(rows, columns, matchOpts);
-          if (rowIndex === null) { skipped++; continue; }
+          if (rowIndex === null) {
+            if (listKind === "FLANGE" && String(fields.IdentLotto || "").trim()) {
+              if (cfg.getColIndex(columns, "IdentLotto") === null) throw new Error("Colonna LOTTO non trovata in Excel FLANGE");
+              const codeIndex = cfg.getColIndex(columns, "Title");
+              const lotIndex = cfg.getColIndex(columns, "IdentLotto")!;
+              const duplicates = rows.some((row) => codeIndex !== null && normalizeExcelKey(String(row.values[0]?.[codeIndex] ?? "")) === normalizeExcelKey(title) && effectiveFlangeLot(row.values[0]?.[lotIndex]) === effectiveFlangeLot(fields.IdentLotto));
+              if (duplicates) throw new Error(`Lotto ambiguo in Excel: ${title} (${fields.IdentLotto})`);
+              await sharepointService.appendWorkbookTableRowByItemId(driveItem.id, cfg.table, cfg.buildRow(columns, fields), { sessionId }, driveId || undefined);
+              rows.push({ index: Math.max(-1, ...rows.map((row) => row.index)) + 1, values: [cfg.buildRow(columns, fields)] });
+              updated++;
+            } else skipped++;
+            continue;
+          }
 
           const rowRange = buildRowRangeAddress(dataBodyRange.address, rowIndex, dataBodyRange.rowCount);
           if (!rowRange) { skipped++; continue; }
@@ -8800,6 +8919,7 @@ function AuthenticatedShell() {
 
     try {
       const updates = cartList.map((item) => {
+        if (item.source === "FLANGE" && item.lotAmbiguous) throw new Error(`Identificativo lotto ambiguo per ${item.title}: correggerlo nel Pannello Admin.`);
         const values = editValues[item.key] || buildEditableState(item);
         const isForgiati = item.source === "FORGIATI";
         const isOring = item.source === "ORING-HNBR";
@@ -8807,6 +8927,7 @@ function AuthenticatedShell() {
         const isSpark = item.source === "SPARK-GUPS";
         const isFiloFlusso = item.source === "FILO-FLUSSO";
         const isTuboMeccanico = item.source === "TUBO-MECCANICO";
+        const isFlange = item.source === "FLANGE";
         const listId = isForgiati
           ? forgiatiListId
           : isOring
@@ -8819,6 +8940,8 @@ function AuthenticatedShell() {
           ? filoFlussoListId
           : isTuboMeccanico
           ? tuboMeccanicoListId
+          : isFlange
+          ? flangeListId
           : tubiListId;
         if (!listId) {
           throw new Error(`List ID non configurato per ${item.source}.`);
@@ -8826,7 +8949,14 @@ function AuthenticatedShell() {
 
         const contabSum = sumAdditiveExpression(values.giacenzaContab);
 
-        const payload = isForgiati
+        const payload = isFlange
+          ? {
+              GiacenzaMm: toNumberOrNull(values.giacenza),
+              PrezzoCad: toNumberOrNull(values.prezzoUnitario),
+              Commessa: values.commessa ?? null,
+              IdentLotto: item.lottoProg || toStr(item.fields.IdentLotto),
+            }
+          : isForgiati
           ? {
               field_24: values.commessa ?? null,
               field_23: toIsoOrNull(values.dataPrelievo),
@@ -8901,8 +9031,16 @@ function AuthenticatedShell() {
           sharepointService.updateItem<Record<string, unknown>>(listId, item.itemId, payload)
         )
       );
+      if (updates.some((update) => update.item.source === "FLANGE")) clearCacheKeys(["flange", "admin-flange"]);
 
       const excelErrors: string[] = [];
+      for (const update of updates.filter((entry) => entry.item.source === "FLANGE")) {
+        try {
+          await writeFlangeExcel(sharepointService, { Title: update.item.title, ...update.payload });
+        } catch (error) {
+          excelErrors.push(`FLANGE: ${error instanceof Error ? error.message : "Errore Excel"}`);
+        }
+      }
       const forgiatiUpdates = updates.filter((update) => update.item.source === "FORGIATI");
       if (forgiatiUpdates.length > 0) {
         try {
@@ -9417,6 +9555,7 @@ function AuthenticatedShell() {
         hasSparkGups: sources.includes("SPARK-GUPS"),
         hasFiloFlusso: sources.includes("FILO-FLUSSO"),
         hasTuboMeccanico: sources.includes("TUBO-MECCANICO"),
+        hasFlange: sources.includes("FLANGE"),
         items: cartList.map((item) => {
           const values = editValues[item.key] || buildEditableState(item);
           const isTubi = item.source === "TUBI";
@@ -9480,6 +9619,7 @@ function AuthenticatedShell() {
           case "SPARK-GUPS": return "spark-gups";
           case "FILO-FLUSSO": return "filo-flusso";
           case "TUBO-MECCANICO": return "tubo-meccanico";
+          case "FLANGE": return "flange";
           default: return null;
         }
       }).filter((k) => k !== null) as string[];
@@ -9510,6 +9650,7 @@ function AuthenticatedShell() {
     oringNbrListId,
     sparkGupsListId,
     sharepointService,
+    flangeListId,
     tubiListId,
     forgiatiExcelPath,
     forgiatiExcelFolder,
@@ -9555,7 +9696,7 @@ function AuthenticatedShell() {
       case "filo-flusso":
         return <FiloFlussoPanel {...selectionProps} />;
       case "flange":
-        return <FlangePanel />;
+        return <FlangePanel {...selectionProps} />;
       default:
         return <ForgiatiPanel {...selectionProps} />;
     }

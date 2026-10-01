@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuthenticatedGraphClient } from "../../hooks/useAuthenticatedGraphClient";
 import { SharePointService } from "../../services/sharePointService";
 import { useCachedList, clearCacheKeys } from "../../hooks/useCachedList";
+import { matchFlangeExcelRow } from "../../utils/flangeExcelMatch";
+import { flangeLotLabels, nextFlangeLot } from "../../utils/flangeLots";
 import { formatSharePointDate } from "../../utils/dateUtils";
 import { SharePointListItem } from "../../types/sharepoint";
 import { SyncCleanupPlan, SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "../../types/sync";
@@ -268,9 +270,8 @@ const FLANGE_FIELDS: FieldConfig[] = [
   { key: "NumeroCertificato", label: "N° CERT." },
   { key: "NumeroColata", label: "N° COLATA" },
   { key: "PrezzoCad", label: "PREZZO CAD", type: "decimal" },
-  { key: "GiacenzaMm", label: "GIACENZA (mm)", type: "decimal" },
+  { key: "GiacenzaMm", label: "GIACENZA (Numero Pezzi)", type: "number", placeholder: "Es. 24" },
   { key: "Commessa", label: "COMMESSA" },
-  { key: "PrezzoEuroKg", label: "Prezzo €/Kg", type: "decimal" },
   { key: "Commessa2", label: "COMMESSA2" },
 ];
 
@@ -638,6 +639,11 @@ const FLANGE_EXCEL_COLUMN_MAP = (() => {
   map.set(normalizeExcelKey("N CERT"), "NumeroCertificato");
   map.set(normalizeExcelKey("N CERT."), "NumeroCertificato");
   map.set(normalizeExcelKey("N COLATA"), "NumeroColata");
+  // Legacy workbook headers remain supported even though these labels changed in the UI.
+  map.set(normalizeExcelKey("GIACENZA (mm)"), "GiacenzaMm");
+  map.set(normalizeExcelKey("PrezzoEuroKg"), "PrezzoEuroKg");
+  map.set(normalizeExcelKey("Prezzo €/Kg"), "PrezzoEuroKg");
+  map.set(normalizeExcelKey("PREZZO EUROKG"), "PrezzoEuroKg");
   return map;
 })();
 
@@ -941,21 +947,8 @@ const findFlangeExcelRowIndex = (
   rows: Array<{ index: number; values: Array<Array<unknown>> }>,
   excelColumns: string[],
   options: { codice: string; lotto?: string }
-) => {
-  const titleIdx = getFlangeExcelColumnIndex(excelColumns, "Title");
-  const lottoIdx = getFlangeExcelColumnIndex(excelColumns, "IdentLotto");
-  if (titleIdx === null) return null;
-  const title = normalizeExcelKey(options.codice || "");
-  const lotto = normalizeExcelKey(options.lotto || "");
-  const sameCodeRows: number[] = [];
-  for (const row of rows) {
-    const values = row.values?.[0] || [];
-    if (normalizeExcelKey(String(values[titleIdx] ?? "")) !== title) continue;
-    sameCodeRows.push(row.index);
-    if (lottoIdx === null || normalizeExcelKey(String(values[lottoIdx] ?? "")) === lotto) return row.index;
-  }
-  return sameCodeRows.length === 1 ? sameCodeRows[0] : null;
-};
+) => matchFlangeExcelRow(rows, getFlangeExcelColumnIndex(excelColumns, "Title"), getFlangeExcelColumnIndex(excelColumns, "IdentLotto"), options.codice, options.lotto || "");
+
 
 const findLastRowIndexByCodice = (
   rows: Array<{ index: number; values: Array<Array<unknown>> }>,
@@ -1212,7 +1205,7 @@ const getSummaryMeta = (
     return [
       { label: "Lotto", value: toStr(fields.IdentLotto) || "-" },
       { label: "Ordine", value: toStr(fields.NumeroOrdine) || "-" },
-      { label: "Giacenza", value: toStr(fields.GiacenzaMm) || "-" },
+      { label: "Giacenza (Numero Pezzi)", value: toStr(fields.GiacenzaMm) || "-" },
       { label: "Commessa", value: toStr(fields.Commessa) || "-" },
     ];
   }
@@ -1806,7 +1799,7 @@ export function AdminPanel({
           const excelFields = {
             ...(currentItem?.fields || {}),
             ...payload,
-            ...(isSpark || isFiloFlusso ? {} : { IdentLotto: identLotto }),
+            ...(isSpark || isFiloFlusso || isFlange ? {} : { IdentLotto: identLotto }),
           } as Record<string, unknown>;
           const rowValues = isForgiati
             ? buildForgiatiExcelRow(columns, excelFields)
@@ -1888,6 +1881,12 @@ export function AdminPanel({
     filoFlussoExcelTable,
     filoFlussoExcelDriveId,
     filoFlussoExcelDriveNameEnv,
+    flangeExcelPath,
+    flangeExcelFolder,
+    flangeExcelFilename,
+    flangeExcelTable,
+    flangeExcelDriveId,
+    flangeExcelDriveNameEnv,
     flangeExcelPath,
     flangeExcelFolder,
     flangeExcelFilename,
@@ -2115,6 +2114,12 @@ export function AdminPanel({
     filoFlussoExcelTable,
     filoFlussoExcelDriveId,
     filoFlussoExcelDriveNameEnv,
+    flangeExcelPath,
+    flangeExcelFolder,
+    flangeExcelFilename,
+    flangeExcelTable,
+    flangeExcelDriveId,
+    flangeExcelDriveNameEnv,
     tubiProgressiveMap,
     forgiatiProgressiveMap,
     tuboMeccanicoProgressiveMap,
@@ -2139,6 +2144,16 @@ export function AdminPanel({
       setCreateStatus("error");
       setCreateMessage("Il campo Title è obbligatorio");
       return;
+    }
+
+    if (activeList === "FLANGE") {
+      const sameTitle = flangeItems.filter((item) => normalizeExcelKey(toStr(item.fields.Title)) === normalizeExcelKey(toStr(payload.Title)));
+      payload.IdentLotto = toStr(payload.IdentLotto).trim().toUpperCase() || nextFlangeLot([...flangeLotLabels(sameTitle).values()]);
+      if ([...flangeLotLabels(sameTitle).values()].some((label) => normalizeExcelKey(label) === normalizeExcelKey(toStr(payload.IdentLotto)))) {
+        setCreateStatus("error");
+        setCreateMessage("Esiste già una flangia con lo stesso codice e lotto.");
+        return;
+      }
     }
 
     if (activeList === "FORGIATI" || activeList === "TUBI" || activeList === "TUBO-MECCANICO") {
@@ -2324,6 +2339,7 @@ export function AdminPanel({
     service,
     activeListId,
     createForm,
+    flangeItems,
     activeRefresh,
     activeList,
     forgiatiExcelPath,
@@ -2350,6 +2366,12 @@ export function AdminPanel({
     filoFlussoExcelTable,
     filoFlussoExcelDriveId,
     filoFlussoExcelDriveNameEnv,
+    flangeExcelPath,
+    flangeExcelFolder,
+    flangeExcelFilename,
+    flangeExcelTable,
+    flangeExcelDriveId,
+    flangeExcelDriveNameEnv,
     forgiatiItems,
     tubiItems,
     tuboMeccanicoItems,

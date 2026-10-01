@@ -21,9 +21,10 @@ export const flangeColumns: ForgiatoColumn[] = [
   { field: "NumeroCertificato", label: "N° CERT." },
   { field: "NumeroColata", label: "N° COLATA" },
   { field: "PrezzoCad", label: "PREZZO CAD", type: "number" },
-  { field: "GiacenzaMm", label: "GIACENZA (mm)", type: "number" },
+  // Keep the existing SharePoint internal name; flange stock is counted in pieces.
+  { field: "GiacenzaMm", label: "GIACENZA (Numero Pezzi)", type: "number" },
   { field: "Commessa", label: "COMMESSA" },
-  { field: "PrezzoEuroKg", label: "Prezzo €/Kg", type: "number" },
+  { field: "PrezzoEuroKg", label: "Prezzo €/Kg", type: "number", hidden: true },
   { field: "Commessa2", label: "COMMESSA2" },
   { field: "Modified", label: "Data/ora modifica", type: "date", hidden: true },
 ];
