@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SharePointService } from "./services/sharePointService";
+import { NewLotFields } from "./components/features/NewLotFields";
 
 vi.mock("./auth/authConfig", () => ({ msalConfig: {}, loginRequest: {} }));
 vi.mock("@azure/msal-browser", async (importOriginal) => ({
@@ -18,6 +19,7 @@ vi.mock("./hooks/useCachedList", () => ({
   useCachedList: () => ({ data: [
     { id: "1", fields: { Title: "FLCA001", IdentLotto: "A", GiacenzaMm: 24 } },
     { id: "2", fields: { Title: "FLCA001", IdentLotto: "B", GiacenzaMm: 12 } },
+    { id: "3", fields: { Title: "FLCA002", IdentLotto: "A", Archiviato: true } },
   ], loading: false, error: null, refresh: vi.fn() }),
 }));
 
@@ -32,6 +34,14 @@ beforeEach(() => {
 });
 
 describe("interfaccia flange", () => {
+  it("presenta campi nuovi vuoti, incluso Schedula, con i dati compilabili manualmente", () => {
+    const html = renderToStaticMarkup(createElement(NewLotFields, { kind: "TUBI", values: {}, onChange: vi.fn() }));
+    expect(html).toContain("Schedula");
+    expect(html).toContain("FORNITORE");
+    expect(html).toContain("Prezzo kg/mt");
+    expect(html).not.toMatch(/value="[^"]+"/);
+    expect(html).not.toContain("Data/ora modifica");
+  });
   it("raggruppa per codice e offre selezione e gestione lotti con lo stile degli altri magazzini", () => {
     const html = renderToStaticMarkup(createElement(app.FlangePanel, { selectedItems: {}, onToggle: vi.fn(), selectionLimitReached: false }));
     expect(html).toContain('class="search-box"');
@@ -40,6 +50,7 @@ describe("interfaccia flange", () => {
     expect(html).toContain("Lotti (2)");
     expect(html).toContain("GIACENZA (Numero Pezzi)");
     expect(html).not.toContain("Prezzo €/Kg");
+    expect(html).not.toContain("FLCA002");
   });
   it("usa giacenza e prezzo della flangia nella pagina di aggiornamento", () => {
     const html = renderToStaticMarkup(createElement(app.StockUpdatePage, {
@@ -52,6 +63,14 @@ describe("interfaccia flange", () => {
     expect(html).toContain('value="289"');
     expect(html).not.toContain("Giacenza Tubo Intero");
     expect(html).not.toContain("Prezzo €/Kg");
+  });
+  it("mostra Schedula tra i campi modificabili dell'aggiornamento Tubi", () => {
+    const html = renderToStaticMarkup(createElement(app.StockUpdatePage, {
+      items: [{ key: "TUBI-1", source: "TUBI", itemId: "1", title: "TCAB105", fields: { Schedula: "SCH 40" } }],
+      values: {}, onChange: vi.fn(), onSave: vi.fn(), saving: false, status: "idle", message: null, onBackToInventory: vi.fn(),
+    }));
+    expect(html).toContain("Schedula");
+    expect(html).toContain('value="SCH 40"');
   });
 });
 
@@ -70,6 +89,11 @@ function serviceFixture() {
 }
 
 describe("salvataggio Excel flange", () => {
+  it("riconosce l'intestazione reale GIACENZA(Nr) in entrambe le direzioni", () => {
+    expect(app.buildFlangeExcelRow(["CODICE", "LOTTO", "GIACENZA(Nr)"], { Title: "FLCA044", IdentLotto: "A", GiacenzaMm: 7 })).toEqual(["FLCA044", "A", 7]);
+    expect(app.buildFlangePayloadFromExcelRow(["CODICE", "LOTTO", "GIACENZA(Nr)"], ["FLCA044", "A", 7])).toMatchObject({ Title: "FLCA044", GiacenzaMm: 7 });
+    expect(app.buildFlangePayloadFromExcelRow(["CODICE", "LOTTO"], ["FLCA048", ""])).toMatchObject({ Title: "FLCA048", IdentLotto: "A" });
+  });
   it("aggiorna il lotto selezionato mantenendo prezzo/kg storico e campi non modificati", async () => {
     const { service, typed } = serviceFixture();
     await app.writeFlangeExcel(typed, { Title: "FLCA001", IdentLotto: "A", GiacenzaMm: 7, PrezzoCad: 300, Commessa: "NEW" });
@@ -99,5 +123,15 @@ describe("salvataggio Excel flange", () => {
     service.listWorkbookTableRowsByItemId.mockResolvedValue([{ index: 0, values: [["FLCA001", "", 24, 289, 99, "OLD"]] }]);
     await expect(app.writeFlangeExcel(typed, { Title: "FLCA001", IdentLotto: "A" }, true)).rejects.toThrow("esiste già");
     expect(service.appendWorkbookTableRowByItemId).not.toHaveBeenCalled();
+  });
+});
+
+describe("sincronizzazione Schedula Tubi", () => {
+  it("usa i nomi delle colonne dopo l'inserimento senza spostare SP e GRADO", () => {
+    const columns = ["CODICE", "IdentLotto", "SP", "Schedula", "GRADO", "GRADO MATERIALE 2"];
+    const values = ["TCAB105", "A", "6.35", "SCH 40", "API 5L X52", "X52"];
+    const parsed = app.buildTubiPayloadFromExcelRow(columns, values);
+    expect(parsed.fields).toMatchObject({ field_10: "6.35", Schedula: "SCH 40", field_11: "API 5L X52", GRADOMATERIALE2: "X52" });
+    expect(app.buildTubiExcelRow(columns, parsed.fields)).toEqual(values);
   });
 });

@@ -13,6 +13,7 @@ export const tubiColumns: ForgiatoColumn[] = [
   { field: "field_8", label: 'DN (")' },
   { field: "field_9", label: "DN (mm)" },
   { field: "field_10", label: "SP" },
+  { field: "Schedula", label: "Schedula" },
   { field: "field_11", label: "Grado materiale 1" },
   { field: "GRADOMATERIALE2", label: "GRADO MATERIALE 2" },
   { field: "field_12", label: "PSL1/ PSL2" },

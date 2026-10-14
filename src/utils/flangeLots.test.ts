@@ -14,10 +14,10 @@ describe("nuovi lotti flange", () => {
     expect(nextFlangeLot([" a ", "B", null])).toBe("C");
     expect(nextFlangeLot(Array.from({ length: 26 }, (_, index) => String.fromCharCode(65 + index)))).toBe("AA");
   });
-  it("conserva le caratteristiche ma non duplica giacenza e documenti del lotto originale", () => {
+  it("non copia nessun dato del lotto originale, tranne il codice articolo", () => {
     const source = { Title: "FLCA046", DN: 24, SP: 11, PrezzoCad: 289, GiacenzaMm: 7, Quantita: 12, NumeroBolla: "123", NumeroCertificato: "CERT", DataConsegna: "2026-10-01", Commessa: "AF4870", PrezzoEuroKg: 99, Modified: "2026-10-01", id: "5" };
     const payload = buildFlangeLotPayload(source, { identLotto: "C", colata: " nuova ", ordine: "666", codiceSam: "SAM", dataOrdine: null });
-    expect(payload).toEqual({ Title: "FLCA046", DN: 24, SP: 11, PrezzoCad: 289, IdentLotto: "C", NumeroColata: "nuova", NumeroOrdine: "666", CodiceSAM: "SAM", DataOrdine: null, Quantita: 0, GiacenzaMm: 0 });
+    expect(payload).toEqual({ Title: "FLCA046", IdentLotto: "C", NumeroColata: "nuova", NumeroOrdine: "666", CodiceSAM: "SAM" });
     expect(source.GiacenzaMm).toBe(7);
   });
 });

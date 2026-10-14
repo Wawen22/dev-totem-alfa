@@ -4,6 +4,7 @@ import { SharePointService } from "../../services/sharePointService";
 import { useCachedList, clearCacheKeys } from "../../hooks/useCachedList";
 import { matchFlangeExcelRow } from "../../utils/flangeExcelMatch";
 import { flangeLotLabels, nextFlangeLot } from "../../utils/flangeLots";
+import { isArchivedFlange } from "../../utils/flangeArchive";
 import { formatSharePointDate } from "../../utils/dateUtils";
 import { SharePointListItem } from "../../types/sharepoint";
 import { SyncCleanupPlan, SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "../../types/sync";
@@ -148,6 +149,7 @@ const TUBI_FIELDS: FieldConfig[] = [
   { key: "field_8", label: "DN (\")" },
   { key: "field_9", label: "DN (mm)" },
   { key: "field_10", label: "SP" },
+  { key: "Schedula", label: "Schedula" },
   { key: "field_11", label: "Grado materiale 1" },
   { key: "GRADOMATERIALE2", label: "Grado materiale 2" },
   { key: "field_12", label: "PSL1 / PSL2" },
@@ -464,6 +466,7 @@ const buildTubiExcelColumnMap = () => {
   map.set(normalizeExcelKey("DNMM"), "field_9");
   map.set(normalizeExcelKey("DN MM"), "field_9");
   map.set(normalizeExcelKey("SP"), "field_10");
+  map.set(normalizeExcelKey("Schedula"), "Schedula");
   map.set(normalizeExcelKey("GRADO"), "field_11");
   map.set(normalizeExcelKey("GRADO MATERIALE 2"), "GRADOMATERIALE2");
   map.set(normalizeExcelKey("PSL1PSL2"), "field_12");
@@ -641,6 +644,7 @@ const FLANGE_EXCEL_COLUMN_MAP = (() => {
   map.set(normalizeExcelKey("N COLATA"), "NumeroColata");
   // Legacy workbook headers remain supported even though these labels changed in the UI.
   map.set(normalizeExcelKey("GIACENZA (mm)"), "GiacenzaMm");
+  map.set(normalizeExcelKey("GIACENZA(Nr)"), "GiacenzaMm");
   map.set(normalizeExcelKey("PrezzoEuroKg"), "PrezzoEuroKg");
   map.set(normalizeExcelKey("Prezzo €/Kg"), "PrezzoEuroKg");
   map.set(normalizeExcelKey("PREZZO EUROKG"), "PrezzoEuroKg");
@@ -1498,6 +1502,7 @@ export function AdminPanel({
 
   const sortedItems = useMemo(() => {
     const items = [...activeItems].filter((item) => {
+      if (activeList === "FLANGE" && isArchivedFlange(item.fields)) return false;
       if (activeList !== "TUBI" && activeList !== "FORGIATI") return true;
       const title = toStr((item.fields as Record<string, unknown>).Title).trim();
       return title.length > 0;
@@ -2148,6 +2153,11 @@ export function AdminPanel({
 
     if (activeList === "FLANGE") {
       const sameTitle = flangeItems.filter((item) => normalizeExcelKey(toStr(item.fields.Title)) === normalizeExcelKey(toStr(payload.Title)));
+      if (sameTitle.some((item) => isArchivedFlange(item.fields))) {
+        setCreateStatus("error");
+        setCreateMessage("Il codice appartiene allo storico delle flange: scegli un codice operativo.");
+        return;
+      }
       payload.IdentLotto = toStr(payload.IdentLotto).trim().toUpperCase() || nextFlangeLot([...flangeLotLabels(sameTitle).values()]);
       if ([...flangeLotLabels(sameTitle).values()].some((label) => normalizeExcelKey(label) === normalizeExcelKey(toStr(payload.IdentLotto)))) {
         setCreateStatus("error");

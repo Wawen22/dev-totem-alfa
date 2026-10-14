@@ -12,8 +12,11 @@ import { sparkGupsColumns } from "./config/sparkGupsColumns";
 import { filoFlussoColumns } from "./config/filoFlussoColumns";
 import { tuboMeccanicoColumns } from "./config/tuboMeccanicoColumns";
 import { flangeColumns } from "./config/flangeColumns";
-import { assertUniqueFlangeLots, buildFlangeLotPayload, effectiveFlangeLot, flangeLotLabels, nextFlangeLot } from "./utils/flangeLots";
+import { assertUniqueFlangeLots, effectiveFlangeLot, flangeLotLabels, nextFlangeLot } from "./utils/flangeLots";
 import { matchFlangeExcelRow } from "./utils/flangeExcelMatch";
+import { isArchivedFlange } from "./utils/flangeArchive";
+import { buildNewLotPayload } from "./utils/newLot";
+import { NewLotFields } from "./components/features/NewLotFields";
 import { SharePointListItem } from "./types/sharepoint";
 import { SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "./types/sync";
 import { formatSharePointDate } from "./utils/dateUtils";
@@ -110,6 +113,7 @@ type EditableItemState = {
   qtaAcq2025?: string;
   qtaAcq2026?: string;
   raw?: Record<string, unknown>;
+  schedula?: string;
 };
 
 const CART_SELECTION_LIMIT = 10;
@@ -375,7 +379,7 @@ const toExcelCellValueForDateFields = (
   return String(value);
 };
 
-const buildTubiExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
+export const buildTubiExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
   const fieldKeyLookup = new Map<string, string>();
   Object.keys(fields).forEach((key) => {
     fieldKeyLookup.set(normalizeExcelKey(key), key);
@@ -500,6 +504,7 @@ const flangeExcelColumnFieldMap = (() => {
   map.set(normalizeExcelKey("PREZZO EUROKG"), "PrezzoEuroKg");
   map.set(normalizeExcelKey("PREZZO €/KG"), "PrezzoEuroKg");
   map.set(normalizeExcelKey("GIACENZA (mm)"), "GiacenzaMm");
+  map.set(normalizeExcelKey("GIACENZA(Nr)"), "GiacenzaMm");
   return map;
 })();
 
@@ -601,7 +606,7 @@ const buildFiloFlussoExcelRow = (excelColumns: string[], fields: Record<string, 
   });
 };
 
-const buildFlangeExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
+export const buildFlangeExcelRow = (excelColumns: string[], fields: Record<string, unknown>) => {
   const fieldKeyLookup = new Map<string, string>();
   Object.keys(fields).forEach((key) => fieldKeyLookup.set(normalizeExcelKey(key), key));
   return excelColumns.map((columnName) => {
@@ -615,7 +620,7 @@ const FLANGE_NUMERIC_FIELDS = new Set([
   "Quantita", "DN", "SP", "PrezzoCad", "GiacenzaMm", "PrezzoEuroKg",
 ]);
 
-const buildFlangePayloadFromExcelRow = (excelColumns: string[], values: unknown[]) => {
+export const buildFlangePayloadFromExcelRow = (excelColumns: string[], values: unknown[]) => {
   const fields: Record<string, unknown> = {};
   excelColumns.forEach((columnName, index) => {
     const fieldKey = flangeExcelColumnFieldMap.get(normalizeExcelKey(columnName || ""));
@@ -627,6 +632,8 @@ const buildFlangePayloadFromExcelRow = (excelColumns: string[], values: unknown[
       ? normalizeWorkbookNumberValue(value)
       : normalizeWorkbookScalarValue(value);
   });
+  // Historical blank lot cells represent A; use the same identity in both directions.
+  if (Object.prototype.hasOwnProperty.call(fields, "IdentLotto")) fields.IdentLotto = effectiveFlangeLot(fields.IdentLotto);
   return normalizeTrimmedValue(fields.Title) ? fields : null;
 };
 
@@ -950,6 +957,7 @@ const getPersistedLottoProg = (fields: Record<string, unknown>): string | null =
   extractProgLetter(toStr(fields.LottoProgressivo));
 
 const TUBI_SHAREPOINT_TEXT_FIELDS = [
+  "Schedula",
   "CodiceSAM",
   "field_1",
   "field_2",
@@ -1625,7 +1633,7 @@ const insertWorkbookRowCache = (
   return targetIndex;
 };
 
-const buildTubiPayloadFromExcelRow = (excelColumns: string[], rowValues: unknown[]) => {
+export const buildTubiPayloadFromExcelRow = (excelColumns: string[], rowValues: unknown[]) => {
   const rawByField = new Map<string, unknown>();
   excelColumns.forEach((columnName, index) => {
     const fieldKey = getTubiExcelFieldKey(columnName);
@@ -1783,14 +1791,6 @@ const buildGenericSyncDetailItem = (label: string, detail?: string): SyncDetailI
 
 const buildSyncDetailSections = (sections: SyncDetailSection[]) =>
   sections.filter((section) => section.items.length > 0);
-
-const buildColataPlaceholder = (lottoProg?: string | null) => {
-  const prefix = lottoProg ? `${formatLottoProg(lottoProg)}-` : "";
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  return `${prefix}${timestamp}`;
-};
 
 function DateTimeWidget() {
   const [date, setDate] = useState(new Date());
@@ -1967,6 +1967,7 @@ export function FlangePanel({ selectedItems, onToggle, selectionLimitReached }: 
   const [lotCode, setLotCode] = useState<string | null>(null);
   const [draft, setDraft] = useState<string[]>([]);
   const [colata, setColata] = useState("");
+  const [newLotFields, setNewLotFields] = useState<Record<string, string>>({});
   const [ordine, setOrdine] = useState("");
   const [codiceSam, setCodiceSam] = useState("");
   const [dataOrdine, setDataOrdine] = useState("");
@@ -1980,6 +1981,7 @@ export function FlangePanel({ selectedItems, onToggle, selectionLimitReached }: 
   const groups = useMemo(() => {
     const map = new Map<string, FlangeItem[]>();
     [...rawRows, ...createdRows.filter((item) => !rawRows.some((row) => row.id === item.id))].forEach((item) => {
+      if (isArchivedFlange(item.fields)) return;
       const title = toStr(item.fields.Title).trim();
       if (title) map.set(title, [...(map.get(title) || []), item]);
     });
@@ -2001,8 +2003,8 @@ export function FlangePanel({ selectedItems, onToggle, selectionLimitReached }: 
   const openLots = (entry: typeof groups[number]) => {
     setLotCode(entry.title);
     setDraft(entry.items.filter((item) => selectedItems[`FLANGE-${item.id}`]).map((item) => `FLANGE-${item.id}`));
-    setColata(buildColataPlaceholder(nextFlangeLot([...entry.labels.values()]).toLowerCase()));
-    setOrdine(""); setDataOrdine(""); setCodiceSam(toStr(entry.items[0].fields.CodiceSAM)); setMessage(null);
+    setColata(""); setNewLotFields({});
+    setOrdine(""); setDataOrdine(""); setCodiceSam(""); setMessage(null);
   };
   const outsideCount = Object.keys(selectedItems).filter((key) => !group?.items.some((item) => key === `FLANGE-${item.id}`)).length;
   const confirmSelection = () => {
@@ -2016,10 +2018,10 @@ export function FlangePanel({ selectedItems, onToggle, selectionLimitReached }: 
     if (!service || !listId || !group || saving || !colata.trim()) return;
     setSaving(true); setMessage(null);
     try {
-      const payload = buildFlangeLotPayload(group.items[0].fields, {
-        identLotto: nextFlangeLot([...group.labels.values()]), colata, ordine, codiceSam, dataOrdine: toIsoOrNull(dataOrdine),
+      const payload = buildNewLotPayload("FLANGE", group.title, nextFlangeLot([...group.labels.values()]), {
+        ...newLotFields, NumeroColata: colata, NumeroOrdine: ordine, CodiceSAM: codiceSam, DataOrdine: dataOrdine,
       });
-      const created = await service.createItem(listId, payload);
+      const created = await service.createItem(listId, prepareFieldsForSharePointCreate(payload, await service.listColumns(listId)));
       const createdItem = { id: created.id, fields: { ...payload, ...created.fields } };
       setCreatedRows((current) => [...current, createdItem]);
       clearCacheKeys(["flange", "admin-flange"]);
@@ -2032,7 +2034,7 @@ export function FlangePanel({ selectedItems, onToggle, selectionLimitReached }: 
         onToggle(toCart(createdItem, labels), false);
         setDraft((current) => [...current, `FLANGE-${created.id}`]);
       }
-      setColata("");
+      setColata(""); setOrdine(""); setDataOrdine(""); setCodiceSam(""); setNewLotFields({});
       setMessageStatus(excelError ? "warning" : "success");
       setMessage(excelError ? `Lotto ${payload.IdentLotto} creato su SharePoint; Excel non aggiornato: ${excelError}. Non ricreare il lotto; usa Aggiorna Excel dal Pannello Admin.` : `Lotto ${payload.IdentLotto} creato su SharePoint e Excel.`);
       await refresh();
@@ -2094,7 +2096,8 @@ export function FlangePanel({ selectedItems, onToggle, selectionLimitReached }: 
           <label className="field"><span>Codice SAM</span><input value={codiceSam} disabled={saving} onChange={(event) => setCodiceSam(event.target.value)} /></label>
           <label className="field"><span>Data ordine</span><input type="date" value={dataOrdine} disabled={saving} onChange={(event) => setDataOrdine(event.target.value)} /></label>
         </div>
-        <p className="muted">Il nuovo lotto parte con giacenza e quantità pari a zero.</p>
+        <NewLotFields kind="FLANGE" values={newLotFields} onChange={(field, value) => setNewLotFields((current) => ({ ...current, [field]: value }))} disabled={saving} exclude={["NumeroColata", "NumeroOrdine", "CodiceSAM", "DataOrdine"]} />
+        <p className="muted">Inserisci manualmente i dati del nuovo lotto. Nessun valore viene copiato.</p>
         <button className="btn primary" disabled={saving || loading || !colata.trim() || !listId} onClick={createLot}>{saving ? "Creo..." : "Crea lotto"}</button>
         {message && <div className={`alert ${messageStatus}`} style={{ marginTop: 10 }}>{message}</div>}
         {(selectionLimitReached || outsideCount + draft.length >= CART_SELECTION_LIMIT) && <p className="muted">Limite massimo di 10 articoli in carrello.</p>}
@@ -2125,15 +2128,13 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
     items: ForgiatoItem[];
   } | null>(null);
   const [lotDraftSelection, setLotDraftSelection] = useState<string[]>([]);
+  const [newLotFields, setNewLotFields] = useState<Record<string, string>>({});
   const [newLotColata, setNewLotColata] = useState("");
   const [newLotOrdine, setNewLotOrdine] = useState("");
   const [newLotDataOrdine, setNewLotDataOrdine] = useState("");
   const [newLotCodiceSam, setNewLotCodiceSam] = useState("");
   const [lotSaveStatus, setLotSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [lotSaveMessage, setLotSaveMessage] = useState<string | null>(null);
-  const QTA_RESET_VALUE = 0;
-  const GIACENZA_QTA_RESET_VALUE = 0;
-  const NOTE_RESET_VALUE = "";
 
   const service = useMemo(() => {
     if (!siteId) return null;
@@ -2322,161 +2323,15 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
 
   useEffect(() => {
     if (lotSelection) {
-      const baseItem = lotSelection.items[0];
-      const baseFields = (baseItem?.fields || {}) as any;
-      const nextProg = getNextLottoProg(lotSelection.items, forgiatiProgressiveMap);
-      setNewLotColata(buildColataPlaceholder(nextProg));
+      setNewLotColata("");
+      setNewLotFields({});
       setNewLotOrdine("");
       setNewLotDataOrdine("");
-      setNewLotCodiceSam(toStr(baseFields?.CodiceSAM));
+      setNewLotCodiceSam("");
       setLotSaveStatus("idle");
       setLotSaveMessage(null);
     }
   }, [lotSelection, forgiatiProgressiveMap]);
-
-  const buildLotClonePayload = (
-    item: ForgiatoItem,
-    options: {
-      colata: string;
-      ordine?: string;
-      dataOrdine?: string | null;
-      codiceSam?: string;
-      qtaReset: number | string;
-      giacenzaQtReset: number | string;
-      noteReset: string;
-      dataConsegnaReset: string | null;
-    }
-  ) => {
-    const { colata, ordine, dataOrdine, codiceSam, qtaReset, giacenzaQtReset, noteReset, dataConsegnaReset } = options;
-    const sourceFields = (item.fields || {}) as Record<string, unknown>;
-    const payload: Record<string, unknown> = {};
-
-    const normalizeDateValue = (val: unknown): string | null => {
-      const t = getTimeValue(val);
-      if (!t) return null;
-      const iso = new Date(t).toISOString();
-      return iso;
-    };
-
-    const normalizeTextValue = (val: unknown): string | null => {
-      if (val === null || val === undefined) return null;
-      const trimmed = String(val).trim();
-      return trimmed ? trimmed : null;
-    };
-
-    const ordineValue = ordine !== undefined ? ordine : toStr((sourceFields as any).field_1);
-    const dataOrdineValue = dataOrdine !== undefined ? dataOrdine : normalizeDateValue((sourceFields as any).field_2);
-    const qtaValue = String(qtaReset);
-    const giacenzaQtValue = String(giacenzaQtReset);
-    const noteValue = noteReset;
-    const codiceSamValue = normalizeTextValue(codiceSam);
-    const dataConsegnaValue = dataConsegnaReset !== undefined ? normalizeDateValue(dataConsegnaReset) : normalizeDateValue((sourceFields as any).field_11);
-
-    Object.entries(sourceFields).forEach(([key, value]) => {
-      if (
-        key === "id" ||
-        key === "ContentType" ||
-        key === "ContentTypeId" ||
-        key === "Created" ||
-        key === "Modified" ||
-        key === "AuthorLookupId" ||
-        key === "EditorLookupId" ||
-        key === "ComplianceAssetId" ||
-        key === "GUID" ||
-        key === "Attachments" ||
-        key === "AppAuthor" ||
-        key === "AppEditor" ||
-        key === "AppAuthorLookupId" ||
-        key === "AppEditorLookupId" ||
-        key === "Edit" ||
-        key === "ItemChildCount" ||
-        key === "FolderChildCount" ||
-        key === "_UIVersionString" ||
-        key === "UIVersionString" ||
-        key === "_ModerationStatus" ||
-        key === "_ModerationComments" ||
-        key === "_ComplianceFlags" ||
-        key === "_ComplianceTag" ||
-        key === "_ComplianceTagUserId" ||
-        key === "_ComplianceTagWrittenTime" ||
-        key === "_IsRecord" ||
-        key === "_Level" ||
-        key === "_Version" ||
-        key === "field_26" ||
-        key.startsWith("LinkTitle") ||
-        key.startsWith("_Compliance") ||
-        key.startsWith("@") ||
-        key.startsWith("odata")
-      ) {
-        return;
-      }
-
-      if (key === "field_13") {
-        payload[key] = colata;
-        return;
-      }
-
-      if (key === "field_1") {
-        payload[key] = ordineValue;
-        return;
-      }
-
-      if (key === "field_2") {
-        payload[key] = dataOrdineValue;
-        return;
-      }
-
-      if (key === "field_5") {
-        payload[key] = qtaValue;
-        return;
-      }
-
-      if (key === "field_22") {
-        payload[key] = giacenzaQtValue;
-        return;
-      }
-
-      if (key === "field_25") {
-        payload[key] = noteValue;
-        return;
-      }
-
-      if (key === "CodiceSAM") {
-        payload[key] = codiceSam !== undefined ? codiceSamValue : value;
-        return;
-      }
-
-      if (key === "field_11") {
-        // Skip - will be handled after if needed
-        return;
-      }
-
-      if (key === "LottoProgressivo") {
-        payload[key] = null;
-        return;
-      }
-
-      payload[key] = value;
-    });
-
-    if (!("field_13" in payload)) payload.field_13 = colata;
-    if (!("field_1" in payload)) payload.field_1 = ordineValue;
-    if (!("field_2" in payload)) payload.field_2 = dataOrdineValue;
-    if (!("field_5" in payload)) payload.field_5 = qtaValue;
-    if (!("field_22" in payload)) payload.field_22 = giacenzaQtValue;
-    if (!("field_25" in payload)) payload.field_25 = noteValue;
-    // Omit field_11 (Data consegna) entirely - let SharePoint set default or null
-
-    // Remove null/undefined/empty string values to avoid SharePoint errors
-    Object.keys(payload).forEach((k) => {
-      const v = payload[k];
-      if (v === null || v === undefined || v === "") {
-        delete payload[k];
-      }
-    });
-
-    return payload;
-  };
 
   const handleCreateLot = async () => {
     if (!service || !listId || !lotSelection) {
@@ -2503,18 +2358,11 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
       const ordineOverride = newLotOrdine.trim();
       const dataOrdineInput = newLotDataOrdine.trim();
       const newLotProg = formatLottoProg(getNextLottoProg(lotSelection.items, forgiatiProgressiveMap));
-      const payload = buildLotClonePayload(baseItem, {
-        colata: normalized,
-        ordine: ordineOverride,
-        dataOrdine: dataOrdineInput ? toIsoOrNull(dataOrdineInput) : null,
-        codiceSam: newLotCodiceSam.trim(),
-        qtaReset: QTA_RESET_VALUE,
-        giacenzaQtReset: GIACENZA_QTA_RESET_VALUE,
-        noteReset: NOTE_RESET_VALUE,
-        dataConsegnaReset: null,
+      const payload = buildNewLotPayload("FORGIATI", lotSelection.title, "", {
+        ...newLotFields, field_13: newLotColata, field_1: newLotOrdine, field_2: newLotDataOrdine, CodiceSAM: newLotCodiceSam,
       });
       payload.IdentLotto = newLotProg;
-      await service.createItem<Record<string, unknown>>(listId, payload);
+      await service.createItem<Record<string, unknown>>(listId, prepareFieldsForSharePointCreate(payload, await service.listColumns(listId)));
       let excelError: string | null = null;
       const resolvedPath = forgiatiExcelPath || (forgiatiExcelFolder && forgiatiExcelFilename ? `${forgiatiExcelFolder}/${forgiatiExcelFilename}` : "");
       let resolvedDriveId = forgiatiExcelDriveIdRef.current;
@@ -2598,8 +2446,8 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
           ? `Nuovo lotto creato su SharePoint. Excel non aggiornato: ${excelError}`
           : "Nuovo lotto creato e registrato su Excel. Aggiorno la lista..."
       );
-      const fallbackProg = getNextLottoProg(lotSelection.items, forgiatiProgressiveMap);
-      setNewLotColata(buildColataPlaceholder(fallbackProg));
+      setNewLotColata("");
+      setNewLotFields({});
       setNewLotOrdine("");
       setNewLotDataOrdine("");
       setNewLotCodiceSam("");
@@ -2892,7 +2740,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
               <div className="section-heading" style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <span className="pill ghost">Nuovo lotto</span>
-                  <p className="muted" style={{ margin: "6px 0 0" }}>Duplico l&apos;articolo</p>
+                  <p className="muted" style={{ margin: "6px 0 0" }}>Inserisci manualmente i dati del nuovo lotto. Nessun valore viene copiato.</p>
                 </div>
               </div>
               <div className="field-grid" style={{ marginTop: 8, alignItems: "flex-end" }}>
@@ -2947,6 +2795,7 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
                     }}
                   />
                 </label>
+                <NewLotFields kind="FORGIATI" values={newLotFields} onChange={(field, value) => setNewLotFields((current) => ({ ...current, [field]: value }))} disabled={lotSaveStatus === "saving"} exclude={["field_13", "field_1", "field_2", "CodiceSAM"]} />
                 <button
                   className="btn primary"
                   style={{ minWidth: 160, height: 44 }}
@@ -3763,13 +3612,13 @@ function TubiPanel
     items: TubiItem[];
     representative: TubiItem;
   } | null>(null);
+  const [newLotFields, setNewLotFields] = useState<Record<string, string>>({});
   const [newLotColata, setNewLotColata] = useState("");
   const [newLotOrdine, setNewLotOrdine] = useState("");
   const [newLotDataOrdine, setNewLotDataOrdine] = useState("");
   const [newLotCodiceSam, setNewLotCodiceSam] = useState("");
   const [lotSaveStatus, setLotSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [lotSaveMessage, setLotSaveMessage] = useState<string | null>(null);
-  const GIACENZA_RESET_VALUE = 500;
 
   const service = useMemo(() => {
     if (!siteId) return null;
@@ -3950,150 +3799,15 @@ function TubiPanel
 
   useEffect(() => {
     if (lotSelection) {
-      const baseItem = lotSelection.items[0];
-      const baseFields = (baseItem?.fields || {}) as any;
-      const nextProg = getNextLottoProg(lotSelection.items, tubiProgressiveMap);
-      setNewLotColata(buildColataPlaceholder(nextProg));
+      setNewLotColata("");
+      setNewLotFields({});
       setNewLotOrdine("");
-      setNewLotDataOrdine(toInputDate(baseFields?.field_3));
-      setNewLotCodiceSam(toStr(baseFields?.CodiceSAM));
+      setNewLotDataOrdine("");
+      setNewLotCodiceSam("");
       setLotSaveStatus("idle");
       setLotSaveMessage(null);
     }
   }, [lotSelection, tubiProgressiveMap]);
-
-  const buildLotClonePayload = (
-    item: TubiItem,
-    options: {
-      colata: string;
-      ordine?: string;
-      dataOrdine?: string | null;
-      codiceSam?: string;
-      giacenzaNonTagliato: number | string;
-      giacenzaContabile: number | string;
-    }
-  ) => {
-    const { colata, ordine, dataOrdine, codiceSam, giacenzaNonTagliato, giacenzaContabile } = options;
-    const sourceFields = (item.fields || {}) as Record<string, unknown>;
-    const payload: Record<string, unknown> = {};
-
-    const normalizeDateValue = (val: unknown): string | null => {
-      const t = getTimeValue(val);
-      if (!t) return null;
-      return new Date(t).toISOString();
-    };
-
-    const normalizeTextValue = (val: unknown): string | null => {
-      if (val === null || val === undefined) return null;
-      const trimmed = String(val).trim();
-      return trimmed ? trimmed : null;
-    };
-
-    const ordineValue = normalizeTextValue(ordine !== undefined ? ordine : (sourceFields as any).field_2);
-    const dataOrdineValue = dataOrdine !== undefined ? dataOrdine : normalizeDateValue((sourceFields as any).field_3);
-    const dataConsegnaValue = null;
-    const dataUltimoPrelievoValue = null;
-    const codiceSamValue = normalizeTextValue(codiceSam);
-    const giacenzaContabValue = normalizeTextValue(giacenzaContabile);
-    const giacenzaNonTagliatoValue = normalizeTextValue(giacenzaNonTagliato);
-
-    Object.entries(sourceFields).forEach(([key, value]) => {
-      if (
-        key === "id" ||
-        key === "ContentType" ||
-        key === "ContentTypeId" ||
-        key === "Created" ||
-        key === "Modified" ||
-        key === "AuthorLookupId" ||
-        key === "EditorLookupId" ||
-        key === "ComplianceAssetId" ||
-        key === "GUID" ||
-        key === "Attachments" ||
-        key === "AppAuthor" ||
-        key === "AppEditor" ||
-        key === "AppAuthorLookupId" ||
-        key === "AppEditorLookupId" ||
-        key === "Edit" ||
-        key === "ItemChildCount" ||
-        key === "FolderChildCount" ||
-        key === "_UIVersionString" ||
-        key === "UIVersionString" ||
-        key === "_ModerationStatus" ||
-        key === "_ModerationComments" ||
-        key === "_ComplianceFlags" ||
-        key === "_ComplianceTag" ||
-        key === "_ComplianceTagUserId" ||
-        key === "_ComplianceTagWrittenTime" ||
-        key === "_IsRecord" ||
-        key === "_Level" ||
-        key === "_Version" ||
-        key.startsWith("LinkTitle") ||
-        key.startsWith("_Compliance") ||
-        key.startsWith("@") ||
-        key.startsWith("odata")
-      ) {
-        return;
-      }
-
-      if (key === "field_18") {
-        payload[key] = normalizeTextValue(colata);
-        return;
-      }
-
-      if (key === "field_2") {
-        payload[key] = ordineValue;
-        return;
-      }
-
-      if (key === "field_3") {
-        payload[key] = dataOrdineValue;
-        return;
-      }
-
-      if (key === "field_16") {
-        payload[key] = dataConsegnaValue;
-        return;
-      }
-
-      if (key === "field_19") {
-        payload[key] = giacenzaContabValue;
-        return;
-      }
-
-      if (key === "field_20") {
-        payload[key] = giacenzaNonTagliatoValue;
-        return;
-      }
-
-      if (key === "field_21") {
-        payload[key] = dataUltimoPrelievoValue;
-        return;
-      }
-
-      if (key === "CodiceSAM") {
-        payload[key] = codiceSamValue;
-        return;
-      }
-
-      if (key === "LottoProgressivo") {
-        payload[key] = null;
-        return;
-      }
-
-      payload[key] = normalizeTextValue(value);
-    });
-
-    if (!("field_18" in payload)) payload.field_18 = normalizeTextValue(colata);
-    if (!("field_2" in payload)) payload.field_2 = ordineValue;
-    if (!("field_3" in payload)) payload.field_3 = dataOrdineValue;
-    if (!("field_16" in payload)) payload.field_16 = dataConsegnaValue;
-    if (!("field_19" in payload)) payload.field_19 = giacenzaContabValue;
-    if (!("field_20" in payload)) payload.field_20 = giacenzaNonTagliatoValue;
-    if (!("field_21" in payload)) payload.field_21 = dataUltimoPrelievoValue;
-    if (!("CodiceSAM" in payload)) payload.CodiceSAM = null;
-
-    return payload;
-  };
 
   const handleCreateLot = async () => {
     if (!service || !listId || !lotSelection) {
@@ -4120,19 +3834,14 @@ function TubiPanel
     try {
       const ordineOverride = newLotOrdine.trim();
       const dataOrdineInput = newLotDataOrdine.trim();
-      payload = buildLotClonePayload(baseItem, {
-        colata: normalized,
-        ordine: ordineOverride ? ordineOverride : undefined,
-        dataOrdine: dataOrdineInput ? toIsoOrNull(dataOrdineInput) : undefined,
-        codiceSam: newLotCodiceSam.trim() ? newLotCodiceSam : undefined,
-        giacenzaNonTagliato: GIACENZA_RESET_VALUE,
-        giacenzaContabile: GIACENZA_RESET_VALUE,
+      payload = buildNewLotPayload("TUBI", lotSelection.title, "", {
+        ...newLotFields, field_18: newLotColata, field_2: newLotOrdine, field_3: newLotDataOrdine, CodiceSAM: newLotCodiceSam,
       });
       const newLotProg = formatLottoProg(
         getNextLottoProg(lotSelection.items, tubiProgressiveMap)
       );
       payload.IdentLotto = newLotProg;
-      await service.createItem<Record<string, unknown>>(listId, payload);
+      await service.createItem<Record<string, unknown>>(listId, prepareFieldsForSharePointCreate(payload, await service.listColumns(listId)));
       let excelError: string | null = null;
       const resolvedPath = tubiExcelPath || (tubiExcelFolder && tubiExcelFilename ? `${tubiExcelFolder}/${tubiExcelFilename}` : "");
       let resolvedDriveId = tubiExcelDriveIdRef.current;
@@ -4216,9 +3925,10 @@ function TubiPanel
           ? `Nuovo lotto creato su SharePoint. Excel non aggiornato: ${excelError}`
           : "Nuovo lotto creato e registrato su Excel. Aggiorno la lista..."
       );
-      const fallbackProg = getNextLottoProg(lotSelection.items, tubiProgressiveMap);
-      setNewLotColata(buildColataPlaceholder(fallbackProg));
+      setNewLotColata("");
+      setNewLotFields({});
       setNewLotOrdine("");
+      setNewLotDataOrdine("");
       setNewLotCodiceSam("");
       await refresh();
     } catch (err: any) {
@@ -4543,7 +4253,7 @@ function TubiPanel
               <div className="section-heading" style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <span className="pill ghost">Nuovo lotto</span>
-                  <p className="muted" style={{ margin: "6px 0 0" }}>Duplico l&apos;articolo</p>
+                  <p className="muted" style={{ margin: "6px 0 0" }}>Inserisci manualmente i dati del nuovo lotto. Nessun valore viene copiato.</p>
                 </div>
               </div>
               <div className="field-grid" style={{ marginTop: 8, alignItems: "flex-end" }}>
@@ -4598,6 +4308,7 @@ function TubiPanel
                     }}
                   />
                 </label>
+                <NewLotFields kind="TUBI" values={newLotFields} onChange={(field, value) => setNewLotFields((current) => ({ ...current, [field]: value }))} disabled={lotSaveStatus === "saving"} exclude={["field_18", "field_2", "field_3", "CodiceSAM"]} />
                 <button
                   className="btn primary"
                   style={{ minWidth: 160, height: 44 }}
@@ -4682,6 +4393,7 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
     items: TuboMeccanicoItem[];
   } | null>(null);
   const [lotDraftSelection, setLotDraftSelection] = useState<string[]>([]);
+  const [newLotFields, setNewLotFields] = useState<Record<string, string>>({});
   const [newLotColata, setNewLotColata] = useState("");
   const [newLotOrdine, setNewLotOrdine] = useState("");
   const [newLotDataOrdine, setNewLotDataOrdine] = useState("");
@@ -4858,151 +4570,15 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
 
   useEffect(() => {
     if (lotSelection) {
-      const baseItem = lotSelection.items[0];
-      const baseFields = (baseItem?.fields || {}) as any;
-      const nextProg = getNextLottoProg(lotSelection.items, progressiveMap);
-      setNewLotColata(buildColataPlaceholder(nextProg));
+      setNewLotColata("");
+      setNewLotFields({});
       setNewLotOrdine("");
-      setNewLotDataOrdine(toInputDate(baseFields?.field_3));
-      setNewLotCodiceSam(toStr(baseFields?.field_1));
+      setNewLotDataOrdine("");
+      setNewLotCodiceSam("");
       setLotSaveStatus("idle");
       setLotSaveMessage(null);
     }
   }, [lotSelection, progressiveMap]);
-
-  const buildLotClonePayload = (
-    item: TuboMeccanicoItem,
-    options: {
-      colata: string;
-      ordine?: string;
-      dataOrdine?: string | null;
-      codiceSam?: string;
-    }
-  ) => {
-    const { colata, ordine, dataOrdine, codiceSam } = options;
-    const sourceFields = (item.fields || {}) as Record<string, unknown>;
-    const payload: Record<string, unknown> = {};
-
-    const normalizeDateValue = (val: unknown): string | null => {
-      const t = getTimeValue(val);
-      if (!t) return null;
-      return new Date(t).toISOString();
-    };
-
-    const normalizeTextValue = (val: unknown): string | null => {
-      if (val === null || val === undefined) return null;
-      const trimmed = String(val).trim();
-      return trimmed ? trimmed : null;
-    };
-
-    // Preserva il tipo nativo restituito da Graph: le colonne numeriche di
-    // SharePoint (P., Q.tà, Lungh., Ø Est., SP, Prezzo, ...) tornano come number
-    // e vanno rispedite come number, non come stringa, altrimenti SharePoint
-    // rifiuta la POST con "General exception while processing". I testi restano
-    // testi e i booleani booleani.
-    const normalizeScalarValue = (val: unknown): unknown => {
-      if (val === null || val === undefined) return null;
-      if (typeof val === "number") return Number.isFinite(val) ? val : null;
-      if (typeof val === "boolean") return val;
-      const trimmed = String(val).trim();
-      return trimmed ? trimmed : null;
-    };
-
-    const ordineValue = normalizeTextValue(ordine !== undefined ? ordine : (sourceFields as any).field_2);
-    const dataOrdineValue = dataOrdine !== undefined ? dataOrdine : normalizeDateValue((sourceFields as any).field_3);
-    const codiceSamValue = normalizeTextValue(codiceSam !== undefined ? codiceSam : (sourceFields as any).field_1);
-
-    Object.entries(sourceFields).forEach(([key, value]) => {
-      if (
-        key === "id" ||
-        key === "ContentType" ||
-        key === "ContentTypeId" ||
-        key === "Created" ||
-        key === "Modified" ||
-        key === "AuthorLookupId" ||
-        key === "EditorLookupId" ||
-        key === "ComplianceAssetId" ||
-        key === "GUID" ||
-        key === "Attachments" ||
-        key === "AppAuthor" ||
-        key === "AppEditor" ||
-        key === "AppAuthorLookupId" ||
-        key === "AppEditorLookupId" ||
-        key === "Edit" ||
-        key === "ItemChildCount" ||
-        key === "FolderChildCount" ||
-        key === "_UIVersionString" ||
-        key === "UIVersionString" ||
-        key === "_ModerationStatus" ||
-        key === "_ModerationComments" ||
-        key === "_ComplianceFlags" ||
-        key === "_ComplianceTag" ||
-        key === "_ComplianceTagUserId" ||
-        key === "_ComplianceTagWrittenTime" ||
-        key === "_IsRecord" ||
-        key === "_Level" ||
-        key === "_Version" ||
-        key.startsWith("LinkTitle") ||
-        key.startsWith("_Compliance") ||
-        key.startsWith("@") ||
-        key.startsWith("odata")
-      ) {
-        return;
-      }
-
-      if (key === "field_14") {
-        payload[key] = normalizeTextValue(colata);
-        return;
-      }
-
-      if (key === "field_2") {
-        payload[key] = ordineValue;
-        return;
-      }
-
-      if (key === "field_3") {
-        payload[key] = dataOrdineValue;
-        return;
-      }
-
-      if (key === "field_1") {
-        payload[key] = codiceSamValue;
-        return;
-      }
-
-      // NON inviare le giacenze (field_16 Giacenza Amm., field_17 Giacenza,
-      // field_19 Utilizzato per comm.) alla creazione del lotto. Su questa lista
-      // sono colonne che rifiutano il valore inviato (tipo testo o calcolate):
-      // inserirle fa fallire la POST con "General exception while processing".
-      // Un nuovo lotto parte senza giacenza — proprio come gli articoli che si
-      // creano correttamente, il cui item di origine non porta queste chiavi.
-      if (key === "field_16" || key === "field_17" || key === "field_19") {
-        return;
-      }
-      // field_12 (DATA CONSEGNA) e field_18 (DATA PRELIEVO) sono colonne data:
-      // un nuovo lotto non ha ancora consegna/prelievo, quindi le resettiamo a
-      // null. Evita anche di inviare una data come testo grezzo alla colonna
-      // DateTime di SharePoint (causa di "General exception while processing").
-      if (key === "field_12" || key === "field_18") {
-        payload[key] = null;
-        return;
-      }
-
-      if (key === "LottoProgressivo") {
-        payload[key] = null;
-        return;
-      }
-
-      payload[key] = normalizeScalarValue(value);
-    });
-
-    if (!("field_14" in payload)) payload.field_14 = normalizeTextValue(colata);
-    if (!("field_2" in payload)) payload.field_2 = ordineValue;
-    if (!("field_3" in payload)) payload.field_3 = dataOrdineValue;
-    if (!("field_1" in payload)) payload.field_1 = codiceSamValue;
-
-    return payload;
-  };
 
   const handleCreateLot = async () => {
     if (!service || !listId || !lotSelection) {
@@ -5024,14 +4600,11 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
       const newLotProg = formatLottoProg(
         getNextLottoProg(lotSelection.items, progressiveMap)
       );
-      const payload = buildLotClonePayload(baseItem, {
-        colata: normalized,
-        ordine: ordineOverride ? ordineOverride : undefined,
-        dataOrdine: dataOrdineInput ? toIsoOrNull(dataOrdineInput) : undefined,
-        codiceSam: newLotCodiceSam.trim() ? newLotCodiceSam : undefined,
+      const payload = buildNewLotPayload("TUBO-MECCANICO", lotSelection.title, "", {
+        ...newLotFields, field_14: newLotColata, field_2: newLotOrdine, field_3: newLotDataOrdine, field_1: newLotCodiceSam,
       });
       payload.IdentLotto = newLotProg;
-      await service.createItem<Record<string, unknown>>(listId, payload);
+      await service.createItem<Record<string, unknown>>(listId, prepareFieldsForSharePointCreate(payload, await service.listColumns(listId)));
       let excelError: string | null = null;
       const resolvedPath = excelPath || (excelFolder && excelFilename ? `${excelFolder}/${excelFilename}` : "");
       let resolvedDriveId = excelDriveIdRef.current;
@@ -5115,9 +4688,10 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
           ? `Nuovo lotto creato su SharePoint. Excel non aggiornato: ${excelError}`
           : "Nuovo lotto creato e registrato su Excel. Aggiorno la lista..."
       );
-      const fallbackProg = getNextLottoProg(lotSelection.items, progressiveMap);
-      setNewLotColata(buildColataPlaceholder(fallbackProg));
+      setNewLotColata("");
+      setNewLotFields({});
       setNewLotOrdine("");
+      setNewLotDataOrdine("");
       setNewLotCodiceSam("");
       await refresh();
     } catch (err: any) {
@@ -5405,7 +4979,7 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
               <div className="section-heading" style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <span className="pill ghost">Nuovo lotto</span>
-                  <p className="muted" style={{ margin: "6px 0 0" }}>Duplico l&apos;articolo</p>
+                  <p className="muted" style={{ margin: "6px 0 0" }}>Inserisci manualmente i dati del nuovo lotto. Nessun valore viene copiato.</p>
                 </div>
               </div>
               <div className="field-grid" style={{ marginTop: 8, alignItems: "flex-end" }}>
@@ -5460,6 +5034,7 @@ function TuboMeccanicoPanel({ selectedItems, onToggle, selectionLimitReached }: 
                     }}
                   />
                 </label>
+                <NewLotFields kind="TUBO-MECCANICO" values={newLotFields} onChange={(field, value) => setNewLotFields((current) => ({ ...current, [field]: value }))} disabled={lotSaveStatus === "saving"} exclude={["field_14", "field_2", "field_3", "field_1"]} />
                 <button
                   className="btn primary"
                   style={{ minWidth: 160, height: 44 }}
@@ -5596,6 +5171,7 @@ function buildEditableState(item: CartItem): EditableItemState {
 
   return {
     type: "TUBI",
+    schedula: toStr(fields.Schedula),
     title: item.title || "-",
     dataUltimoPrelievo: toInputDate((fields as any).field_21),
     commessa: toStr((fields as any).field_25),
@@ -6239,6 +5815,7 @@ export function StockUpdatePage({
                         onChange={(e) => onChange(item.key, "commessa", e.target.value)}
                       />
                     </label>
+                    <label className="field"><span>Schedula</span><input type="text" value={cardValues.schedula || ""} onChange={(event) => onChange(item.key, "schedula", event.target.value)} /></label>
                     <label className="field">
                       <span>Giacenza Tubo Intero mm</span>
                       <input
@@ -8475,6 +8052,7 @@ function AuthenticatedShell() {
       const requiredSyncColumns = [
         "Title",
         "IdentLotto",
+        "Archiviato",
         ...flangeColumns
           .filter((column) => column.field !== "Modified")
           .map((column) => column.field),
@@ -8491,7 +8069,7 @@ function AuthenticatedShell() {
 
       const byExactKey = new Map<string, SharePointListItem<Record<string, unknown>>[]>();
       const keyFor = (title: unknown, lotto: unknown) =>
-        `${normalizeExcelKey(String(title ?? ""))}::${normalizeExcelKey(String(lotto ?? ""))}`;
+        `${normalizeExcelKey(String(title ?? ""))}::${normalizeExcelKey(effectiveFlangeLot(lotto))}`;
       existingItems.forEach((item) => {
         const fields = item.fields as Record<string, unknown>;
         const code = normalizeExcelKey(toStr(fields.Title));
@@ -8580,6 +8158,11 @@ function AuthenticatedShell() {
 
           if (exactMatches.length === 1) {
             const match = exactMatches[0];
+            if (isArchivedFlange(match.fields)) {
+              skipped++;
+              skippedItems.push(buildGenericSyncDetailItem(record.code, "Articolo archiviato: nessuna riattivazione automatica"));
+              continue;
+            }
             await sharepointService.updateItem<Record<string, unknown>>(flangeListId, match.id, record.fields);
             usedItemIds.add(match.id);
             updated++;
@@ -8615,7 +8198,7 @@ function AuthenticatedShell() {
       }
 
       const sharePointOnlyItems = existingItems
-        .filter((item) => !usedItemIds.has(item.id))
+        .filter((item) => !usedItemIds.has(item.id) && !isArchivedFlange(item.fields))
         .map((item) => {
           const fields = (item.fields || {}) as Record<string, unknown>;
           const code = toStr(fields.Title) || "(senza codice)";
@@ -8797,7 +8380,8 @@ function AuthenticatedShell() {
 
     try {
       onProgress?.("Caricamento articoli da SharePoint...");
-      const spItems = await sharepointService.listItems<Record<string, unknown>>(cfg.listId);
+      const allSpItems = await sharepointService.listItems<Record<string, unknown>>(cfg.listId);
+      const spItems = listKind === "FLANGE" ? allSpItems.filter((item) => !isArchivedFlange(item.fields)) : allSpItems;
       if (spItems.length === 0) {
         return { success: true, message: `Nessun articolo trovato su SharePoint per ${listKind}.` };
       }
@@ -9017,6 +8601,7 @@ function AuthenticatedShell() {
               field_19: toNumberOrNull(values.utilizzatoPerCommessa),
             }
           : {
+              Schedula: values.schedula ?? null,
               field_21: toIsoOrNull(values.dataUltimoPrelievo),
               field_25: values.commessa ?? null,
               field_20: contabSum ?? toNumberOrNull(values.giacenzaBib),
@@ -9025,6 +8610,14 @@ function AuthenticatedShell() {
 
         return { item, listId, values, payload };
       });
+
+      if (updates.some((update) => update.item.source === "FLANGE")) {
+        const currentFlangeItems = await sharepointService.listItems<Record<string, unknown>>(flangeListId!);
+        for (const update of updates.filter((entry) => entry.item.source === "FLANGE")) {
+          const currentItem = currentFlangeItems.find((entry) => entry.id === update.item.itemId);
+          if (!currentItem || isArchivedFlange(currentItem.fields)) throw new Error(`La flangia ${update.item.title} è archiviata o non è più disponibile. Rimuovila dal carrello.`);
+        }
+      }
 
       await Promise.all(
         updates.map(({ item, listId, payload }) =>

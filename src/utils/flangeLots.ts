@@ -1,4 +1,4 @@
-import { flangeColumns } from "../config/flangeColumns";
+import { buildNewLotPayload } from "./newLot";
 import type { SharePointListItem } from "../types/sharepoint";
 
 export const effectiveFlangeLot = (value: unknown): string => String(value ?? "").trim().toUpperCase() || "A";
@@ -42,21 +42,7 @@ export function buildFlangeLotPayload(
   source: Record<string, unknown>,
   options: { identLotto: string; colata: string; ordine: string; codiceSam: string; dataOrdine: string | null }
 ): Record<string, unknown> {
-  const payload: Record<string, unknown> = {};
-  const reset = new Set(["IdentLotto", "Quantita", "GiacenzaMm", "NumeroOrdine", "DataOrdine", "CodiceSAM", "NumeroColata", "NumeroBolla", "NumeroCertificato", "DataConsegna", "Commessa", "Commessa2"]);
-  for (const column of flangeColumns) {
-    if (column.hidden || reset.has(column.field)) continue;
-    const value = source[column.field];
-    if (value !== null && value !== undefined && value !== "") payload[column.field] = value;
-  }
-  return {
-    ...payload,
-    IdentLotto: options.identLotto,
-    NumeroColata: options.colata.trim(),
-    NumeroOrdine: options.ordine.trim(),
-    CodiceSAM: options.codiceSam.trim(),
-    DataOrdine: options.dataOrdine,
-    Quantita: 0,
-    GiacenzaMm: 0,
-  };
+  return buildNewLotPayload("FLANGE", String(source.Title ?? ""), options.identLotto, {
+    NumeroColata: options.colata, NumeroOrdine: options.ordine, CodiceSAM: options.codiceSam, DataOrdine: options.dataOrdine,
+  });
 }

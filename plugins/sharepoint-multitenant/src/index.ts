@@ -377,6 +377,32 @@ server.registerTool("read_excel_table", { description: "Read the values and addr
   try { return result(await graphRequest(`/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/workbook/tables/${encodeURIComponent(tableIdOrName)}/range`, {}, connectionId)); } catch (error) { return failure(error); }
 });
 
+server.registerTool("list_excel_table_columns", { description: "List the column names of a named Excel table in a SharePoint workbook, without reading all rows.", inputSchema: z.object({ driveId: z.string().min(1), itemId: z.string().min(1), tableIdOrName: z.string().min(1), connectionId: z.string().optional() }) }, async ({ driveId, itemId, tableIdOrName, connectionId }) => {
+    try {
+        return result(await graphRequest(`/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/workbook/tables/${encodeURIComponent(tableIdOrName)}/columns?$select=id,name,index`, {}, connectionId));
+    }
+    catch (error) {
+        return failure(error);
+    }
+});
+server.registerTool("read_excel_table_row", { description: "Read one data row by zero-based index from a named Excel table in a SharePoint workbook.", inputSchema: z.object({ driveId: z.string().min(1), itemId: z.string().min(1), tableIdOrName: z.string().min(1), rowIndex: z.number().int().min(0), connectionId: z.string().optional() }) }, async ({ driveId, itemId, tableIdOrName, rowIndex, connectionId }) => {
+    try {
+        return result(await graphRequest(`/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/workbook/tables/${encodeURIComponent(tableIdOrName)}/rows/itemAt(index=${rowIndex})/range`, {}, connectionId));
+    }
+    catch (error) {
+        return failure(error);
+    }
+});
+server.registerTool("find_sharepoint_list_items_by_title", { description: "Find SharePoint list items by their exact Title field. Read-only diagnostic tool.", inputSchema: z.object({ siteId: z.string().min(1), listId: z.string().min(1), title: z.string().min(1), connectionId: z.string().optional() }) }, async ({ siteId, listId, title, connectionId }) => {
+    try {
+        const escapedTitle = title.replace(/'/g, "''");
+        const query = new URLSearchParams({ "$expand": "fields", "$filter": `fields/Title eq '${escapedTitle}'` });
+        return result(await graphRequest(`/sites/${encodeURIComponent(siteId)}/lists/${encodeURIComponent(listId)}/items?${query.toString()}`, { headers: { Prefer: "HonorNonIndexedQueriesWarningMayFailRandomly" } }, connectionId));
+    }
+    catch (error) {
+        return failure(error);
+    }
+});
 server.registerTool("add_excel_table_column", { description: "Insert a named column in an Excel table. First show the target and index to the user, then call only after explicit confirmation.", annotations: { destructiveHint: true }, inputSchema: z.object({ driveId: z.string().min(1), itemId: z.string().min(1), tableIdOrName: z.string().min(1), name: z.string().min(1), index: z.number().int().nonnegative(), values: z.array(z.array(z.unknown())).optional(), connectionId: z.string().optional(), confirm: z.literal(true).describe("Must be true only after the user has explicitly confirmed this exact Excel change.") }) }, async ({ driveId, itemId, tableIdOrName, name, index, values, connectionId }) => {
   try {
     return result(await graphRequest(`/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/workbook/tables/${encodeURIComponent(tableIdOrName)}/columns/add`, { method: "POST", body: JSON.stringify({ name, index, ...(values ? { values } : {}) }) }, connectionId));
@@ -539,6 +565,50 @@ server.registerTool("import_excel_table_to_sharepoint_list", {
       failed,
     });
   } catch (error) { return failure(error); }
+});
+
+server.registerTool("list_sharepoint_list_items", {
+  description: "Read all items and fields from a SharePoint list, following pagination. No modifications.",
+  inputSchema: z.object({ siteId: z.string().min(1), listId: z.string().min(1), connectionId: z.string().optional() }),
+}, async ({ siteId, listId, connectionId }) => {
+  try {
+    let path: string | undefined = `/sites/${encodeURIComponent(siteId)}/lists/${encodeURIComponent(listId)}/items?$expand=fields&$top=999`;
+    const items: unknown[] = [];
+    const visited = new Set<string>();
+    while (path) {
+      if (visited.has(path)) throw new Error("Graph pagination cycle");
+      visited.add(path);
+      const page = await graphRequest(path, {}, connectionId) as { value?: unknown[]; "@odata.nextLink"?: string };
+      items.push(...(page.value ?? []));
+      const next = page["@odata.nextLink"];
+      if (next && !next.startsWith(GRAPH_BASE_URL + "/")) throw new Error("Unexpected Graph pagination URL");
+      path = next ? next.slice(GRAPH_BASE_URL.length) : undefined;
+    }
+    return result({ value: items });
+  } catch (error) { return failure(error); }
+});
+
+server.registerTool("read_excel_worksheet", {
+  description: "Read the populated cells of one named worksheet. Does not change the workbook.",
+  inputSchema: z.object({ driveId: z.string().min(1), itemId: z.string().min(1), sheetName: z.string().min(1), connectionId: z.string().optional() }),
+}, async ({ driveId, itemId, sheetName, connectionId }) => {
+  try { return result(await graphRequest(`/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/workbook/worksheets/${encodeURIComponent(sheetName)}/usedRange(valuesOnly=true)`, {}, connectionId)); }
+  catch (error) { return failure(error); }
+});
+
+server.registerTool("update_sharepoint_list_items", {
+  description: "Patch explicitly reviewed item IDs and fields. Optional eTag prevents overwriting concurrent edits. Requires confirmation; no deletions.",
+  inputSchema: z.object({ siteId: z.string().min(1), listId: z.string().min(1), items: z.array(z.object({ id: z.string().min(1), fields: z.record(z.string(), z.unknown()), eTag: z.string().optional() })).min(1).max(100), connectionId: z.string().optional(), confirm: z.literal(true) }),
+}, async ({ siteId, listId, items, connectionId }) => {
+  const updated: string[] = [];
+  const failed: Array<{ id: string; error: string }> = [];
+  for (const item of items) {
+    try {
+      await graphRequest(`/sites/${encodeURIComponent(siteId)}/lists/${encodeURIComponent(listId)}/items/${encodeURIComponent(item.id)}/fields`, { method: "PATCH", headers: item.eTag ? { "If-Match": item.eTag } : {}, body: JSON.stringify(item.fields) }, connectionId);
+      updated.push(item.id);
+    } catch (error) { failed.push({ id: item.id, error: error instanceof Error ? error.message : String(error) }); }
+  }
+  return result({ updated, failed });
 });
 
 async function main() {
