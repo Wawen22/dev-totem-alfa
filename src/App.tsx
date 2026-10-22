@@ -8,6 +8,7 @@ import { forgiatiColumns, ForgiatoColumn } from "./config/forgiatiColumns";
 import { tubiColumns } from "./config/tubiColumns";
 import { oringHnbrColumns } from "./config/oringHnbrColumns";
 import { oringNbrColumns } from "./config/oringNbrColumns";
+import { AdditionalOringKind, getOringItemTitle, isAdditionalOring, oringAdditionalColumns, usesHnbrFields } from "./config/oringAdditionalColumns";
 import { sparkGupsColumns } from "./config/sparkGupsColumns";
 import { filoFlussoColumns } from "./config/filoFlussoColumns";
 import { tuboMeccanicoColumns } from "./config/tuboMeccanicoColumns";
@@ -62,7 +63,7 @@ type FiloFlussoItem = SharePointListItem<Record<string, unknown>>;
 
 type CartItem = {
   key: string;
-  source: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO" | "FLANGE";
+  source: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "ORING-FKM" | "ORING-EPDM" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO" | "FLANGE";
   itemId: string;
   title: string;
   bolla?: unknown;
@@ -2826,10 +2827,10 @@ function ForgiatiPanel({ selectedItems, onToggle, selectionLimitReached }: Selec
   );
 }
 
-function OringHnbrPanel({ selectedItems, onToggle, selectionLimitReached }: SelectionStateProps) {
+export function OringPanel({ selectedItems, onToggle, selectionLimitReached, kind = "ORING-HNBR" }: SelectionStateProps & { kind?: "ORING-HNBR" | AdditionalOringKind }) {
   const getClient = useAuthenticatedGraphClient();
   const siteId = import.meta.env.VITE_SHAREPOINT_SITE_ID;
-  const listId = import.meta.env.VITE_ORING_HNBR_LIST_ID;
+  const listId = kind === "ORING-FKM" ? import.meta.env.VITE_ORING_FKM_LIST_ID : kind === "ORING-EPDM" ? import.meta.env.VITE_ORING_EPDM_LIST_ID : import.meta.env.VITE_ORING_HNBR_LIST_ID;
 
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -2843,7 +2844,7 @@ function OringHnbrPanel({ selectedItems, onToggle, selectionLimitReached }: Sele
   const { data: rawRows, loading, error, refresh } = useCachedList<Record<string, unknown>>(
     service,
     listId,
-    "oring-hnbr"
+    kind.toLowerCase()
   );
 
   const rows = useMemo(() => {
@@ -2856,7 +2857,7 @@ function OringHnbrPanel({ selectedItems, onToggle, selectionLimitReached }: Sele
     return sorted;
   }, [rawRows]);
 
-  const visibleColumns = oringHnbrColumns;
+  const visibleColumns = isAdditionalOring(kind) ? oringAdditionalColumns : oringHnbrColumns;
 
   const normalizedRows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -2899,7 +2900,7 @@ function OringHnbrPanel({ selectedItems, onToggle, selectionLimitReached }: Sele
       <div className="panel-content">
         {error && <div className="alert error">{error}</div>}
         {!listId && (
-          <div className="alert warning">Inserisci il GUID della lista ORING-HNBR in .env.local (VITE_ORING_HNBR_LIST_ID).</div>
+          <div className="alert warning">Lista {kind} non configurata. Contatta l’amministratore.</div>
         )}
 
         <div className="toolbar">
@@ -2964,10 +2965,10 @@ function OringHnbrPanel({ selectedItems, onToggle, selectionLimitReached }: Sele
               )}
               {visibleRows.map((item) => {
                 const cartItem: CartItem = {
-                  key: `ORING-HNBR-${item.id}`,
-                  source: "ORING-HNBR",
+                  key: `${kind}-${item.id}`,
+                  source: kind,
                   itemId: item.id,
-                  title: ((item.fields as Record<string, unknown>).Title as string) || "-",
+                  title: isAdditionalOring(kind) ? getOringItemTitle(item.fields) : String(item.fields.Title || "-"),
                   fields: item.fields as Record<string, unknown>,
                 };
                 const checked = Boolean(selectedItems[cartItem.key]);
@@ -2986,7 +2987,7 @@ function OringHnbrPanel({ selectedItems, onToggle, selectionLimitReached }: Sele
                     {visibleColumns.map((col) => {
                       const isTitle = col.field === "Title";
                       const className = isTitle ? "sticky-col" : undefined;
-                      const content = formatCellValue((item.fields as Record<string, unknown>)[col.field], col.type);
+                      const content = col.field === "Title" && isAdditionalOring(kind) ? getOringItemTitle(item.fields) : formatCellValue((item.fields as Record<string, unknown>)[col.field], col.type);
 
                       if (isTitle) {
                         return (
@@ -5106,9 +5107,9 @@ function buildEditableState(item: CartItem): EditableItemState {
     };
   }
 
-  if (item.source === "ORING-HNBR") {
+  if (usesHnbrFields(item.source)) {
     return {
-      type: "ORING-HNBR",
+      type: item.source,
       title: item.title || "-",
       commessa: toStr((fields as any).field_12),
       dataPrelievo: toInputDate((fields as any).field_17),
@@ -5183,6 +5184,23 @@ function buildEditableState(item: CartItem): EditableItemState {
   };
 }
 
+export function buildOringStockUpdate(source: string, values: EditableItemState, listIds: Record<string, string | undefined>) {
+  if (!usesHnbrFields(source)) throw new Error('Sorgente ORING non supportata: ' + source);
+  const listId = listIds[source];
+  if (!listId) throw new Error('List ID non configurato per ' + source + '.');
+  return {
+    listId,
+    payload: {
+      field_12: values.commessa ?? null,
+      field_15: toNumberOrNull(values.giacenza),
+      field_16: toNumberOrNull(values.prenotazione),
+      field_17: toIsoOrNull(values.dataPrelievo),
+      field_18: values.nrOrdine ?? null,
+      field_19: toIsoOrNull(values.dataOrdine),
+    },
+  };
+}
+
 export function StockUpdatePage({
   items,
   values,
@@ -5248,7 +5266,7 @@ export function StockUpdatePage({
         {items.map((item) => {
           const cardValues = values[item.key] || buildEditableState(item);
           const isForgiati = item.source === "FORGIATI";
-          const isOring = item.source === "ORING-HNBR";
+          const isOring = usesHnbrFields(item.source);
           const isOringNbr = item.source === "ORING-NBR";
           const isSpark = item.source === "SPARK-GUPS";
           const isFiloFlusso = item.source === "FILO-FLUSSO";
@@ -5847,17 +5865,19 @@ export function StockUpdatePage({
   );
 }
 
-function NavigationTabs({
+export function NavigationTabs({
   activeTab,
   onTabChange,
 }: {
-  activeTab: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso" | "flange";
-  onTabChange: (id: "forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso" | "flange") => void;
+  activeTab: "forgiati" | "oring-hnbr" | "oring-nbr" | "oring-fkm" | "oring-epdm" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso" | "flange";
+  onTabChange: (id: "forgiati" | "oring-hnbr" | "oring-nbr" | "oring-fkm" | "oring-epdm" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso" | "flange") => void;
 }) {
   const tabs = [
     { id: "forgiati", label: "1_FORGIATI", enabled: true },
     { id: "oring-hnbr", label: "2_ORING-HNBR", enabled: true },
     { id: "oring-nbr", label: "2_ORING-NBR", enabled: true },
+    { id: "oring-fkm", label: "2_ORING-FKM", enabled: true },
+    { id: "oring-epdm", label: "2_ORING-EPDM", enabled: true },
     { id: "tubi", label: "3_TUBI", enabled: true },
     { id: "tubo-meccanico", label: "4_TUBO-MECCANICO", enabled: true },
     { id: "spark-gups", label: "6_SPARK GUPS", enabled: true },
@@ -5888,6 +5908,8 @@ function AuthenticatedShell() {
   const forgiatiListId = import.meta.env.VITE_FORGIATI_LIST_ID;
   const oringHnbrListId = import.meta.env.VITE_ORING_HNBR_LIST_ID;
   const oringNbrListId = import.meta.env.VITE_ORING_NBR_LIST_ID;
+  const oringFkmListId = import.meta.env.VITE_ORING_FKM_LIST_ID;
+  const oringEpdmListId = import.meta.env.VITE_ORING_EPDM_LIST_ID;
   const tubiListId = import.meta.env.VITE_TUBI_LIST_ID;
   const tuboMeccanicoListId = import.meta.env.VITE_TUBO_MECCANICO_LIST_ID;
   const sparkGupsListId = import.meta.env.VITE_SPARK_GUPS_LIST_ID;
@@ -5942,7 +5964,7 @@ function AuthenticatedShell() {
   }, [getClient, siteId]);
   const flowService = useMemo(() => new PowerAutomateService(), []);
   const [view, setView] = useState<'dashboard' | 'inventory' | 'update-stock' | 'website' | 'docs' | 'videos' | 'admin'>('dashboard');
-  const [activeTab, setActiveTab] = useState<"forgiati" | "oring-hnbr" | "oring-nbr" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso" | "flange">("forgiati");
+  const [activeTab, setActiveTab] = useState<"forgiati" | "oring-hnbr" | "oring-nbr" | "oring-fkm" | "oring-epdm" | "tubi" | "spark-gups" | "tubo-meccanico" | "filo-flusso" | "flange">("forgiati");
   const [cartItems, setCartItems] = useState<Record<string, CartItem>>({});
   const [selectionMessage, setSelectionMessage] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, EditableItemState>>({});
@@ -5955,6 +5977,7 @@ function AuthenticatedShell() {
     if (view === "update-stock") return "totem-shell update-mode";
     if (view === "admin") return "totem-shell admin-mode";
     if (view === "docs") return "totem-shell docs-mode";
+    if (view === "inventory") return "totem-shell inventory-mode";
     return "totem-shell";
   }, [view]);
 
@@ -6032,7 +6055,7 @@ function AuthenticatedShell() {
     if (item.source === "FORGIATI") return toStr((raw as any).field_1);
     if (item.source === "TUBI") return toStr((raw as any).field_2);
     if (item.source === "TUBO-MECCANICO") return toStr((raw as any).field_2);
-    if (item.source === "ORING-HNBR") return toStr((raw as any).field_18);
+    if (usesHnbrFields(item.source)) return toStr((raw as any).field_18);
     if (item.source === "SPARK-GUPS") return toStr((raw as any).field_4);
     if (item.source === "FILO-FLUSSO") return toStr((raw as any).field_1);
     if (item.source === "FLANGE") return toStr(raw.NumeroOrdine);
@@ -8253,7 +8276,7 @@ function AuthenticatedShell() {
   ]);
 
   const handleSyncExcel = useCallback(async (
-    listKind: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO" | "FLANGE",
+    listKind: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "ORING-FKM" | "ORING-EPDM" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO" | "FLANGE",
     onProgress?: (msg: string) => void
   ): Promise<SyncResult> => {
     if (listKind === "FORGIATI") {
@@ -8506,16 +8529,17 @@ function AuthenticatedShell() {
         if (item.source === "FLANGE" && item.lotAmbiguous) throw new Error(`Identificativo lotto ambiguo per ${item.title}: correggerlo nel Pannello Admin.`);
         const values = editValues[item.key] || buildEditableState(item);
         const isForgiati = item.source === "FORGIATI";
-        const isOring = item.source === "ORING-HNBR";
+        const isOring = usesHnbrFields(item.source);
         const isOringNbr = item.source === "ORING-NBR";
         const isSpark = item.source === "SPARK-GUPS";
         const isFiloFlusso = item.source === "FILO-FLUSSO";
         const isTuboMeccanico = item.source === "TUBO-MECCANICO";
         const isFlange = item.source === "FLANGE";
+        const oringUpdate = isOring ? buildOringStockUpdate(item.source, values, { "ORING-HNBR": oringHnbrListId, "ORING-FKM": oringFkmListId, "ORING-EPDM": oringEpdmListId }) : null;
         const listId = isForgiati
           ? forgiatiListId
           : isOring
-          ? oringHnbrListId
+          ? oringUpdate!.listId
           : isOringNbr
           ? oringNbrListId
           : isSpark
@@ -8549,14 +8573,7 @@ function AuthenticatedShell() {
               field_21: toNumberOrNull(values.giacenzaBarra),
             }
           : isOring
-          ? {
-              field_12: values.commessa ?? null,
-              field_15: toNumberOrNull(values.giacenza),
-              field_16: toNumberOrNull(values.prenotazione),
-              field_17: toIsoOrNull(values.dataPrelievo),
-              field_18: values.nrOrdine ?? null,
-              field_19: toIsoOrNull(values.dataOrdine),
-            }
+          ? oringUpdate!.payload
           : isOringNbr
           ? {
               field_11: values.commessa ?? null,
@@ -9145,6 +9162,8 @@ function AuthenticatedShell() {
         hasTubi: sources.includes("TUBI"),
         hasOringHnbr: sources.includes("ORING-HNBR"),
         hasOringNbr: sources.includes("ORING-NBR"),
+        hasOringFkm: sources.includes("ORING-FKM"),
+        hasOringEpdm: sources.includes("ORING-EPDM"),
         hasSparkGups: sources.includes("SPARK-GUPS"),
         hasFiloFlusso: sources.includes("FILO-FLUSSO"),
         hasTuboMeccanico: sources.includes("TUBO-MECCANICO"),
@@ -9209,6 +9228,8 @@ function AuthenticatedShell() {
           case "TUBI": return "tubi";
           case "ORING-HNBR": return "oring-hnbr";
           case "ORING-NBR": return "oring-nbr";
+          case "ORING-FKM": return "oring-fkm";
+          case "ORING-EPDM": return "oring-epdm";
           case "SPARK-GUPS": return "spark-gups";
           case "FILO-FLUSSO": return "filo-flusso";
           case "TUBO-MECCANICO": return "tubo-meccanico";
@@ -9217,6 +9238,17 @@ function AuthenticatedShell() {
         }
       }).filter((k) => k !== null) as string[];
       clearCacheKeys(cacheKeysToInvalidate);
+      // Keep the selected new ORING records consistent with the values just
+      // saved; rebuilding the form must not restore the original stock value.
+      setCartItems((previous) => {
+        const next = { ...previous };
+        for (const { item, payload } of updates) {
+          if (isAdditionalOring(item.source) && next[item.key]) {
+            next[item.key] = { ...next[item.key], fields: { ...next[item.key].fields, ...payload } };
+          }
+        }
+        return next;
+      });
       setEditValues({});
 
       setSaveStatus("success");
@@ -9241,6 +9273,8 @@ function AuthenticatedShell() {
     forgiatiListId,
     oringHnbrListId,
     oringNbrListId,
+    oringFkmListId,
+    oringEpdmListId,
     sparkGupsListId,
     sharepointService,
     flangeListId,
@@ -9277,7 +9311,11 @@ function AuthenticatedShell() {
 
     switch (activeTab) {
       case "oring-hnbr":
-        return <OringHnbrPanel {...selectionProps} />;
+        return <OringPanel key="oring-hnbr" {...selectionProps} />;
+      case "oring-fkm":
+        return <OringPanel key="oring-fkm" kind="ORING-FKM" {...selectionProps} />;
+      case "oring-epdm":
+        return <OringPanel key="oring-epdm" kind="ORING-EPDM" {...selectionProps} />;
       case "oring-nbr":
         return <OringNbrPanel {...selectionProps} />;
       case "tubi":
@@ -9423,6 +9461,8 @@ function AuthenticatedShell() {
               tubiListId={tubiListId}
               oringHnbrListId={oringHnbrListId}
               oringNbrListId={oringNbrListId}
+              oringFkmListId={oringFkmListId}
+              oringEpdmListId={oringEpdmListId}
               sparkGupsListId={sparkGupsListId}
               tuboMeccanicoListId={tuboMeccanicoListId}
               filoFlussoListId={filoFlussoListId}
@@ -9524,7 +9564,7 @@ function AuthenticatedShell() {
                             ? "cart-row-tubi"
                             : item.source === "TUBO-MECCANICO"
                             ? "cart-row-tubo-meccanico"
-                            : item.source === "ORING-HNBR"
+                            : usesHnbrFields(item.source)
                             ? "cart-row-oring"
                             : item.source === "ORING-NBR"
                             ? "cart-row-oring-nbr"

@@ -9,7 +9,9 @@ import { formatSharePointDate } from "../../utils/dateUtils";
 import { SharePointListItem } from "../../types/sharepoint";
 import { SyncCleanupPlan, SyncDetailItem, SyncDetailSection, SyncFieldChange, SyncResult } from "../../types/sync";
 
-type ListKind = "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO" | "FLANGE";
+import { getOringItemTitle, isAdditionalOring, usesHnbrFields } from "../../config/oringAdditionalColumns";
+
+type ListKind = "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "ORING-FKM" | "ORING-EPDM" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO" | "FLANGE";
 
 type FieldType = "text" | "number" | "decimal" | "date" | "textarea";
 
@@ -89,6 +91,8 @@ type AdminPanelProps = {
   tubiListId?: string;
   oringHnbrListId?: string;
   oringNbrListId?: string;
+  oringFkmListId?: string;
+  oringEpdmListId?: string;
   sparkGupsListId?: string;
   tuboMeccanicoListId?: string;
   filoFlussoListId?: string;
@@ -188,6 +192,15 @@ const ORING_HNBR_FIELDS: FieldConfig[] = [
   { key: "field_17", label: "Data prelievo", type: "date" },
   { key: "field_18", label: "NR Ordine" },
   { key: "field_19", label: "Data ordine", type: "date" },
+];
+
+export const ORING_ADDITIONAL_FIELDS: FieldConfig[] = [
+  ...ORING_HNBR_FIELDS.filter((field) => !["field_10", "field_11"].includes(field.key)).map((field) => ({ ...field, placeholder: field.key === "Title" ? "Es. FKM6775 / EPDM2287" : field.placeholder, type: ["field_4", "field_5", "field_6", "field_14"].includes(field.key) ? "decimal" as const : field.type })),
+  { key: "CodiceSAM", label: "Codice SAM" },
+  { key: "QuantitaOrdinata", label: "Q.tà ordinata", type: "number" },
+  { key: "ValoreOriginaleR", label: "Valore originale colonna R" },
+  { key: "NoteOriginali", label: "Note originali", type: "textarea" },
+  { key: "RigaExcel", label: "Riga Excel origine", type: "number", writable: false },
 ];
 
 const ORING_NBR_FIELDS: FieldConfig[] = [
@@ -1092,6 +1105,8 @@ const LIST_OPTIONS: { kind: ListKind; label: string }[] = [
   { kind: "FORGIATI", label: "1_FORGIATI" },
   { kind: "ORING-HNBR", label: "2_ORING-HNBR" },
   { kind: "ORING-NBR", label: "2_ORING-NBR" },
+  { kind: "ORING-FKM", label: "2_ORING-FKM" },
+  { kind: "ORING-EPDM", label: "2_ORING-EPDM" },
   { kind: "TUBI", label: "3_TUBI" },
   { kind: "TUBO-MECCANICO", label: "4_TUBO-MECCANICO" },
   { kind: "SPARK-GUPS", label: "6_SPARK GUPS" },
@@ -1103,6 +1118,7 @@ const getFieldSet = (kind: ListKind) => {
   if (kind === "FORGIATI") return FORGIATI_FIELDS;
   if (kind === "TUBI") return TUBI_FIELDS;
   if (kind === "TUBO-MECCANICO") return TUBO_MECCANICO_FIELDS;
+  if (isAdditionalOring(kind)) return ORING_ADDITIONAL_FIELDS;
   if (kind === "ORING-HNBR") return ORING_HNBR_FIELDS;
   if (kind === "SPARK-GUPS") return SPARK_GUPS_FIELDS;
   if (kind === "FILO-FLUSSO") return FILO_FLUSSO_FIELDS;
@@ -1114,6 +1130,7 @@ const getListNoun = (kind: ListKind) => {
   if (kind === "FORGIATI") return "forgiato";
   if (kind === "TUBI") return "tubo";
   if (kind === "TUBO-MECCANICO") return "tubo meccanico";
+  if (isAdditionalOring(kind)) return `oring ${kind.slice(6)}`;
   if (kind === "ORING-HNBR") return "oring HNBR";
   if (kind === "SPARK-GUPS") return "spark gups";
   if (kind === "FILO-FLUSSO") return "filo & flusso";
@@ -1125,6 +1142,7 @@ const getCacheKeysForList = (kind: ListKind) => {
   if (kind === "FORGIATI") return ["forgiati", "admin-forgiati"];
   if (kind === "TUBI") return ["tubi", "admin-tubi"];
   if (kind === "TUBO-MECCANICO") return ["tubo-meccanico", "admin-tubo-meccanico"];
+  if (isAdditionalOring(kind)) return [kind.toLowerCase(), `admin-${kind.toLowerCase()}`];
   if (kind === "ORING-HNBR") return ["oring-hnbr", "admin-oring-hnbr"];
   if (kind === "SPARK-GUPS") return ["spark-gups", "admin-spark-gups"];
   if (kind === "FILO-FLUSSO") return ["filo-flusso", "admin-filo-flusso"];
@@ -1136,7 +1154,7 @@ const getSortDateKey = (kind: ListKind) => {
   if (kind === "FORGIATI") return "field_2";
   if (kind === "TUBI") return "field_3";
   if (kind === "TUBO-MECCANICO") return "field_3";
-  if (kind === "ORING-HNBR") return "field_19";
+  if (usesHnbrFields(kind)) return "field_19";
   if (kind === "SPARK-GUPS") return "field_5";
   if (kind === "FILO-FLUSSO") return "Title";
   if (kind === "FLANGE") return "DataOrdine";
@@ -1147,7 +1165,7 @@ const getSearchKeys = (kind: ListKind) => {
   if (kind === "FORGIATI") return ["Title", "field_10", "field_13"];
   if (kind === "TUBI") return ["Title", "field_15", "field_18"];
   if (kind === "TUBO-MECCANICO") return ["Title", "field_11", "field_14"];
-  if (kind === "ORING-HNBR") return ["Title", "field_18", "field_12", "field_2"];
+  if (usesHnbrFields(kind)) return ["Title", "field_18", "field_12", "field_2", "CodiceSAM", "field_0"];
   if (kind === "SPARK-GUPS") return ["Title", "field_1", "field_4", "field_8"];
   if (kind === "FILO-FLUSSO") return ["Title", "field_1", "field_2", "field_3"];
   if (kind === "FLANGE") return ["Title", "IdentLotto", "CodiceSAM", "NumeroOrdine", "NumeroBolla", "NumeroColata", "Commessa", "Commessa2"];
@@ -1183,8 +1201,9 @@ const getSummaryMeta = (
       { label: "Lotto", value: formatLottoProg(options.lottoProg || toStr(fields.LottoProgressivo) || "A") },
     ];
   }
-  if (kind === "ORING-HNBR") {
+  if (usesHnbrFields(kind)) {
     return [
+      ...(isAdditionalOring(kind) ? [{ label: "Posizione / Riga Excel", value: toStr(fields.field_0) || toStr(fields.RigaExcel) || "-" }] : []),
       { label: "Ordine", value: toStr(fields.field_18) || "-" },
       { label: "Commessa", value: toStr(fields.field_12) || "-" },
       { label: "Giacenza", value: toStr(fields.field_15) || "-" },
@@ -1226,6 +1245,8 @@ export function AdminPanel({
   tubiListId,
   oringHnbrListId,
   oringNbrListId,
+  oringFkmListId,
+  oringEpdmListId,
   sparkGupsListId,
   tuboMeccanicoListId,
   filoFlussoListId,
@@ -1310,6 +1331,9 @@ export function AdminPanel({
     refresh: refreshOringNbr,
   } = useCachedList<Record<string, unknown>>(service, oringNbrListId, "admin-oring-nbr");
 
+  const { data: oringFkmItems, loading: oringFkmLoading, error: oringFkmError, refresh: refreshOringFkm } = useCachedList<Record<string, unknown>>(service, oringFkmListId, "admin-oring-fkm");
+  const { data: oringEpdmItems, loading: oringEpdmLoading, error: oringEpdmError, refresh: refreshOringEpdm } = useCachedList<Record<string, unknown>>(service, oringEpdmListId, "admin-oring-epdm");
+
   const {
     data: sparkGupsItems,
     loading: sparkGupsLoading,
@@ -1369,6 +1393,10 @@ export function AdminPanel({
       ? tubiItems
       : activeList === "TUBO-MECCANICO"
       ? tuboMeccanicoItems
+      : activeList === "ORING-FKM"
+      ? oringFkmItems
+      : activeList === "ORING-EPDM"
+      ? oringEpdmItems
       : activeList === "ORING-HNBR"
       ? oringHnbrItems
       : activeList === "SPARK-GUPS"
@@ -1385,6 +1413,10 @@ export function AdminPanel({
       ? tubiLoading
       : activeList === "TUBO-MECCANICO"
       ? tuboMeccanicoLoading
+      : activeList === "ORING-FKM"
+      ? oringFkmLoading
+      : activeList === "ORING-EPDM"
+      ? oringEpdmLoading
       : activeList === "ORING-HNBR"
       ? oringHnbrLoading
       : activeList === "SPARK-GUPS"
@@ -1401,6 +1433,10 @@ export function AdminPanel({
       ? tubiError
       : activeList === "TUBO-MECCANICO"
       ? tuboMeccanicoError
+      : activeList === "ORING-FKM"
+      ? oringFkmError
+      : activeList === "ORING-EPDM"
+      ? oringEpdmError
       : activeList === "ORING-HNBR"
       ? oringHnbrError
       : activeList === "SPARK-GUPS"
@@ -1417,6 +1453,10 @@ export function AdminPanel({
       ? tubiListId
       : activeList === "TUBO-MECCANICO"
       ? tuboMeccanicoListId
+      : activeList === "ORING-FKM"
+      ? oringFkmListId
+      : activeList === "ORING-EPDM"
+      ? oringEpdmListId
       : activeList === "ORING-HNBR"
       ? oringHnbrListId
       : activeList === "SPARK-GUPS"
@@ -1433,6 +1473,10 @@ export function AdminPanel({
       ? refreshTubi
       : activeList === "TUBO-MECCANICO"
       ? refreshTuboMeccanico
+      : activeList === "ORING-FKM"
+      ? refreshOringFkm
+      : activeList === "ORING-EPDM"
+      ? refreshOringEpdm
       : activeList === "ORING-HNBR"
       ? refreshOringHnbr
       : activeList === "SPARK-GUPS"
@@ -2598,7 +2642,7 @@ export function AdminPanel({
           : undefined
         : undefined;
     return {
-      title: toStr(fields.Title) || "-",
+      title: isAdditionalOring(activeList) ? getOringItemTitle(fields) : toStr(fields.Title) || "-",
       meta: getSummaryMeta(activeList, fields, { lottoProg }),
       modified:
         formatSharePointDate(fields.Modified) || formatSharePointDate(fields["field_26"] || fields["Modified"]),

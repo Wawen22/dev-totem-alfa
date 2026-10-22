@@ -34,6 +34,10 @@ body {
   overflow: auto;
 }
 
+.totem-shell.inventory-mode { overflow: auto; }
+.inventory-mode .panels-grid { min-height: 320px; }
+.inventory-mode .cart-panel { flex-shrink: 0; }
+
 .totem-shell.admin-mode,
 .totem-shell.docs-mode {
   overflow: auto;
@@ -2595,7 +2599,7 @@ h3 { font-size: 20px; }
 .admin-panel { display: flex; flex-direction: column; gap: 14px; width: 100%; }
 .admin-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .admin-header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.admin-switch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.admin-switch { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
 .admin-switch__btn {
   border: 1px solid var(--border);
   background: #fff;
@@ -2671,8 +2675,7 @@ h3 { font-size: 20px; }
 
 @media (max-width: 1180px) {
   .admin-grid { grid-template-columns: 1fr; }
-  .admin-list { max-height: none; }
-  .admin-switch { grid-template-columns: 1fr; }
+  .admin-list { max-height: min(42vh, 640px); }
 }
 
 .chip-name { font-weight: 600; font-size: 13px; }
@@ -2680,7 +2683,9 @@ h3 { font-size: 20px; }
 
 /* Navigation Tabs (Pulsantoni) */
 .nav-tabs {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  flex-shrink: 0;
   gap: 12px;
   overflow-x: auto;
   padding-bottom: 4px; /* Space for focus rings/shadows */

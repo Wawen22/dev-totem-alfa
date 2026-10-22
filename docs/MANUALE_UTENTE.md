@@ -38,6 +38,8 @@ La sezione **Giacenza Magazzino** permette di consultare e aggiornare l'inventar
 | **1_FORGIATI** | Articoli forgiati |
 | **2_ORING-HNBR** | O-ring in materiale HNBR |
 | **2_ORING-NBR** | O-ring in materiale NBR |
+| **2_ORING-FKM** | O-ring in materiale FKM |
+| **2_ORING-EPDM** | O-ring in materiale EPDM |
 | **3_TUBI** | Tubi e tubazioni |
 | **6_SPARK GUPS** | Spark Gups |
 
@@ -277,3 +279,7 @@ Per assistenza tecnica o problemi con l'applicazione, contattare:
 
 *Ultimo aggiornamento: Febbraio 2026*
 *Versione documento: 1.0*
+
+### ORING-FKM e ORING-EPDM
+
+I nuovi magazzini consentono ricerca, selezione nel carrello, modifica di giacenza, prenotazione, commessa, numero e data ordine e data prelievo, come HNBR. Il Pannello Admin consente di inserire, modificare ed eliminare articoli in ciascuna lista. Posizione e riga Excel distinguono i record con lo stesso codice. Gli EPDM senza codice Alfa sono indicati con “Senza codice (cliente …)”; l’amministratore può completarne il codice.

@@ -1,6 +1,6 @@
 # Totem Alfa – SPA verticale per magazzino (React + Vite + MSAL)
 
-Totem touch fullscreen per operatori ALFA ENG: login Microsoft (SSO), consultazione e aggiornamento liste SharePoint (1_FORGIATI, 2_ORING-HNBR, 2_ORING-NBR, 3_TUBI), integrazione futura con Power Automate. L'interfaccia è progettata per schermi verticali 4K con pulsanti e testo molto leggibili.
+Totem touch fullscreen per operatori ALFA ENG: login Microsoft (SSO), consultazione e aggiornamento liste SharePoint (1_FORGIATI, 2_ORING-HNBR, 2_ORING-NBR, 2_ORING-FKM, 2_ORING-EPDM, 3_TUBI), integrazione futura con Power Automate. L'interfaccia è progettata per schermi verticali 4K con pulsanti e testo molto leggibili.
 
 ## Cosa contiene già
 - Bootstrap completo MSAL (login redirect + active account) con React 19 + Vite 7.
@@ -35,7 +35,7 @@ totem-alfa-app/
 ## Variabili d'ambiente (chiave)
 - `VITE_CLIENT_ID`, `VITE_TENANT_ID`, `VITE_REDIRECT_URI`: dati registrazione SPA Entra ID.
 - `VITE_SHAREPOINT_SITE_ID`, `VITE_SHAREPOINT_SITE_URL`: sito SharePoint con le liste magazzino.
-- `VITE_FORGIATI_LIST_ID`, `VITE_ORING_HNBR_LIST_ID`, `VITE_ORING_NBR_LIST_ID`, `VITE_TUBI_LIST_ID`: GUID liste (fornisci almeno FORGIATI per partire).
+- `VITE_FORGIATI_LIST_ID`, `VITE_ORING_HNBR_LIST_ID`, `VITE_ORING_NBR_LIST_ID`, `VITE_ORING_FKM_LIST_ID`, `VITE_ORING_EPDM_LIST_ID`, `VITE_TUBI_LIST_ID`: GUID liste (fornisci almeno FORGIATI per partire).
 - `VITE_TUBI_EXCEL_PATH`, `VITE_TUBI_EXCEL_TABLE`: percorso del file Excel (relativo alla libreria) e nome tabella da aggiornare alla creazione lotto TUBI.
 - `VITE_TUBI_EXCEL_DRIVE_ID` o `VITE_TUBI_EXCEL_DRIVE_NAME`: opzionale, per puntare alla libreria corretta (es. `MAGAZZINO`).
 - `VITE_SETTINGS_LIST_ID`: opzionale, per salvare configurazioni runtime (modalità auth, feature flag).
@@ -59,7 +59,7 @@ totem-alfa-app/
 ## Prossimi step suggeriti
 1) Inserisci in `.env.local` i GUID di `VITE_FORGIATI_LIST_ID` e `VITE_TUBI_LIST_ID` (oltre a `VITE_SHAREPOINT_SITE_ID`).  
 2) Avvia l'app e verifica popolamento FORGIATI/TUBI; allinea `forgiatiColumns.ts` e `tubiColumns.ts` con gli internal name reali.  
-3) Abilita i tab ORING duplicando il pannello TUBI/forgiati e creando `oringColumns.ts` + env `VITE_ORING_*`.  
+3) Configura i GUID delle liste ORING tramite le variabili `VITE_ORING_*_LIST_ID`. HNBR, NBR, FKM ed EPDM sono già integrati; per le nuove liste consulta `docs/ORING_FKM_EPDM.md`.
 4) Collega il carrello a un Flow Power Automate o a una lista ordini/prelievi e valuta stampa PDF/QR del riepilogo.  
 5) Implementa azioni di update (es. +/- giacenza, prelievo) usando `SharePointService` (patch su `/fields`).
 
@@ -68,3 +68,7 @@ totem-alfa-app/
 - Per prod `npm run build` e deploy su Azure Static Web Apps o hosting statico a scelta.
 
 Se qualcosa non funziona controlla: consent Graph (Sites.ReadWrite.All), GUID liste, account attivo MSAL, e che l'utente abbia permessi sul sito SharePoint.
+
+### ORING FKM ed EPDM
+
+Gestione completa in Magazzino, carrello, aggiornamento giacenze e Pannello Admin. Liste SharePoint create e popolate dai fogli di `2_ORING.xlsx`. Configurazione, schema e verifica: [ORING_FKM_EPDM](docs/ORING_FKM_EPDM.md).

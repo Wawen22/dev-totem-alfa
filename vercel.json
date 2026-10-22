@@ -1,0 +1,4 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "VITE_ORING_FKM_LIST_ID=\"${VITE_ORING_FKM_LIST_ID:-6d32aab0-1068-40b9-8633-dc868a928538}\" VITE_ORING_EPDM_LIST_ID=\"${VITE_ORING_EPDM_LIST_ID:-98e87950-64df-490b-8547-ff8f0c0ad12f}\" npm run build"
+}
