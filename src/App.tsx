@@ -36,6 +36,8 @@ import { useIsAdmin } from "./hooks/useIsAdmin";
 import { AdminPanel } from "./components/features/AdminPanel";
 import { PowerAutomateService } from "./services/powerAutomateService";
 import { saveOringWithExcel } from "./services/oringExcelService";
+import { isOringKind, OringKind } from "./config/oringSync";
+import { syncOringWarehouse, OringSyncDirection } from "./services/oringBulkSyncService";
 
 const msalInstance = new PublicClientApplication(msalConfig);
 
@@ -8255,10 +8257,17 @@ function AuthenticatedShell() {
     flangeExcelTable, flangeExcelDriveNameEnv,
   ]);
 
+  const handleSyncOring = useCallback(async (kind: OringKind, direction: OringSyncDirection, onProgress?: SyncProgressHandler): Promise<SyncResult> => {
+    if (!sharepointService) return { success: false, message: "Configurazione SharePoint mancante." };
+    const listIds = { "ORING-HNBR": oringHnbrListId, "ORING-NBR": oringNbrListId, "ORING-FKM": oringFkmListId, "ORING-EPDM": oringEpdmListId };
+    return syncOringWarehouse(sharepointService, kind, listIds[kind], direction, onProgress);
+  }, [sharepointService, oringHnbrListId, oringNbrListId, oringFkmListId, oringEpdmListId]);
+
   const handleSyncFromExcel = useCallback(async (
-    listKind: "FORGIATI" | "TUBI" | "TUBO-MECCANICO" | "FLANGE",
+    listKind: "FORGIATI" | "TUBI" | "TUBO-MECCANICO" | "FLANGE" | OringKind,
     onProgress?: SyncProgressHandler
   ): Promise<SyncResult> => {
+    if (isOringKind(listKind)) return handleSyncOring(listKind, "excel-to-totem", onProgress);
     if (listKind === "FORGIATI") {
       return handleSyncForgiatiExcelToSharePoint(onProgress);
     }
@@ -8270,6 +8279,7 @@ function AuthenticatedShell() {
     }
     return handleSyncTubiExcelToSharePoint(onProgress);
   }, [
+    handleSyncOring,
     handleSyncForgiatiExcelToSharePoint,
     handleSyncTubiExcelToSharePoint,
     handleSyncTuboMeccanicoExcelToSharePoint,
@@ -8280,6 +8290,7 @@ function AuthenticatedShell() {
     listKind: "FORGIATI" | "TUBI" | "ORING-HNBR" | "ORING-NBR" | "ORING-FKM" | "ORING-EPDM" | "SPARK-GUPS" | "TUBO-MECCANICO" | "FILO-FLUSSO" | "FLANGE",
     onProgress?: (msg: string) => void
   ): Promise<SyncResult> => {
+    if (isOringKind(listKind)) return handleSyncOring(listKind, "totem-to-excel", onProgress);
     if (listKind === "FORGIATI") {
       return handleSyncForgiatiSharePointToExcel(onProgress);
     }
@@ -8498,6 +8509,7 @@ function AuthenticatedShell() {
       return { success: false, message: `Errore: ${err?.message || "Errore sync Excel"}` };
     }
   }, [
+    handleSyncOring,
     handleSyncForgiatiSharePointToExcel,
     handleSyncTubiSharePointToExcel,
     sharepointService,

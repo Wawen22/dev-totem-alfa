@@ -62,6 +62,18 @@ La prenotazione EPDM viene salvata in una colonna `PRENOTAZIONE FORNITORE`, aggi
 
 Questo flusso riguarda le modifiche dei record esistenti; la creazione e l'eliminazione dall'Admin rimangono operazioni sulle liste SharePoint. Non viene attivata una sincronizzazione automatica Excel → SharePoint. L'eventuale flusso Power Automate riceve anche le nuove sorgenti e i flag hasOringFkm/hasOringEpdm e non viene invocato se la sincronizzazione del carrello non è completata.
 
+### Pulsanti manuali per tutti gli ORING
+
+Nel Pannello Admin sono disponibili **Aggiorna Totem da Excel** e **Aggiorna Excel da Totem** per HNBR, NBR, FKM ed EPDM. Il primo legge il rispettivo foglio e aggiorna/crea gli elementi nella lista; il secondo legge la lista e aggiorna/aggiunge le righe nel foglio. I record presenti solo nella destinazione non vengono eliminati. I conteggi e il dettaglio segnalano errori, elementi conservati e abbinamenti ambigui; un risultato parziale non viene indicato come successo completo. Durante le operazioni i comandi concorrenti sono disabilitati.
+
+La lista e il foglio selezionati sono indipendenti dagli altri magazzini. Per NBR si usa il nome reale `NBR `, con spazio finale, personalizzabile con `VITE_ORING_NBR_EXCEL_SHEET`. Le tre colonne Fluidi di NBR restano separate. Le date delle liste storiche vengono interpretate nel calendario italiano per evitare lo spostamento al giorno UTC precedente. I campi presenti soltanto in Excel e assenti dalle liste storiche, ad esempio Codice SAM e Ordine NBR, vengono conservati in Excel senza essere cancellati o inviati a colonne SharePoint inesistenti.
+
+Le nuove righe Excel conservano le formule del modello tramite riferimenti R1C1. Le tabelle HNBR/FKM vengono estese quando necessario; FKM usa prima le righe vuote già predisposte. Il pulsante Aggiorna Excel permette quindi anche di trasferire i nuovi articoli creati solo nella lista SharePoint.
+
+Verifica sui dati correnti, eseguita **solo in memoria**: NBR, FKM ed EPDM si associano senza ambiguità. In HNBR, l'elemento SharePoint HNBR61400 con posizione `23-26` corrisponde a due righe distinte del foglio (34 e 37): il flusso segnala queste righe e l'elemento, senza dividerlo o sovrascriverlo automaticamente. Gli altri record vengono elaborati e il risultato rimane parziale finché tale dato non viene corretto.
+
+Verifica dei pulsanti: 98 test automatici superati, più una simulazione in memoria sui dati correnti dei quattro fogli e delle quattro liste. Nel browser sono state provate tutte le otto azioni, con verifica dei valori nelle due direzioni, aggiornamento della vista e blocco dei comandi concorrenti. Controllo visivo su portatile e schermo verticale, controllo TypeScript e build Vite riusciti. Le sincronizzazioni di prova non hanno scritto sui dati reali del cliente.
+
 ## Attivazione
 
 Creazione e importazione eseguite il 22/10/2026, dopo conferma esplicita dell'utente:

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuthenticatedGraphClient } from "../../hooks/useAuthenticatedGraphClient";
 import { SharePointService } from "../../services/sharePointService";
 import { saveOringWithExcel } from "../../services/oringExcelService";
+import { isOringKind, OringKind } from "../../config/oringSync";
 import { useCachedList, clearCacheKeys } from "../../hooks/useCachedList";
 import { matchFlangeExcelRow } from "../../utils/flangeExcelMatch";
 import { flangeLotLabels, nextFlangeLot } from "../../utils/flangeLots";
@@ -103,7 +104,7 @@ type AdminPanelProps = {
     onProgress?: (msg: string) => void
   ) => Promise<SyncResult>;
   onSyncFromExcel?: (
-    listKind: Extract<ListKind, "FORGIATI" | "TUBI" | "TUBO-MECCANICO" | "FLANGE">,
+    listKind: Extract<ListKind, "FORGIATI" | "TUBI" | "TUBO-MECCANICO" | "FLANGE" | OringKind>,
     onProgress?: (msg: string) => void
   ) => Promise<SyncResult>;
 };
@@ -2449,10 +2450,11 @@ export function AdminPanel({
     tuboMeccanicoProgressiveMap,
   ]);
 
-  const EXCEL_LISTS: ListKind[] = ["FORGIATI", "TUBI", "TUBO-MECCANICO", "SPARK-GUPS", "FILO-FLUSSO", "FLANGE"];
+  const operationBusy = syncStatus === "syncing" || updateStatus === "saving" || createStatus === "saving" || deleteStatus === "deleting";
+  const EXCEL_LISTS: ListKind[] = ["FORGIATI", "TUBI", "TUBO-MECCANICO", "SPARK-GUPS", "FILO-FLUSSO", "FLANGE", "ORING-HNBR", "ORING-NBR", "ORING-FKM", "ORING-EPDM"];
   const hasExcel = EXCEL_LISTS.includes(activeList);
-  const showExcelSyncAction = activeList === "TUBI" || activeList === "FORGIATI" || activeList === "TUBO-MECCANICO" || activeList === "FLANGE";
-  const showBidirectionalSyncActions = activeList === "TUBI" || activeList === "FORGIATI" || activeList === "TUBO-MECCANICO" || activeList === "FLANGE";
+  const showExcelSyncAction = isOringKind(activeList) || activeList === "TUBI" || activeList === "FORGIATI" || activeList === "TUBO-MECCANICO" || activeList === "FLANGE";
+  const showBidirectionalSyncActions = isOringKind(activeList) || activeList === "TUBI" || activeList === "FORGIATI" || activeList === "TUBO-MECCANICO" || activeList === "FLANGE";
 
   const handleSyncExcel = useCallback(async () => {
     if (!onSyncExcel) return;
@@ -2463,14 +2465,15 @@ export function AdminPanel({
     setIsSyncLogOpen(false);
     setSyncLogSearch("");
     const result = await onSyncExcel(activeList, (msg) => setSyncMessage(msg));
+    await activeRefresh();
     setSyncStatus(result.success ? "success" : "error");
     setSyncMessage(result.message);
     setSyncDetails(result.details || null);
     setSyncCleanupPlan(result.cleanupPlan || null);
-  }, [onSyncExcel, activeList]);
+  }, [onSyncExcel, activeList, activeRefresh]);
 
   const handleSyncFromExcel = useCallback(async () => {
-    if (!onSyncFromExcel || (activeList !== "TUBI" && activeList !== "FORGIATI" && activeList !== "TUBO-MECCANICO" && activeList !== "FLANGE")) return;
+    if (!onSyncFromExcel || (!isOringKind(activeList) && activeList !== "TUBI" && activeList !== "FORGIATI" && activeList !== "TUBO-MECCANICO" && activeList !== "FLANGE")) return;
     setSyncStatus("syncing");
     setSyncMessage("Avvio sincronizzazione Excel -> SharePoint...");
     setSyncDetails(null);
@@ -2478,13 +2481,12 @@ export function AdminPanel({
     setIsSyncLogOpen(false);
     setSyncLogSearch("");
     const result = await onSyncFromExcel(activeList, (msg) => setSyncMessage(msg));
+    // Keep controls locked until the form has received the new list snapshot.
+    await activeRefresh();
     setSyncStatus(result.success ? "success" : "error");
     setSyncMessage(result.message);
     setSyncDetails(result.details || null);
     setSyncCleanupPlan(result.cleanupPlan || null);
-    // Aspetta il nuovo caricamento: altrimenti il form può conservare il
-    // vecchio snapshot mentre la sincronizzazione ha già scritto SharePoint.
-    await activeRefresh();
   }, [onSyncFromExcel, activeList, activeRefresh]);
 
   const handleSafeDuplicateCleanup = useCallback(async () => {
@@ -2609,7 +2611,7 @@ export function AdminPanel({
       value: form[field.key] ?? "",
       onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(field.key, e.target.value),
       placeholder: field.placeholder ?? (isDateField ? "gg/mm/aaaa" : isDecimalField ? "Es. 645,00" : undefined),
-      disabled: field.writable === false,
+      disabled: field.writable === false || operationBusy,
     };
 
     if (field.type === "textarea") {
@@ -2687,7 +2689,7 @@ export function AdminPanel({
               className="btn admin-sync-btn admin-sync-btn--sp"
               type="button"
               onClick={handleSyncExcel}
-              disabled={syncStatus === "syncing"}
+              disabled={operationBusy}
               title={`Aggiorna la tabella Excel ${activeList} usando i dati presenti in SharePoint`}
             >
               <span className="admin-sync-btn__icon" aria-hidden="true">↘</span>
@@ -2702,7 +2704,7 @@ export function AdminPanel({
               className="btn admin-sync-btn admin-sync-btn--excel"
               type="button"
               onClick={handleSyncFromExcel}
-              disabled={syncStatus === "syncing"}
+              disabled={operationBusy}
               title={`Aggiorna SharePoint ${activeList} usando i dati presenti nel file Excel`}
             >
               <span className="admin-sync-btn__icon" aria-hidden="true">↗</span>
@@ -2712,7 +2714,7 @@ export function AdminPanel({
               </span>
             </button>
           )}
-          <button className="btn primary" type="button" onClick={() => setIsCreateOpen(true)}>
+          <button className="btn primary" type="button" onClick={() => setIsCreateOpen(true)} disabled={operationBusy}>
             + Nuovo articolo
           </button>
         </div>
@@ -2724,6 +2726,7 @@ export function AdminPanel({
             key={kind}
             className={`admin-switch__btn ${activeList === kind ? "active" : ""}`}
             onClick={() => setActiveList(kind)}
+            disabled={operationBusy}
             type="button"
           >
             {label}
@@ -2824,7 +2827,7 @@ export function AdminPanel({
                   →
                 </button>
               </div>
-              <button className="btn secondary" onClick={() => activeRefresh()} disabled={activeLoading} type="button">
+              <button className="btn secondary" onClick={() => activeRefresh()} disabled={activeLoading || operationBusy} type="button">
                 {activeLoading ? "Aggiorno..." : "Aggiorna"}
               </button>
               {activeError && <span className="pill danger" style={{ background: "#fee2e2", color: "#b91c1c" }}>{activeError}</span>}
@@ -2874,7 +2877,7 @@ export function AdminPanel({
                           e.stopPropagation();
                           handleDelete(item);
                         }}
-                        disabled={deleteStatus === "deleting" && deletingId === item.id}
+                        disabled={operationBusy}
                       >
                         🗑️
                       </button>
@@ -2919,7 +2922,7 @@ export function AdminPanel({
                 <button className="btn secondary" onClick={() => setEditForm(buildFormFromItem(selectedItem, fieldSet))} type="button">
                   Ripristina valori
                 </button>
-                <button className="btn primary" onClick={handleUpdate} disabled={updateStatus === "saving"} type="button">
+                <button className="btn primary" onClick={handleUpdate} disabled={operationBusy} type="button">
                   {updateStatus === "saving" ? "Salvo..." : "Salva modifiche"}
                 </button>
               </div>
@@ -2952,7 +2955,7 @@ export function AdminPanel({
               <button className="btn secondary" onClick={() => setCreateForm(buildFormFromItem(null, fieldSet))} type="button">
                 Pulisci campi
               </button>
-              <button className="btn primary" onClick={handleCreate} disabled={createStatus === "saving"} type="button">
+              <button className="btn primary" onClick={handleCreate} disabled={operationBusy} type="button">
                 {createStatus === "saving" ? "Creo..." : "Crea nuovo"}
               </button>
             </div>

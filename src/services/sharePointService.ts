@@ -25,6 +25,8 @@ export type WorkbookWorksheetRange = {
   columnIndex: number;
   values: unknown[][];
   formulas: unknown[][];
+  formulasR1C1?: unknown[][];
+  numberFormat?: string[][];
 };
 
 export class SharePointService {
@@ -426,6 +428,22 @@ export class SharePointService {
     let request = client.api(`${base}/items/${itemId}/workbook/worksheets/${encodeURIComponent(sheetName)}/range(address='${address}')`);
     if (options.sessionId) request = request.header("workbook-session-id", options.sessionId);
     await request.patch({ values: [[value]], ...(options.numberFormat ? { numberFormat: [[options.numberFormat]] } : {}) });
+  }
+
+  async updateWorkbookFormulaByAddress(
+    itemId: string,
+    sheetName: string,
+    address: string,
+    formulaR1C1: string,
+    options: { sessionId?: string } = {},
+    driveId?: string
+  ): Promise<void> {
+    if (!/^[A-Z]+[1-9]\d*$/.test(address) || !formulaR1C1.startsWith("=")) throw new Error("Formula o indirizzo Excel non validi");
+    const client = await this.getClient();
+    const base = this.buildDriveBase(driveId);
+    let request = client.api(`${base}/items/${itemId}/workbook/worksheets/${encodeURIComponent(sheetName)}/range(address='${address}')`);
+    if (options.sessionId) request = request.header("workbook-session-id", options.sessionId);
+    await request.patch({ formulasR1C1: [[formulaR1C1]] });
   }
 
   async updateWorkbookTableRowByIndex(

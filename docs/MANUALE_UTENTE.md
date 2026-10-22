@@ -283,3 +283,12 @@ Per assistenza tecnica o problemi con l'applicazione, contattare:
 ### ORING-FKM e ORING-EPDM
 
 I nuovi magazzini consentono ricerca, selezione nel carrello, modifica di giacenza, prenotazione, commessa, numero e data ordine e data prelievo, come HNBR. Il Pannello Admin consente di inserire, modificare ed eliminare articoli in ciascuna lista. Posizione e riga Excel distinguono i record con lo stesso codice. Gli EPDM senza codice Alfa sono indicati con “Senza codice (cliente …)”; l’amministratore può completarne il codice.
+
+### Pulsanti di sincronizzazione ORING
+
+Per HNBR, NBR, FKM ed EPDM, seleziona il magazzino nel Pannello Admin e usa:
+
+- **Aggiorna Totem da Excel** per riportare nella lista i valori del foglio, inclusi gli articoli nuovi.
+- **Aggiorna Excel da Totem** per riportare nel foglio i valori della lista, aggiungendo gli articoli mancanti e conservando le formule.
+
+Attendi il risultato prima di eseguire altre operazioni. Il riepilogo mostra aggiornati, creati, invariati e casi da verificare; il pulsante del dettaglio permette di consultarli. Gli elementi presenti solo nella destinazione non vengono eliminati. Se un codice ha un abbinamento ambiguo, la relativa riga non viene modificata e il risultato viene indicato come parziale.

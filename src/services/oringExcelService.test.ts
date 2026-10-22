@@ -161,5 +161,8 @@ describe("scrittura puntuale ORING su Excel", () => {
     expect(api).toHaveBeenCalledWith("/sites/site/drives/drive/items/file/workbook/worksheets/EPDM/range(address='D9')");
     expect(request.header).toHaveBeenCalledWith("workbook-session-id", "session");
     expect(request.patch).toHaveBeenCalledWith({ values: [["BLU2"]] });
+    await service.updateWorkbookFormulaByAddress("file", "NBR ", "E10", "=RC[1]-2*RC[2]", { sessionId: "session" }, "drive");
+    expect(api).toHaveBeenCalledWith("/sites/site/drives/drive/items/file/workbook/worksheets/NBR%20/range(address='E10')");
+    expect(request.patch).toHaveBeenCalledWith({ formulasR1C1: [["=RC[1]-2*RC[2]"]] });
   });
 });
