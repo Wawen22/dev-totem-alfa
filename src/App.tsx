@@ -35,6 +35,7 @@ import { IdleScreensaver } from "./components/features/IdleScreensaver";
 import { useIsAdmin } from "./hooks/useIsAdmin";
 import { AdminPanel } from "./components/features/AdminPanel";
 import { PowerAutomateService } from "./services/powerAutomateService";
+import { saveOringWithExcel } from "./services/oringExcelService";
 
 const msalInstance = new PublicClientApplication(msalConfig);
 
@@ -8637,13 +8638,25 @@ function AuthenticatedShell() {
       }
 
       await Promise.all(
-        updates.map(({ item, listId, payload }) =>
+        updates.filter(({ item }) => !isAdditionalOring(item.source)).map(({ item, listId, payload }) =>
           sharepointService.updateItem<Record<string, unknown>>(listId, item.itemId, payload)
         )
       );
       if (updates.some((update) => update.item.source === "FLANGE")) clearCacheKeys(["flange", "admin-flange"]);
 
       const excelErrors: string[] = [];
+      const savedOringFields = new Map<string, Record<string, unknown>>();
+      for (const update of updates) {
+        if (!isAdditionalOring(update.item.source)) continue;
+        try {
+          const savedFields = await saveOringWithExcel(sharepointService, update.item.source, update.listId, update.item.itemId, update.item.fields, update.payload);
+          savedOringFields.set(update.item.key, savedFields);
+          clearCacheKeys([update.item.source.toLowerCase(), 'admin-' + update.item.source.toLowerCase()]);
+        } catch (error) {
+          clearCacheKeys([update.item.source.toLowerCase(), 'admin-' + update.item.source.toLowerCase()]);
+          excelErrors.push(update.item.source + ': ' + (error instanceof Error ? error.message : 'Errore salvataggio'));
+        }
+      }
       for (const update of updates.filter((entry) => entry.item.source === "FLANGE")) {
         try {
           await writeFlangeExcel(sharepointService, { Title: update.item.title, ...update.payload });
@@ -9216,7 +9229,7 @@ function AuthenticatedShell() {
         // Excel non aggiornato: NON notificare Power Automate per evitare
         // che legga dati obsoleti da Excel e sovrascriva SharePoint.
         setSaveStatus("error");
-        setSaveMessage(`Giacenza aggiornata su SharePoint, ma Excel non aggiornato: ${excelErrors.join(" | ")} — Power Automate NON notificato per evitare sovrascrittura dati.`);
+        setSaveMessage(`Salvataggio non completato per tutti gli articoli: ${excelErrors.join(" | ")} — Power Automate non notificato. Riprova il salvataggio.`);
         return;
       }
 
@@ -9244,7 +9257,7 @@ function AuthenticatedShell() {
         const next = { ...previous };
         for (const { item, payload } of updates) {
           if (isAdditionalOring(item.source) && next[item.key]) {
-            next[item.key] = { ...next[item.key], fields: { ...next[item.key].fields, ...payload } };
+            next[item.key] = { ...next[item.key], fields: { ...(savedOringFields.get(item.key) || next[item.key].fields), ...payload } };
           }
         }
         return next;

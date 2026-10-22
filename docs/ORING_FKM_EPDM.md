@@ -52,7 +52,15 @@ La build Vercel configura questi due GUID pubblici tramite `vercel.json`, senza 
 
 ## Sincronizzazione
 
-Come HNBR e NBR, questi magazzini salvano le modifiche sulle liste SharePoint. Non è presente una sincronizzazione automatica bidirezionale con Excel per gli ORING esistenti; questa integrazione non la attiva. L'importazione iniziale è separata dai successivi aggiornamenti operativi. L'eventuale flusso Power Automate riceve anche le nuove sorgenti e i flag hasOringFkm/hasOringEpdm.
+Le modifiche ad articoli FKM ed EPDM già presenti in Excel vengono salvate sia sulle liste SharePoint sia nei rispettivi fogli di `2_ORING.xlsx`, dal Pannello Admin e da Aggiorna Giacenza. Il percorso predefinito è `MAGAZZINO/MAGAZZINI ATTIVI/2_ORING.xlsx` nella libreria `TOTEM ALFA`; eventuali personalizzazioni usano `VITE_ORING_EXCEL_PATH`, `VITE_ORING_EXCEL_DRIVE_NAME` o `VITE_ORING_EXCEL_DRIVE_ID`.
+
+Prima di scrivere vengono verificate intestazioni, identità originale del record e celle di destinazione. La scrittura riguarda solo le celle modificate, preservando formule, formati e modifiche Excel estranee all'operazione. I valori vengono riletti per verificare la scrittura. Se si modifica un diametro di cui dipende una formula, il risultato calcolato viene riportato anche su SharePoint. La modifica diretta di una cella calcolata viene rifiutata, indicando di modificare i valori da cui dipende.
+
+I codici ripetuti vengono distinti con i dati originali e, quando necessario, la posizione e la riga di provenienza; un abbinamento ambiguo interrompe il salvataggio. Il codice originale viene usato anche in caso di rinomina. Le etichette “Senza codice” non vengono scritte come codici Alfa nel foglio.
+
+La prenotazione EPDM viene salvata in una colonna `PRENOTAZIONE FORNITORE`, aggiunta dopo l'intervallo utilizzato alla prima valorizzazione. Le celle originali senza intestazione R/T restano distinte. Un errore Excel mostra uno stato di errore anche se SharePoint è già stato aggiornato; riprovare il salvataggio verifica e completa la scrittura. Salvare dall'Admin senza nuove modifiche permette di riallineare a Excel il record SharePoint dopo un precedente salvataggio parziale.
+
+Questo flusso riguarda le modifiche dei record esistenti; la creazione e l'eliminazione dall'Admin rimangono operazioni sulle liste SharePoint. Non viene attivata una sincronizzazione automatica Excel → SharePoint. L'eventuale flusso Power Automate riceve anche le nuove sorgenti e i flag hasOringFkm/hasOringEpdm e non viene invocato se la sincronizzazione del carrello non è completata.
 
 ## Attivazione
 
@@ -68,4 +76,4 @@ La verifica del frontend copre ricerca, selezione indipendente dei codici ripetu
 
 La build è generata in `dist/`; la pubblicazione del TOTEM è gestita dall'integrazione Git di Vercel dopo il push.
 
-Verifica finale: 51 test automatici superati, controllo TypeScript e build Vite riusciti.
+Verifica della correzione Excel: 68 test automatici superati, inclusi 17 test su mapping, aggiornamento puntuale, formule, date, celle vuote, righe spostate, duplicati, errori parziali e retry. Prove interattive con Graph simulato: modifiche di colore e giacenza in entrambi i materiali, verifica delle celle rilette e conservazione di tutte le formule originali, errore Excel visibile e retry riuscito. Non sono state eseguite scritture di prova sui dati reali del cliente.

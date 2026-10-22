@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuthenticatedGraphClient } from "../../hooks/useAuthenticatedGraphClient";
 import { SharePointService } from "../../services/sharePointService";
+import { saveOringWithExcel } from "../../services/oringExcelService";
 import { useCachedList, clearCacheKeys } from "../../hooks/useCachedList";
 import { matchFlangeExcelRow } from "../../utils/flangeExcelMatch";
 import { flangeLotLabels, nextFlangeLot } from "../../utils/flangeLots";
@@ -202,6 +203,9 @@ export const ORING_ADDITIONAL_FIELDS: FieldConfig[] = [
   { key: "NoteOriginali", label: "Note originali", type: "textarea" },
   { key: "RigaExcel", label: "Riga Excel origine", type: "number", writable: false },
 ];
+
+const ORING_FKM_FIELDS = ORING_ADDITIONAL_FIELDS.filter(field => !["ValoreOriginaleR", "NoteOriginali"].includes(field.key));
+const ORING_EPDM_FIELDS = ORING_ADDITIONAL_FIELDS.filter(field => field.key !== "field_0");
 
 const ORING_NBR_FIELDS: FieldConfig[] = [
   { key: "Title", label: "Codice / Title", required: true, placeholder: "Es. ORN-001" },
@@ -1118,7 +1122,8 @@ const getFieldSet = (kind: ListKind) => {
   if (kind === "FORGIATI") return FORGIATI_FIELDS;
   if (kind === "TUBI") return TUBI_FIELDS;
   if (kind === "TUBO-MECCANICO") return TUBO_MECCANICO_FIELDS;
-  if (isAdditionalOring(kind)) return ORING_ADDITIONAL_FIELDS;
+  if (kind === "ORING-FKM") return ORING_FKM_FIELDS;
+  if (kind === "ORING-EPDM") return ORING_EPDM_FIELDS;
   if (kind === "ORING-HNBR") return ORING_HNBR_FIELDS;
   if (kind === "SPARK-GUPS") return SPARK_GUPS_FIELDS;
   if (kind === "FILO-FLUSSO") return FILO_FLUSSO_FIELDS;
@@ -1756,6 +1761,15 @@ export function AdminPanel({
     setUpdateMessage(null);
 
     try {
+      if (isAdditionalOring(activeList)) {
+        if (!currentItem) throw new Error("Articolo ORING non più disponibile. Aggiorna la lista.");
+        await saveOringWithExcel(service, activeList, activeListId, selectedId, currentItem.fields, payload);
+        clearCacheKeys(getCacheKeysForList(activeList));
+        await activeRefresh();
+        setUpdateStatus("success");
+        setUpdateMessage("Elemento aggiornato su SharePoint ed Excel");
+        return;
+      }
       await service.updateItem<Record<string, unknown>>(activeListId, selectedId, payload);
       let excelError: string | null = null;
       if (activeList === "TUBI" || activeList === "FORGIATI" || activeList === "SPARK-GUPS" || activeList === "TUBO-MECCANICO" || activeList === "FILO-FLUSSO" || activeList === "FLANGE") {
@@ -1903,6 +1917,7 @@ export function AdminPanel({
     } catch (err: any) {
       setUpdateStatus("error");
       setUpdateMessage(err?.message || "Errore durante il salvataggio");
+      if (isAdditionalOring(activeList)) clearCacheKeys(getCacheKeysForList(activeList));
     }
   }, [
     service,

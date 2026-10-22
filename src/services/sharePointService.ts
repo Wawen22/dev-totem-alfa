@@ -19,6 +19,14 @@ export type SharePointColumnDefinition = {
   text?: { maxLength?: number };
 };
 
+export type WorkbookWorksheetRange = {
+  address: string;
+  rowIndex: number;
+  columnIndex: number;
+  values: unknown[][];
+  formulas: unknown[][];
+};
+
 export class SharePointService {
   private siteId: string;
 
@@ -389,6 +397,35 @@ export class SharePointService {
     }
     const response = await req.get();
     return response.values || [];
+  }
+
+  async readWorkbookWorksheetByItemId(
+    itemId: string,
+    sheetName: string,
+    options: { sessionId?: string } = {},
+    driveId?: string
+  ): Promise<WorkbookWorksheetRange> {
+    const client = await this.getClient();
+    const base = this.buildDriveBase(driveId);
+    let request = client.api(`${base}/items/${itemId}/workbook/worksheets/${encodeURIComponent(sheetName)}/usedRange(valuesOnly=true)`);
+    if (options.sessionId) request = request.header("workbook-session-id", options.sessionId);
+    return request.get();
+  }
+
+  async updateWorkbookCellByAddress(
+    itemId: string,
+    sheetName: string,
+    address: string,
+    value: string | number | boolean,
+    options: { sessionId?: string; numberFormat?: string } = {},
+    driveId?: string
+  ): Promise<void> {
+    if (!/^[A-Z]+[1-9]\d*$/.test(address)) throw new Error("Indirizzo cella Excel non valido");
+    const client = await this.getClient();
+    const base = this.buildDriveBase(driveId);
+    let request = client.api(`${base}/items/${itemId}/workbook/worksheets/${encodeURIComponent(sheetName)}/range(address='${address}')`);
+    if (options.sessionId) request = request.header("workbook-session-id", options.sessionId);
+    await request.patch({ values: [[value]], ...(options.numberFormat ? { numberFormat: [[options.numberFormat]] } : {}) });
   }
 
   async updateWorkbookTableRowByIndex(
